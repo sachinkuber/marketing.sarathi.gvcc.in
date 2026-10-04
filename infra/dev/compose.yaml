@@ -1,4 +1,4 @@
-# Local development and test database only. Bound to this machine; never used on the server.
+# Development and test database only. Bound to the machine it runs on; never used in production.
 name: mkt-dev
 services:
   postgres:

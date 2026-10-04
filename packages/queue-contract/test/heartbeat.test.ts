@@ -41,4 +41,29 @@ describe('a job whose worker goes silent is taken back', () => {
     expect(elapsed).toBeGreaterThan(9_000)
     expect(elapsed).toBeLessThan(25_000)
   })
+
+  it('keeps a job active while work() holds it longer than the gap, because the library sends the heartbeats', async () => {
+    const held = uniqueName('held')
+    await queue.createQueue(held, {
+      heartbeatSeconds: 10,
+      retryLimit: 2,
+      retryDelay: 1,
+      expireInSeconds: 300,
+    })
+    let runs = 0
+    await queue.work(held, { pollingIntervalSeconds: 0.5 }, async () => {
+      runs += 1
+      await sleep(15_000)
+    })
+    const id = (await queue.send(held, {})) as string
+
+    let job = await queue.getJobById(held, id)
+    for (let i = 0; i < 80 && job?.state !== 'completed'; i += 1) {
+      await sleep(500)
+      job = await queue.getJobById(held, id)
+    }
+
+    expect(job?.state).toBe('completed')
+    expect(runs).toBe(1)
+  }, 60_000)
 })

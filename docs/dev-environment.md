@@ -1,6 +1,6 @@
 # Development environment
 
-Nothing is installed on the owner's laptop. All development, testing and staging work runs on the development server `root@72.60.221.142` (also the Aztek staging host), in containers.
+Nothing is installed on the owner's laptop. All development, testing and staging work runs on the development server, in containers. The server's address and login are kept in the owner's private notes, not in this repository.
 
 - Project copy: `/opt/mkt-dev/marketing`, synced from the laptop with `rsync` (without `node_modules`).
 - Commands: `/opt/mkt-dev/run.sh "<command>"` runs the command in the `node:24.20.0` image (Node 24.20.0, npm 11.19.0), limited to 2 GB of memory and 1.5 CPUs. The script is `infra/dev/server-run.sh`.
