@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "auth:schema": "node src/auth/print-schema.ts"
+    "auth:schema": "node src/auth/print-schema.ts",
+    "start": "node src/main.ts"
   },
   "dependencies": {
     "@mkt/db": "*",
