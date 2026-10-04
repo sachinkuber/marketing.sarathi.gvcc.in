@@ -27,8 +27,14 @@ describe('rate limits, lockout and the audit of every attempt', () => {
 
   it('locks an address after five wrong passwords, even for the right one, and frees it after 15 minutes', async () => {
     for (let i = 0; i < 5; i++) expect((await wrong('victim@example.test')).status).toBe(401)
+    const count = (action: string) => stack.audit.entries.filter((e) => e.action === action).length
+    const signIns = count('auth.sign_in')
+    const lockedOut = count('auth.locked_out')
     const locked = await stack.newClient().signIn('victim@example.test', PASSWORD)
     expect(locked.status).toBe(429)
+    // Exactly one entry for the refused attempt: the refusal, not also a failed sign-in.
+    expect(count('auth.sign_in')).toBe(signIns)
+    expect(count('auth.locked_out')).toBe(lockedOut + 1)
     advance(14 * 60_000)
     expect((await stack.newClient().signIn('victim@example.test', PASSWORD)).status).toBe(429)
     advance(61_000)
