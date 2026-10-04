@@ -74,7 +74,7 @@ This is a new version of the Phase 1 spec (version 5) and needs the owner's appr
 
 | Item | When |
 |---|---|
-| All of the above on Node 24.20.0 | Milestone 1 |
+| All of the above on Node 24.20.0 | Done in milestone 1: `packages/queue-contract` |
 | The model provider's library with `claude-opus-5-5` | Milestone 1 if an API key is available (owner item A3); otherwise before milestone 4 |
 | The sign-in library generating its tables as SQL | Milestone 2 |
 | The complete pinned set installing and type-checking together | Milestone 1 |
