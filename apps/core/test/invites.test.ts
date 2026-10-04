@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createInvite } from '../src/auth/invites.ts'
+import type { Pool } from '@mkt/db'
+import { acceptInvite, createInvite } from '../src/auth/invites.ts'
+import type { Auth } from '../src/auth/options.ts'
+import { createUserWithPassword } from '../src/auth/users.ts'
 import { ORIGIN, addBrand, addUser, createStack, tokenFromMail, type Stack } from './support.ts'
 
 const PASSWORD = 'a long enough password'
@@ -84,7 +87,7 @@ describe('invites (acceptance test 11)', () => {
     expect(again.json.error.code).toBe('invite_invalid')
   })
 
-  it('refuses an expired invite, leaves no account behind, and gives the same answer as an unknown token', async () => {
+  it('refuses an expired invite and gives the same answer as an unknown token', async () => {
     const { created, token } = await invite('late@example.test')
     await stack.db.admin.query(
       "update app.invite set expires_at = now() - interval '1 second' where id = $1",
@@ -140,6 +143,117 @@ describe('invites (acceptance test 11)', () => {
     expect(
       (await stack.newClient().request('POST', '/api/v1/invites/lookup', { body: { token } })).status,
     ).toBe(200)
+  })
+
+  // The account is made before the invite is redeemed, so these break the redeem (or the clean-up)
+  // after the account exists and check what is left behind.
+  describe('when a step fails after the account is made', () => {
+    const accountsFor = async (email: string) =>
+      (await stack.db.admin.query('select id from auth."user" where email = $1', [email])).rows.length
+
+    // A pool that answers the invite check for real and runs `onRedeem` in place of the redeem.
+    function poolWithRedeem(onRedeem: (text: string, values: unknown[]) => Promise<unknown>): Pool {
+      return {
+        query: (text: string, values: unknown[]) =>
+          text.includes('redeem_invite') ? onRedeem(text, values) : stack.appPool.query(text, values),
+      } as unknown as Pool
+    }
+
+    async function authWith(override: Record<string, unknown>): Promise<Auth> {
+      const context = await stack.core.auth.$context
+      return {
+        $context: Promise.resolve({
+          ...context,
+          internalAdapter: { ...context.internalAdapter, ...override },
+        }),
+      } as unknown as Auth
+    }
+
+    it('removes the account when the invite expires between the check and the redeem', async () => {
+      const { created, token } = await invite('between@example.test')
+      const pool = poolWithRedeem(async (text, values) => {
+        await stack.db.admin.query(
+          "update app.invite set expires_at = now() - interval '1 second' where id = $1",
+          [created.id],
+        )
+        return stack.appPool.query(text, values)
+      })
+      await expect(
+        acceptInvite(stack.core.auth, pool, { token, name: 'B', password: PASSWORD }),
+      ).rejects.toMatchObject({
+        status: 410,
+        code: 'invite_invalid',
+      })
+      expect(await accountsFor('between@example.test')).toBe(0)
+    })
+
+    it('removes the account and passes the original error on when the redeem fails another way', async () => {
+      const { token } = await invite('broken@example.test')
+      const failure = new Error('redeem broke')
+      const pool = poolWithRedeem(async () => {
+        throw failure
+      })
+      await expect(
+        acceptInvite(stack.core.auth, pool, { token, name: 'B', password: PASSWORD }),
+      ).rejects.toBe(failure)
+      expect(await accountsFor('broken@example.test')).toBe(0)
+    })
+
+    it('names the account left behind when removing it fails too', async () => {
+      const { token } = await invite('stuck@example.test')
+      const failure = new Error('redeem broke')
+      const pool = poolWithRedeem(async () => {
+        throw failure
+      })
+      const auth = await authWith({
+        deleteUser: async () => {
+          throw new Error('delete broke')
+        },
+      })
+      const error = await acceptInvite(auth, pool, { token, name: 'S', password: PASSWORD }).catch((e) => e)
+      const [row] = (
+        await stack.db.admin.query('select id from auth."user" where email = $1', ['stuck@example.test'])
+      ).rows
+      expect(error).toBeInstanceOf(Error)
+      expect(error.message).toContain(row.id)
+      expect(error.message).toContain('left behind')
+      expect(error.cause).toBe(failure)
+    })
+
+    it('removes the account when linking the password fails, and passes the original error on', async () => {
+      const failure = new Error('link broke')
+      const auth = await authWith({
+        linkAccount: async () => {
+          throw failure
+        },
+      })
+      await expect(
+        createUserWithPassword(auth, { email: 'nolink@example.test', name: 'N', password: PASSWORD }),
+      ).rejects.toBe(failure)
+      expect(await accountsFor('nolink@example.test')).toBe(0)
+    })
+
+    it('names the account left behind when linking and removing both fail', async () => {
+      const failure = new Error('link broke')
+      const auth = await authWith({
+        linkAccount: async () => {
+          throw failure
+        },
+        deleteUser: async () => {
+          throw new Error('delete broke')
+        },
+      })
+      const error = await createUserWithPassword(auth, {
+        email: 'halfmade@example.test',
+        name: 'H',
+        password: PASSWORD,
+      }).catch((e) => e)
+      const [row] = (
+        await stack.db.admin.query('select id from auth."user" where email = $1', ['halfmade@example.test'])
+      ).rows
+      expect(error.message).toContain(row.id)
+      expect(error.cause).toBe(failure)
+    })
   })
 
   it('refuses an accept from another origin', async () => {

@@ -5,7 +5,7 @@ import type { Mailer } from '../ports.ts'
 import { INVITE_HOURS } from './policy.ts'
 import type { Auth } from './options.ts'
 import type { Role } from './session.ts'
-import { createUserWithPassword, deleteUser } from './users.ts'
+import { createUserWithPassword, removeAfterFailure } from './users.ts'
 
 export function hashInviteToken(token: string): Buffer {
   return createHash('sha256').update(token).digest()
@@ -55,8 +55,9 @@ export async function lookupInvite(pool: Pool, token: string) {
   return found
 }
 
-// Order: check the invite, make the account, then redeem. If redeeming loses a race, the account just
-// made is removed, so a refused accept never leaves a user behind.
+// Order: check the invite, make the account, then redeem. If redeeming fails for any reason, the account
+// just made is removed, so a refused accept never leaves a user behind; if even that fails, the error
+// names the user (a 500, logged with the id).
 export async function acceptInvite(
   auth: Auth,
   pool: Pool,
@@ -76,7 +77,12 @@ export async function acceptInvite(
     ])
     return { userId, brandId: redeemed.rows[0].brand_id as string }
   } catch (error) {
-    await deleteUser(auth, userId)
+    await removeAfterFailure(
+      auth,
+      userId,
+      error,
+      'invite accept: user {id} left behind after a failed redeem',
+    )
     if ((error as { code?: string }).code === 'MKT01') throw INVALID()
     throw error
   }
