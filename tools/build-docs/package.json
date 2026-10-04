@@ -1,0 +1,14 @@
+{
+  "name": "build-docs",
+  "private": true,
+  "description": "Generates Word copies of the Markdown documents in docs/. Markdown is canonical.",
+  "scripts": {
+    "prd": "node md2docx.js ../../docs/prd/2026-10-03-ai-marketing-agency-prd.md ../../docs/prd/ai-marketing-agency-prd.docx",
+    "architecture": "node md2docx.js ../../docs/architecture/2026-10-04-architecture.md ../../docs/architecture/architecture.docx",
+    "phase1": "node md2docx.js ../../docs/specs/2026-10-04-phase-1-foundation.md ../../docs/specs/phase-1-foundation.docx"
+  },
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "*",
+    "docx": "*"
+  }
+}
