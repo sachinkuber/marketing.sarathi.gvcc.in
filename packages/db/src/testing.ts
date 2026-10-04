@@ -40,7 +40,19 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     await superuser.end()
   }
 
-  await migrate(urlWith(databaseUrl, name, 'mkt_migration', password('migration')))
+  try {
+    await migrate(urlWith(databaseUrl, name, 'mkt_migration', password('migration')))
+  } catch (error) {
+    // A failed migration must not leave its throw-away database behind.
+    const cleanup = new pg.Client({ connectionString: databaseUrl })
+    await cleanup.connect()
+    try {
+      await cleanup.query(`drop database if exists ${name} with (force)`)
+    } finally {
+      await cleanup.end()
+    }
+    throw error
+  }
 
   // Give the run-time roles a login. The migration only creates them without one.
   const admin = new pg.Pool({ connectionString: urlWith(databaseUrl, name), max: 2 })
