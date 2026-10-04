@@ -2,6 +2,7 @@ import { createPool } from '@mkt/db'
 import { createTestDatabase } from '@mkt/db/testing'
 import { getMigrations } from 'better-auth/db/migration'
 import { MemoryAudit, MemoryMailer } from '../testing.ts'
+import { AttemptLimiter } from './limiter.ts'
 import { authOptions } from './options.ts'
 
 // Prints the SQL the pinned sign-in library needs, as its `generate` command would, against an empty
@@ -19,6 +20,7 @@ try {
         baseURL: 'https://app.example.test',
         mailer: new MemoryMailer(),
         audit: new MemoryAudit(),
+        limiter: new AttemptLimiter({ maxFailures: 5, windowMs: 1, lockMs: 1 }),
       }),
     )
     process.stdout.write(`${await compileMigrations()}\n`)

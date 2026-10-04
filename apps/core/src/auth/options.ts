@@ -1,8 +1,10 @@
 import type { Pool } from '@mkt/db'
+import { createHash } from 'node:crypto'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { twoFactor } from 'better-auth/plugins'
 import type { AuditSink, Mailer } from '../ports.ts'
+import { attemptKey, type AttemptLimiter } from './limiter.ts'
 import {
   BACKUP_CODE_COUNT,
   BACKUP_CODE_LENGTH,
@@ -19,6 +21,35 @@ export interface AuthDeps {
   baseURL: string
   mailer: Mailer
   audit: AuditSink
+  limiter: AttemptLimiter
+  // Left unset in production; tests pass { disabled: true } to keep the library's warnings out of the output.
+  logger?: BetterAuthOptions['logger']
+}
+
+const AUDITED: Record<string, string> = {
+  '/sign-in/email': 'auth.sign_in',
+  '/two-factor/verify-totp': 'auth.second_factor',
+  '/two-factor/verify-backup-code': 'auth.backup_code_used',
+  '/request-password-reset': 'auth.password_reset_requested',
+  '/reset-password': 'auth.password_reset',
+}
+
+export function emailHash(email: string): string {
+  return createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 16)
+}
+
+// What a lockout is counted against. Sign-in and recovery: the address. A second-factor guess: the
+// pending sign-in it belongs to, which is named by the cookie the library set after the password step.
+function limitedKey(path: string, body: unknown, headers: Headers | undefined): string | null {
+  const email = (body as { email?: unknown } | undefined)?.email
+  if ((path === '/sign-in/email' || path === '/request-password-reset') && typeof email === 'string') {
+    return attemptKey(path, email)
+  }
+  if (path === '/two-factor/verify-totp' || path === '/two-factor/verify-backup-code') {
+    const cookie = headers?.get('cookie')
+    return cookie ? attemptKey(path, createHash('sha256').update(cookie).digest('hex')) : null
+  }
+  return null
 }
 
 export function authOptions(deps: AuthDeps): BetterAuthOptions {
@@ -27,6 +58,7 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
     baseURL: deps.baseURL,
     basePath: '/api/auth',
     secret: deps.secret,
+    logger: deps.logger,
     trustedOrigins: [deps.baseURL],
     database: deps.pool,
     advanced: {
@@ -63,18 +95,39 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         if (ctx.path === '/two-factor/disable') {
           throw new APIError('FORBIDDEN', { message: 'The second factor cannot be turned off.' })
         }
+        const key = limitedKey(ctx.path, ctx.body, ctx.headers)
+        if (key && deps.limiter.check(key) > 0) {
+          await deps.audit.record({
+            action: 'auth.locked_out',
+            actor: null,
+            outcome: 'failure',
+            detail: { path: ctx.path },
+          })
+          throw new APIError('TOO_MANY_REQUESTS', { message: 'Too many attempts. Try again later.' })
+        }
       }),
       after: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== '/two-factor/verify-backup-code') return
+        const action = AUDITED[ctx.path]
+        if (!action) return
         const returned = ctx.context.returned
         const failed = returned instanceof APIError
-        const user = ctx.context.newSession?.user
+        const user = ctx.context.newSession?.user ?? ctx.context.session?.user
+        const key = limitedKey(ctx.path, ctx.body, ctx.headers)
+        if (key) {
+          if (failed) deps.limiter.fail(key)
+          else deps.limiter.succeed(key)
+        }
+        const email =
+          typeof (ctx.body as { email?: unknown } | undefined)?.email === 'string'
+            ? (ctx.body as { email: string }).email
+            : null
         await deps.audit.record({
-          action: 'auth.backup_code_used',
+          action,
           actor: user?.id ?? null,
           outcome: failed ? 'failure' : 'success',
+          ...(email ? { detail: { emailHash: emailHash(email) } } : {}),
         })
-        if (!failed && user) {
+        if (ctx.path === '/two-factor/verify-backup-code' && !failed && user) {
           await deps.mailer.send({
             to: user.email,
             subject: 'A backup code was used to sign in',

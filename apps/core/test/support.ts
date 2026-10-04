@@ -8,6 +8,8 @@ import { requireDatabase } from '@mkt/test-support'
 import type { Config } from '../src/config.ts'
 import { buildCore } from '../src/core.ts'
 import { createLogger } from '../src/logger.ts'
+import { AttemptLimiter } from '../src/auth/limiter.ts'
+import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../src/auth/policy.ts'
 import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
 import type { MailMessage } from '../src/ports.ts'
@@ -41,19 +43,26 @@ export interface Stack {
   authPool: Pool
   mailer: MemoryMailer
   audit: MemoryAudit
+  limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   server: TestServer
   newClient(): TestClient
   close(): Promise<void>
 }
 
-export async function createStack(): Promise<Stack> {
+export async function createStack(options: { now?: () => number } = {}): Promise<Stack> {
   await requireDatabase()
   const db = await createTestDatabase()
   const appPool = createPool(db.urlFor('app'))
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = new MemoryMailer()
   const audit = new MemoryAudit()
+  const limiter = new AttemptLimiter({
+    maxFailures: LOCK_MAX_FAILURES,
+    windowMs: LOCK_WINDOW_MS,
+    lockMs: LOCK_DURATION_MS,
+    now: options.now,
+  })
   const config: Config = {
     nodeEnv: 'test',
     port: 0,
@@ -62,7 +71,16 @@ export async function createStack(): Promise<Stack> {
     publicOrigin: ORIGIN,
     logLevel: 'silent',
   }
-  const core = buildCore({ config, logger: createLogger('silent'), appPool, authPool, mailer, audit })
+  const core = buildCore({
+    config,
+    logger: createLogger('silent'),
+    appPool,
+    authPool,
+    mailer,
+    audit,
+    limiter,
+    authLogger: { disabled: true },
+  })
   const server = await startTestServer(core.app)
   return {
     db,
@@ -70,6 +88,7 @@ export async function createStack(): Promise<Stack> {
     authPool,
     mailer,
     audit,
+    limiter,
     core,
     server,
     newClient: () => new TestClient(server.url, ORIGIN),

@@ -3,6 +3,7 @@ import { createTestDatabase, type TestDatabase } from '@mkt/db/testing'
 import { requireDatabase } from '@mkt/test-support'
 import { getMigrations } from 'better-auth/db/migration'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { AttemptLimiter } from '../src/auth/limiter.ts'
 import { authOptions } from '../src/auth/options.ts'
 import { MemoryAudit, MemoryMailer } from '../src/testing.ts'
 
@@ -27,6 +28,7 @@ describe('the committed auth migration matches what the pinned library expects',
         baseURL: 'https://app.example.test',
         mailer: new MemoryMailer(),
         audit: new MemoryAudit(),
+        limiter: new AttemptLimiter({ maxFailures: 5, windowMs: 1, lockMs: 1 }),
       }),
     )
     expect(plan.toBeCreated).toEqual([])
