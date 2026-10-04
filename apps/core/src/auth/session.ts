@@ -27,7 +27,13 @@ export function needsSecondFactor(isPlatformOwner: boolean, memberships: { role:
 
 export function loadPrincipal(auth: Auth, pool: Pool): RequestHandler {
   return async (req, res, next) => {
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
+    // Once the session is older than the refresh age the library extends it and sends a renewed cookie;
+    // that cookie is passed on, or the browser's copy would still end 30 minutes after sign-in.
+    const { headers, response: session } = await auth.api.getSession({
+      headers: fromNodeHeaders(req.headers),
+      returnHeaders: true,
+    })
+    for (const cookie of headers?.getSetCookie() ?? []) res.append('set-cookie', cookie)
     if (!session) throw new AppError(401, 'not_signed_in', 'Sign in to continue.')
     const userId = session.user.id
     // No brand is set yet, so these two named functions read across brands for this one user.

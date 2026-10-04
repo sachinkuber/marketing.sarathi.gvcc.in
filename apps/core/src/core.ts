@@ -45,7 +45,12 @@ export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Rout
     allowedOrigins: [config.publicOrigin],
     secret: config.authSecret,
     sessionIdFor: async (req) => {
-      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
+      // Read only: a refresh here would extend the stored session and drop the renewed cookie, leaving
+      // nothing for loadPrincipal to pass on.
+      const session = await auth.api.getSession({
+        headers: fromNodeHeaders(req.headers),
+        query: { disableRefresh: true },
+      })
       return session?.session.id ?? null
     },
   })
