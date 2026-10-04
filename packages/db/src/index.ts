@@ -1,2 +1,5 @@
 export { migrate } from './migrate.ts'
+export { createPool } from './pool.ts'
+export type { PoolOptions } from './pool.ts'
 export { withBrand } from './with-brand.ts'
+export type { Pool, PoolClient } from 'pg'
