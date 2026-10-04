@@ -44,6 +44,9 @@ export class RouteTable {
 
   add(route: RouteDeclaration): void {
     const where = `${route.method} ${route.path}`
+    // A path without the leading slash is read by the rules below as if it had one, but Express would not
+    // serve it at that address: refuse it rather than declare something that is not what runs.
+    if (!route.path.startsWith('/')) throw new Error(`${where}: a route path must start with '/'`)
     const segments = route.path.split('/').filter((segment) => segment !== '')
     const brandScoped = route.access.kind === 'member' || route.access.kind === 'permission'
     // Decided by path segment, never by substring: a misspelt parameter must not slip past the brand check.

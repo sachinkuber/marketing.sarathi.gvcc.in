@@ -51,6 +51,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         body: route.method === 'get' ? undefined : {},
       })
       expect([401, 404], `${route.method} ${route.path}`).not.toContain(reply.status)
+      expect(reply.status, `${route.method} ${route.path}`).toBeLessThan(500)
     }
   })
 
@@ -64,7 +65,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         body: route.method === 'get' ? undefined : {},
         origin: 'https://app.example.test',
       })
-      expect([401, 403], `${route.method} ${route.path}`).toContain(none.status)
+      // The origin header is sent, so the request guard has no reason to refuse it: only the missing session.
+      expect(none.status, `${route.method} ${route.path}`).toBe(401)
       const blocked = await fresh.request(route.method.toUpperCase(), path, {
         body: route.method === 'get' ? undefined : {},
       })

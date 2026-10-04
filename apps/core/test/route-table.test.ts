@@ -53,6 +53,22 @@ describe('RouteTable', () => {
     expect(() => table.add({ ...route, path: '/c', summary: '  ' })).toThrow(/summary/)
   })
 
+  it('refuses a path that does not start with a slash, naming it', () => {
+    const table = new RouteTable()
+    expect(() =>
+      table.add({
+        method: 'get',
+        path: 'brands/:brandId',
+        access: { kind: 'member' },
+        summary: 'x',
+        handlers: [ok],
+      }),
+    ).toThrow(/get brands\/:brandId: a route path must start with '\/'/)
+    expect(() =>
+      table.add({ method: 'get', path: '', access: { kind: 'public' }, summary: 'x', handlers: [ok] }),
+    ).toThrow(/must start with '\/'/)
+  })
+
   it('lists what was declared', () => {
     const table = new RouteTable()
     table.add({ method: 'post', path: '/a', access: { kind: 'public' }, summary: 'a', handlers: [ok] })
