@@ -21,6 +21,14 @@ class FailingAudit extends MemoryAudit {
   }
 }
 
+// An audit that is down for the withdrawal entry only.
+class WithdrawalFailingAudit extends MemoryAudit {
+  override async record(entry: Parameters<MemoryAudit['record']>[0]): Promise<void> {
+    if (entry.action === 'users.invite_withdrawn') throw new Error('audit is down')
+    await super.record(entry)
+  }
+}
+
 describe('listing people and inviting (users routes, part 1)', () => {
   let stack: Stack
   let brandA: string
@@ -170,6 +178,78 @@ describe('inviting when mail cannot be sent, or the audit cannot be written', ()
       expect((await stack.db.admin.query('select count(*)::int as n from app.invite')).rows[0].n).toBe(0)
       expect(stack.logs.join('')).toContain('mail not sent')
       expect(stack.logs.join('')).not.toContain('x@example.test')
+      // The audit trail says the invite was made and then taken back, for the same invite.
+      const invited = stack.audit.entries.filter((e) => e.action === 'users.invited')
+      const withdrawn = stack.audit.entries.filter((e) => e.action === 'users.invite_withdrawn')
+      expect(invited).toHaveLength(1)
+      expect(withdrawn).toHaveLength(1)
+      expect(withdrawn[0]).toMatchObject({
+        actor: invited[0]!.actor,
+        brandId: brand,
+        outcome: 'success',
+        detail: { inviteId: (invited[0]!.detail as { inviteId: string }).inviteId, reason: 'mail_not_sent' },
+      })
+      expect(JSON.stringify(stack.audit.entries)).not.toContain('x@example.test')
+    } finally {
+      await stack.close()
+    }
+  })
+
+  it('still answers 502 with no invite behind, and reports it, when the withdrawal cannot be audited', async () => {
+    const mailer = new ThrowingMailer()
+    const stack = await createStack({ mailer, audit: new WithdrawalFailingAudit() })
+    try {
+      const brand = await addBrand(stack, 'brand-w')
+      await addUser(stack, {
+        email: 'admin@example.test',
+        password: PASSWORD,
+        role: 'brand_admin',
+        brandId: brand,
+      })
+      const { client } = await enrolledClient(stack, 'admin@example.test', PASSWORD)
+      const reply = await client.request('POST', `/api/v1/brands/${brand}/users/invites`, {
+        body: { email: 'x@example.test', role: 'viewer' },
+      })
+      expect(reply.status).toBe(502)
+      expect((await stack.db.admin.query('select count(*)::int as n from app.invite')).rows[0].n).toBe(0)
+      const inviteId = (
+        stack.audit.entries.find((e) => e.action === 'users.invited')!.detail as { inviteId: string }
+      ).inviteId
+      expect(stack.logs.join('')).toContain(
+        `invite ${inviteId} was taken back, but that could not be recorded`,
+      )
+    } finally {
+      await stack.close()
+    }
+  })
+
+  it('answers 500 naming the invite, and still reports the mail failure, when the invite cannot be taken back', async () => {
+    const mailer = new ThrowingMailer()
+    const stack = await createStack({ mailer })
+    try {
+      const brand = await addBrand(stack, 'brand-d')
+      await addUser(stack, {
+        email: 'admin@example.test',
+        password: PASSWORD,
+        role: 'brand_admin',
+        brandId: brand,
+      })
+      const { client } = await enrolledClient(stack, 'admin@example.test', PASSWORD)
+      // The compensating delete fails: the service may insert invites in this database but not delete them.
+      await stack.db.admin.query('revoke delete on app.invite from mkt_app')
+      const reply = await client.request('POST', `/api/v1/brands/${brand}/users/invites`, {
+        body: { email: 'x@example.test', role: 'viewer' },
+      })
+      expect(reply.status).toBe(500)
+      const left = await stack.db.admin.query('select id from app.invite')
+      expect(left.rowCount).toBe(1)
+      const inviteId = left.rows[0].id as string
+      const logs = stack.logs.join('')
+      expect(logs).toContain('mail not sent')
+      expect(logs).toContain('mail transport is down')
+      expect(logs).toContain(inviteId)
+      expect(logs).not.toContain('x@example.test')
+      expect(stack.audit.entries.filter((e) => e.action === 'users.invite_withdrawn')).toEqual([])
     } finally {
       await stack.close()
     }

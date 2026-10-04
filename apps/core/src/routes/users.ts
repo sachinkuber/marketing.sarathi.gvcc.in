@@ -71,6 +71,15 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
               outcome: 'success',
               detail: { role: body.role, emailHash: emailHash(body.email), inviteId: created.id },
             }),
+          // The mail failed and the invite was taken back: the trail must not end at "invited".
+          onWithdrawn: (withdrawn) =>
+            deps.audit.record({
+              action: 'users.invite_withdrawn',
+              actor,
+              brandId: brand.brandId,
+              outcome: 'success',
+              detail: { inviteId: withdrawn.id, reason: 'mail_not_sent' },
+            }),
         })
         res.status(201).json({ id: invite.id, expiresAt: invite.expiresAt })
       },
