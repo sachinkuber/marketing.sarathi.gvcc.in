@@ -65,35 +65,67 @@ describe('RouteTable', () => {
     const declare = (path: string, access: Parameters<RouteTable['add']>[0]['access']) =>
       new RouteTable().add({ method: 'get', path, access, summary: 'x', handlers: [ok] })
 
-    it('refuses a brand parameter spelled any way but :brandId under /brands', () => {
-      for (const path of ['/brands/:id/posts', '/brands/:brandid/x', '/brands/:brand/x']) {
-        for (const kind of plain) expect(() => declare(path, { kind })).toThrow()
+    const perm = { kind: 'permission', permission: 'manage_users' } as const
+
+    it('refuses a path under /brands that does not continue with :brandId', () => {
+      for (const path of ['/brands/:id/posts', '/brands/:brand/x', '/x/brands/y']) {
+        for (const kind of plain) expect(() => declare(path, { kind })).toThrow(/must continue with :brandId/)
       }
     })
 
-    it('allows /brands/:brandId/... as member or a permission', () => {
-      expect(() => declare('/brands/:brandId/x', { kind: 'member' })).not.toThrow()
-      expect(() =>
-        declare('/brands/:brandId/x', { kind: 'permission', permission: 'manage_users' }),
-      ).not.toThrow()
-      expect(() =>
-        declare('/brands/:brandId/users/:userId', { kind: 'permission', permission: 'manage_users' }),
-      ).not.toThrow()
+    it('refuses any other spelling of the brand parameter, as a whole segment or glued on', () => {
+      for (const path of ['/brands/:brandid/x', '/x/:brandid', '/x/:BrandId', '/x/:brand_id']) {
+        expect(() => declare(path, { kind: 'enrolled' })).toThrow(/spelled exactly :brandId/)
+      }
+      for (const path of ['/x/:brandId?', '/x/:brandId(\\d+)', '/x/y:brandId', '/x/:brandid?']) {
+        expect(() => declare(path, { kind: 'enrolled' })).toThrow(/spelled exactly :brandId/)
+      }
+      expect(() => declare('/brands/:brandid/x', { kind: 'member' })).toThrow(/spelled exactly :brandId/)
     })
 
-    it('allows the list route /brands as enrolled, but not as member', () => {
+    it('refuses a brands segment that is not all lowercase (Express matches it case-insensitively)', () => {
+      for (const path of ['/Brands/:id/posts', '/BRANDS/:brand/x']) {
+        for (const kind of ['enrolled', 'public'] as const) {
+          expect(() => declare(path, { kind })).toThrow(/lowercase/)
+        }
+      }
+      expect(() => declare('/Brands/:brandId/x', { kind: 'member' })).toThrow(/lowercase/)
+    })
+
+    it('allows the brand routes, with or without a trailing slash', () => {
+      expect(() => declare('/brands/:brandId', { kind: 'member' })).not.toThrow()
+      expect(() => declare('/brands/:brandId/x', { kind: 'member' })).not.toThrow()
+      for (const path of [
+        '/brands/:brandId/users',
+        '/brands/:brandId/users/',
+        '/brands/:brandId/',
+        '/brands/:brandId/users/invites',
+        '/brands/:brandId/users/:userId',
+      ]) {
+        expect(() => declare(path, perm)).not.toThrow()
+      }
+    })
+
+    it('refuses /brands/:brandId as enrolled or public, and /brands as member', () => {
+      for (const kind of ['enrolled', 'public'] as const) {
+        expect(() => declare('/brands/:brandId', { kind })).toThrow(/member or a permission/)
+      }
+      expect(() => declare('/brands', { kind: 'member' })).toThrow(/under \/brands\/:brandId/)
+    })
+
+    it('allows the list route and the other routes the service has', () => {
       expect(() => declare('/brands', { kind: 'enrolled' })).not.toThrow()
-      expect(() => declare('/brands', { kind: 'member' })).toThrow()
+      expect(() => declare('/users/:userId/second-factor/reset', { kind: 'platform_owner' })).not.toThrow()
+      expect(() => declare('/session', { kind: 'signed_in' })).not.toThrow()
+      expect(() => declare('/invites/lookup', { kind: 'public' })).not.toThrow()
+      expect(() => declare('/invites/accept', { kind: 'public' })).not.toThrow()
     })
 
     it('requires the brand check to start the path', () => {
-      expect(() => declare('/things/brands/:brandId/x', { kind: 'member' })).toThrow()
-    })
-
-    it('refuses any other spelling of the brand parameter anywhere', () => {
-      for (const path of ['/x/:brandid', '/x/:BrandId', '/x/:brand_id', '/x/:brandId']) {
-        expect(() => declare(path, { kind: 'enrolled' })).toThrow()
-      }
+      expect(() => declare('/things/brands/:brandId/x', { kind: 'member' })).toThrow(
+        /must continue|under \/brands/,
+      )
+      expect(() => declare('/x/:brandId', { kind: 'enrolled' })).toThrow(/member or a permission/)
     })
 
     it('keeps its own copy of the handlers', () => {

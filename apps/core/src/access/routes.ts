@@ -43,8 +43,13 @@ export class RouteTable {
     const brandScoped = route.access.kind === 'member' || route.access.kind === 'permission'
     // Decided by path segment, never by substring: a misspelt parameter must not slip past the brand check.
     for (const segment of segments) {
-      if (/^:brand_?id$/i.test(segment) && segment !== ':brandId') {
+      // Any spelling of the brand parameter, bare or with a modifier, a pattern or text glued on, but :brandId.
+      if (/brand_?id/i.test(segment) && segment !== ':brandId') {
         throw new Error(`${where}: the brand parameter must be spelled exactly :brandId`)
+      }
+      // Express matches paths case-insensitively, so /Brands/... would serve /brands/... unchecked.
+      if (segment.toLowerCase() === 'brands' && segment !== 'brands') {
+        throw new Error(`${where}: the brands segment must be spelled in lowercase`)
       }
     }
     const underBrand = segments[0] === 'brands' && segments[1] === ':brandId'
