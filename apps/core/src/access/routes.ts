@@ -39,11 +39,24 @@ export class RouteTable {
 
   add(route: RouteDeclaration): void {
     const where = `${route.method} ${route.path}`
+    const segments = route.path.split('/').filter((segment) => segment !== '')
     const brandScoped = route.access.kind === 'member' || route.access.kind === 'permission'
-    if (brandScoped && !route.path.includes('/brands/:brandId')) {
+    // Decided by path segment, never by substring: a misspelt parameter must not slip past the brand check.
+    for (const segment of segments) {
+      if (/^:brand_?id$/i.test(segment) && segment !== ':brandId') {
+        throw new Error(`${where}: the brand parameter must be spelled exactly :brandId`)
+      }
+    }
+    const underBrand = segments[0] === 'brands' && segments[1] === ':brandId'
+    const brandsAt = segments.indexOf('brands')
+    const brandsHasChild = brandsAt >= 0 && brandsAt < segments.length - 1
+    if (brandsHasChild && segments[brandsAt + 1] !== ':brandId') {
+      throw new Error(`${where}: a path under /brands must continue with :brandId`)
+    }
+    if (brandScoped && !underBrand) {
       throw new Error(`${where}: a member or permission route must live under /brands/:brandId`)
     }
-    if (!brandScoped && route.path.includes(':brandId')) {
+    if (!brandScoped && (underBrand || segments.includes(':brandId') || brandsHasChild)) {
       throw new Error(`${where}: a route with :brandId must be declared as member or a permission`)
     }
     if (route.handlers.length === 0) throw new Error(`${where}: no handler`)
@@ -51,7 +64,7 @@ export class RouteTable {
     if (this.routes.some((r) => r.method === route.method && r.path === route.path)) {
       throw new Error(`${where}: declared twice`)
     }
-    this.routes.push(route)
+    this.routes.push({ ...route, handlers: [...route.handlers] })
   }
 
   list(): readonly RouteDeclaration[] {
