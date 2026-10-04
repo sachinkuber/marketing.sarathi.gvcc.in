@@ -195,6 +195,11 @@ export class TestClient {
     return { status: res.status, json: parseJson(text), text, headers: res.headers, setCookies }
   }
 
+  // The cookies this client holds, as one Cookie header, for calling the library directly.
+  cookieHeader(): string {
+    return [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ')
+  }
+
   async refreshCsrf(): Promise<Reply> {
     const reply = await this.request('GET', '/api/v1/session')
     this.csrf = reply.json?.csrfToken ?? null

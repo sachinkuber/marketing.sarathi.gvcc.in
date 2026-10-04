@@ -46,6 +46,7 @@ export function emailHash(email: string): string {
 type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0]
 
 const SECOND_FACTOR_PATHS = ['/two-factor/verify-totp', '/two-factor/verify-backup-code']
+const EMAIL_CODE_PATHS = ['/two-factor/send-otp', '/two-factor/verify-otp']
 const TWO_FACTOR_COOKIE = 'two_factor'
 
 // The account a second-factor guess is aimed at: the user in the session (enrolment) or the user the
@@ -121,6 +122,11 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         // SEC-1: there is no way to turn the second factor off. A lost one is reset by the platform owner.
         if (ctx.path === '/two-factor/disable') {
           throw new APIError('FORBIDDEN', { message: 'The second factor cannot be turned off.' })
+        }
+        // Spec 7: the second factor is the authenticator app. The emailed one-time code is refused here,
+        // not only by leaving otpOptions unset, so a later configuration change cannot make it one.
+        if (EMAIL_CODE_PATHS.includes(ctx.path)) {
+          throw new APIError('FORBIDDEN', { message: 'Use the code from your authenticator app.' })
         }
         // SEC-1 and spec 7: every sign-in asks for the second factor. With trustDevice the library would
         // set a signed trust_device cookie and skip the second factor from that browser for 30 days.
