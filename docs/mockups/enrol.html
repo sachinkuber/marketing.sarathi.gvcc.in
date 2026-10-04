@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up second factor — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+.qr{width:168px;height:168px;border:1px dashed #8e99a3;border-radius:var(--radius-s);display:grid;place-items:center;color:var(--ink-3);font-size:13.5px;text-align:center;background:var(--surface)}
+.codes{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--surface)}
+.codes span{font-weight:600;letter-spacing:.06em;font-variant-numeric:tabular-nums}
+.stepno{font-size:16px;font-weight:600}
+</style>
+</head>
+<body data-layout="bare" data-page="enrol">
+<main id="content" class="bare">
+<div class="side">
+  <div class="row" style="gap:10px;font-weight:600">Marketing platform</div>
+  <div><h2>Marketing work, done and checked. You approve.</h2><p>Sign in to see results, approve what goes live, and step in when a lead needs a person.</p></div>
+  <div class="small" style="color:#8c97a1">Mockup: every screen uses sample data.</div>
+</div>
+<div class="main"><div class="box">
+  <div><h1>Set up your second factor</h1><p class="muted" style="margin-top:4px">Required before you can use the platform. No other screen can be reached until this is finished.</p></div>
+  <section class="stack" style="gap:12px" aria-labelledby="s1">
+    <h2 class="stepno" id="s1">Scan the code</h2>
+    <p class="small muted">Open an authenticator app on your phone and scan this square.</p>
+    <div class="qr" role="img" aria-label="Placeholder for the authenticator code">Authenticator code goes here</div>
+    <div class="field"><label for="c">Enter the 6-digit code the app shows</label>
+      <div class="otp" id="c"><span>2</span><span>7</span><span>5</span><span>0</span><span>3</span><span>6</span></div></div>
+    <button class="btn" type="button">Check code</button>
+  </section>
+  <hr class="rule">
+  <section class="stack" style="gap:12px" aria-labelledby="s2">
+    <h2 class="stepno" id="s2">Save your backup codes</h2>
+    <div class="callout warn"><b>These are shown only once.</b> Each code works one time if you lose your phone. Store them somewhere safe, such as a password manager.</div>
+    <div class="codes" aria-label="Backup codes">
+      <span>4F7K-92QD</span><span>H3PM-7XW2</span><span>B8TN-4C6R</span><span>Q2ZL-9VJ5</span><span>M6DA-3YK8</span>
+      <span>R9WE-5HT1</span><span>J4XC-8NB7</span><span>T7GP-2LS6</span><span>W5FV-6QA3</span><span>K1YD-4ZM9</span>
+    </div>
+    <div class="checks"><label><input type="checkbox" id="saved" required> I have saved these codes</label></div>
+    <button class="btn primary block" type="button" id="go" disabled>Continue</button>
+    <p class="muted small">Continue turns on once the box is ticked. If you leave now, your next sign-in returns here.</p>
+  </section>
+  <script>document.getElementById('saved').addEventListener('change',function(e){var b=document.getElementById('go');b.disabled=!e.target.checked;if(!b.disabled)b.onclick=function(){location.href='home.html'}})</script>
+</div></div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

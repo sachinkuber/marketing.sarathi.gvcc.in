@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partner outcome — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+.col1{width:min(480px,100%);display:grid;gap:22px}
+.choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.choice label{display:grid;gap:2px;padding:12px 10px;border:1px solid #b9c1c8;border-radius:var(--radius-m);cursor:pointer;text-align:center;font-weight:600;background:var(--surface)}
+.choice label span{font-weight:400;font-size:13px;color:var(--ink-3)}
+.choice label:has(input:checked){border-color:var(--primary);background:var(--primary-bg)}
+.choice input{position:absolute;opacity:0;pointer-events:none}
+.choice label:has(input:focus-visible){outline:2px solid var(--primary);outline-offset:2px}
+.state{border-top:1px solid var(--line);padding-top:26px}
+</style>
+</head>
+<body data-layout="plain" data-page="partner">
+<main id="content" class="fullpage">
+  <div class="col1">
+    <div class="row" style="font-weight:600;gap:10px">Aztek Global</div>
+
+    <form class="panel pad stack-l" onsubmit="return false">
+      <div>
+        <h1 style="font-size:24px;font-weight:600;letter-spacing:-0.02em">What happened with this lead?</h1>
+        <p class="sub" style="margin-top:6px">Aztek sent you a customer enquiry. Tell us how it went. It takes under a minute and needs no account.</p>
+      </div>
+      <dl class="kv" style="grid-template-columns:90px 1fr"><dt>Lead</dt><dd>Rohit</dd><dt>City</dt><dd>Mumbai</dd></dl>
+
+      <fieldset style="border:0;padding:0;margin:0" class="field">
+        <legend class="lab" style="font-weight:600;font-size:14px;padding:0;margin-bottom:6px">Outcome</legend>
+        <div class="choice">
+          <label><input type="radio" name="o" checked>Won<span>Sale made</span></label>
+          <label><input type="radio" name="o">Lost<span>No sale</span></label>
+          <label><input type="radio" name="o">Not yet<span>Still talking</span></label>
+        </div>
+      </fieldset>
+
+      <div class="grid2" style="gap:12px">
+        <div class="field"><label for="v">Value</label><input id="v" class="input" placeholder="Amount in rupees"><span class="hint">If won</span></div>
+        <div class="field"><label for="d">Date</label><input id="d" class="input" type="date"></div>
+      </div>
+
+      <button class="btn primary block" type="submit">Submit</button>
+      <p class="muted small">We use this only to record the result of this one lead. We do not ask for the customer's phone number or any other personal detail on this page.</p>
+    </form>
+
+    <div class="state">
+      <p class="muted small" style="margin-bottom:10px">What a partner sees when the link has expired</p>
+      <div class="panel pad">
+        <div class="empty" style="padding:10px 0"><b>This link has expired</b>It was valid for 30 days. Ask your Aztek contact to send a new one, or reply to the email you received.</div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brand settings — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="settings" data-section="settings" data-title="Brand settings">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Brand settings</h1>
+      <p>The basics for Aztek Global. Changes here are recorded in the audit log.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 1</span></div>
+  </div>
+  <div class="panel pad stack" style="gap:18px;max-width:760px">
+    <div class="field"><label for="b-name">Brand name</label><input class="input" id="b-name" value="Aztek Global"></div>
+    <div class="field"><label for="b-short">Short address name</label><input class="input" id="b-short" value="Aztek"><span class="hint">Used when the agents refer to the brand in drafts and messages.</span></div>
+    <div class="row wrap"><div class="strong">Status</div><span class="tag ok">Live pilot, week 6</span></div>
+    <div><button class="btn primary" type="button">Save changes</button></div>
+  </div>
+
+  <section class="sec"><div class="sec-head"><h2>Shadow mode</h2></div>
+    <div class="row wrap"><span class="tag plain">Off</span><span class="sub">Content goes out after approval. The 14-day shadow period passed in September.</span><a class="sp" href="safety.html">Change on Kill switch and shadow mode</a></div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Scheduling basics</h2><p>Defaults the Social Media Manager agent plans around</p></div>
+    <div class="panel pad"><dl class="kv">
+      <dt>Time zone</dt><dd>India Standard Time</dd>
+      <dt>Home market</dt><dd>India</dd>
+      <dt>Language</dt><dd>English</dd>
+      <dt>Channels</dt><dd>Instagram, Facebook, LinkedIn, YouTube</dd>
+      <dt>Posting window</dt><dd>9:00 to 18:00, Monday to Saturday</dd>
+      <dt>Plan ahead</dt><dd>2 weeks, in a weekly calendar</dd>
+    </dl></div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Danger zone</h2></div>
+    <div class="panel pad" style="border-color:#f2c4c0">
+      <b>Offboard this brand</b>
+      <ol class="sub" style="margin:10px 0 0 20px;list-style:decimal;display:grid;gap:6px;max-width:70ch">
+        <li>A full export of the brand's data is prepared for you to download first.</li>
+        <li>All connected accounts are disconnected, and access tokens are revoked on each platform.</li>
+        <li>Work stops. Data is kept for the retention period, then deleted. The audit log is kept for its own period.</li>
+      </ol>
+      <p class="small muted" style="margin-top:10px">Offboarding asks for a fresh 6-digit code. Deletion cannot be undone once the retention period ends.</p>
+      <div style="margin-top:14px"><button class="btn danger" type="button">Start offboarding</button></div>
+    </div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

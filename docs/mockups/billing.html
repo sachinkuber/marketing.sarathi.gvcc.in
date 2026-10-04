@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign up and billing — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+#content.fullpage{grid-template-columns:minmax(0,1fr)}.wrap1{width:min(860px,100%);display:grid;grid-template-columns:minmax(0,1fr);gap:34px}.stack-l,.grid3{grid-template-columns:minmax(0,1fr)}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}@media(max-width:980px){.grid3{grid-template-columns:minmax(0,1fr)}}
+.plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.plan{border:1px solid #b9c1c8;border-radius:var(--radius-m);padding:16px;background:var(--surface);display:grid;gap:8px;align-content:start;cursor:pointer}
+.plan:has(input:checked){border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);background:#fbfcff}
+.plan h3{font-size:17px;font-weight:600}
+.plan .price{font-weight:600;color:var(--ink-3)}
+.plan ul{font-size:14px;color:var(--ink-2);display:grid;gap:4px}
+.plan label{display:flex;gap:8px;align-items:center;font-weight:600;cursor:pointer}
+.pay{border:1px dashed #9aa4ac;border-radius:var(--radius-m);padding:26px;text-align:center;color:var(--ink-2);background:#fafbfb}
+@media (max-width:700px){.plans{grid-template-columns:1fr}}
+</style>
+</head>
+<body data-layout="plain" data-page="billing">
+<main id="content" class="fullpage">
+  <div class="wrap1">
+    <div>
+      <div class="row wrap" style="gap:10px"><b>Marketing platform</b><span class="phase">For sale</span></div>
+      <h1 style="font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-top:14px">Sign up and billing</h1>
+      <p class="sub" style="margin-top:4px;max-width:60ch">Choose a plan, accept the agreement, pay, then start onboarding. Plan names and prices here are placeholders until pricing is decided.</p>
+    </div>
+
+    <form class="stack-l" onsubmit="return false">
+      <section>
+        <div class="sec-head"><h2>Choose a plan</h2></div>
+        <div class="plans" role="radiogroup" aria-label="Plan">
+          <div class="plan"><label><input type="radio" name="plan"> Plan one</label><div class="price">Price to be set</div><ul><li>One brand</li><li>Fewer channels</li><li>Sample line, to be defined</li></ul></div>
+          <div class="plan"><label><input type="radio" name="plan" checked> Plan two</label><div class="price">Price to be set</div><ul><li>One brand</li><li>All channels</li><li>Sample line, to be defined</li></ul></div>
+          <div class="plan"><label><input type="radio" name="plan"> Plan three</label><div class="price">Price to be set</div><ul><li>Several brands</li><li>All channels</li><li>Sample line, to be defined</li></ul></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-head"><h2>Accept the agreement</h2></div>
+        <div class="checks"><label><input type="checkbox"> <span>I have read and accept the service agreement.</span></label></div>
+        <p class="muted small" style="margin-top:8px">Contracts come from lawyer-approved templates. You can read the agreement before you accept it.</p>
+      </section>
+
+      <section>
+        <div class="sec-head"><h2>Payment</h2></div>
+        <div class="pay">Payment provider form appears here.<div class="muted small" style="margin-top:4px">Card details are entered with the provider, never on this page.</div></div>
+      </section>
+
+      <div class="row wrap"><button class="btn primary" type="submit">Start onboarding</button><span class="muted small">Next you set up the brand and connect accounts.</span></div>
+    </form>
+
+    <hr class="rule" style="margin:0">
+
+    <section class="stack-l">
+      <div>
+        <h2 style="font-size:22px;font-weight:600;letter-spacing:-0.01em">Billing for an existing customer</h2>
+        <p class="sub small" style="margin-top:3px">Brand admins see this view in the product. Sample data.</p>
+      </div>
+      <div class="grid3" style="gap:16px">
+        <div class="panel pad"><div class="muted small">Current plan</div><div class="strong" style="font-size:18px;margin-top:2px">Plan two</div><div class="muted small">Price to be set · renews on a date to be set</div></div>
+        <div class="panel pad"><div class="muted small">Next invoice</div><div class="strong" style="font-size:18px;margin-top:2px">Date to be set</div><div class="muted small">Amount to be set</div></div>
+        <div class="panel pad"><div class="muted small">Cost this month</div><div class="strong" style="font-size:18px;margin-top:2px">$214.00 · ₹17,826</div><div class="muted small">Tool and model use so far · ₹83.3 per $1</div></div>
+      </div>
+      <div class="panel"><div class="ph"><h3>Invoices</h3></div><div style="overflow-x:auto"><table class="t">
+        <thead><tr><th>Invoice</th><th>Period</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>Invoice 003</td><td>September 2026</td><td class="num">To be set</td><td><span class="tag ok">Paid</span></td><td><a href="#">Download</a></td></tr>
+          <tr><td>Invoice 002</td><td>August 2026</td><td class="num">To be set</td><td><span class="tag ok">Paid</span></td><td><a href="#">Download</a></td></tr>
+          <tr><td>Invoice 001</td><td>July 2026</td><td class="num">To be set</td><td><span class="tag ok">Paid</span></td><td><a href="#">Download</a></td></tr>
+        </tbody></table></div></div>
+      <div class="row wrap"><button class="btn" type="button">Update payment method</button><button class="btn danger" type="button">Leave the platform</button><span class="muted small">Leaving stops all sending, revokes connections and offers your data for download first.</span></div>
+    </section>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

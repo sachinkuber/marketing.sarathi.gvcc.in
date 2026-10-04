@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaigns — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .target { display:grid; grid-template-columns: minmax(0,1.2fr) 170px minmax(0,1.4fr); gap:18px; align-items:center; padding:13px 0; border-bottom:1px solid var(--line-2); }
+  .target:last-child { border-bottom:0; }
+  .target .v { font-weight:600; }
+  .later { border:1.5px dashed #b9c1c8; border-radius: var(--radius-m); background:#fafbfb; }
+  .fig { font-size:26px; font-weight:600; letter-spacing:-0.02em; line-height:1.1; }
+  tr.sel td { background:#f6f9ff; }
+  @media (max-width: 700px) { .target { grid-template-columns: 1fr; gap:6px; } }
+  @media (max-width: 520px) { .topbar { padding: 0 12px; gap: 8px; } .topbar .where span, .userchip span:last-child { display: none; } }
+</style>
+</head>
+<body data-page="campaigns" data-title="Campaigns">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Campaigns</h1>
+      <p>Each campaign has one objective, an audience, channels, dates and target numbers. Agents produce its content once you approve it.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 3, paid ads after the pilot</span></div>
+  </div>
+
+  <section class="sec" aria-labelledby="h-list">
+    <div class="sec-head"><h2 id="h-list">All campaigns</h2><p>3 campaigns</p></div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="t">
+        <thead><tr><th>Campaign</th><th>Objective</th><th>Channels</th><th>Dates</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          <tr class="sel"><td><b>Paint protection film basics</b></td><td>Leads</td><td>Instagram, Facebook, YouTube</td><td class="nowrap">21 Sep to 29 Nov</td><td><span class="tag ok">Running</span></td><td class="right"><a class="btn sm" href="#detail">Opened below</a></td></tr>
+          <tr><td><b>What a certified studio is</b></td><td>Awareness</td><td>LinkedIn, Instagram</td><td class="nowrap">5 Oct to 20 Dec</td><td><span class="tag ok">Running</span></td><td class="right"><button class="btn sm" type="button">Open</button></td></tr>
+          <tr><td><b>Window film for homes</b></td><td>Conversion</td><td>Facebook, YouTube</td><td class="nowrap">12 Oct to 31 Jan</td><td><span class="tag warn">Waiting for your approval</span></td><td class="right"><a class="btn sm" href="inbox.html">Review in inbox</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec" id="detail" aria-labelledby="h-detail">
+    <div class="sec-head"><h2 id="h-detail">Paint protection film basics</h2><p>Opened campaign</p><span class="sp tag ok">Running, week 3 of 10</span></div>
+
+    <div class="split wide-r" style="gap:36px">
+      <div class="stack-l">
+        <div>
+          <dl class="kv">
+            <dt>Objective</dt><dd>Leads: car owners who ask a studio about paint protection film</dd>
+            <dt>Audience</dt><dd>Car owners in Mumbai, Pune, Bengaluru and Delhi NCR who have bought or are about to buy a car</dd>
+            <dt>Channels</dt><dd>Instagram, Facebook, YouTube</dd>
+            <dt>Dates</dt><dd>21 September to 29 November 2026</dd>
+            <dt>Approved</dt><dd>14 September by Priya, brand admin</dd>
+          </dl>
+        </div>
+
+        <div>
+          <h3 style="font-size:15px;font-weight:600;margin-bottom:4px">Targets and progress</h3>
+          <div class="muted small" style="margin-bottom:6px">Targets were approved with the campaign. Progress is to date.</div>
+          <div>
+            <div class="target"><div><b>Qualified leads</b><div class="small muted">Credited to the last non-direct touch</div></div><div class="v">14 of 24</div><div><div class="meter ok"><i style="width:58%"></i></div><div class="tiny muted" style="margin-top:4px">58%, ahead of the schedule (30%)</div></div></div>
+            <div class="target"><div><b>Content published</b><div class="small muted">Posts, reels and videos</div></div><div class="v">19 of 30</div><div><div class="meter ok"><i style="width:63%"></i></div><div class="tiny muted" style="margin-top:4px">63%, on schedule</div></div></div>
+            <div class="target"><div><b>Reach</b><div class="small muted">People who saw at least one item</div></div><div class="v">41,200 of 90,000</div><div><div class="meter"><i style="width:46%"></i></div><div class="tiny muted" style="margin-top:4px">46%, slightly behind (50%)</div></div></div>
+            <div class="target"><div><b>Link clicks to site</b><div class="small muted">Tagged links only</div></div><div class="v">610 of 2,000</div><div><div class="meter warn"><i style="width:31%"></i></div><div class="tiny muted" style="margin-top:4px">31%, behind. The agents will test new calls to action.</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack-l">
+        <div class="later pad panel" style="border-style:dashed;padding:20px 22px;background:#fafbfb;box-shadow:none">
+          <div class="row"><h3 style="font-size:15px;font-weight:600">Paid ads budget</h3><span class="sp tag plain">After the pilot</span></div>
+          <p class="small muted" style="margin-top:6px">Paid ads are not switched on during the pilot. These figures show how the cap will work. Nothing is spent now.</p>
+          <div class="field" style="margin-top:14px">
+            <label for="cap">Budget cap for this campaign</label>
+            <div class="row"><input class="input" id="cap" value="$600 · ₹49,980" disabled aria-describedby="cap-h"></div>
+            <span class="hint" id="cap-h">Set when the campaign is approved. Exchange rate used: ₹83.3 per $1.</span>
+          </div>
+          <div style="margin-top:16px">
+            <div class="row"><span class="small muted">Spend against the cap</span><span class="sp strong">$0 · ₹0 of $600 · ₹49,980</span></div>
+            <div class="meter" style="margin-top:7px"><i style="width:0%"></i></div>
+          </div>
+          <div class="callout" style="margin-top:16px">An agent never spends more than the cap. A request to raise a cap is a new approval, and the old cap stays in force until you approve it.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:34px">
+      <div class="sec-head"><h3 style="font-size:16px;font-weight:600">Content in this campaign</h3><p>30 planned, 19 published</p><a class="more" href="calendar.html">Open calendar</a></div>
+      <div class="panel"><ul class="inbox" style="grid-template-columns:none">
+        <li style="grid-template-columns:64px minmax(0,1fr) auto"><div class="thumb t2">IG</div><div><b>Why paint protection film is not a coating</b><div class="muted small">Instagram post · Tue 6 Oct</div></div><span class="tag danger">Overdue</span></li>
+        <li style="grid-template-columns:64px minmax(0,1fr) auto"><div class="thumb t4">YT</div><div><b>Three questions to ask a film studio</b><div class="muted small">YouTube short · Wed 7 Oct 17:00</div></div><span class="tag info">Approved</span></li>
+        <li style="grid-template-columns:64px minmax(0,1fr) auto"><div class="thumb">IG</div><div><b>How film is applied, step by step</b><div class="muted small">Instagram reel · Fri 9 Oct 9:00</div></div><span class="tag warn">Awaiting approval</span></li>
+        <li style="grid-template-columns:64px minmax(0,1fr) auto"><div class="thumb t3">IG</div><div><b>Gloss, satin or matte: what the finishes mean</b><div class="muted small">Facebook post · Fri 9 Oct 12:00</div></div><span class="tag plain">Planned</span></li>
+      </ul></div>
+    </div>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

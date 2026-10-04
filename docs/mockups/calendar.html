@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content calendar — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .week.detail .day { min-height: 250px; }
+  .week.detail .slot b { display: block; font-weight: 600; }
+  .week.detail .slot .st { display: block; font-size: 12px; margin-top: 2px; font-weight: 600; }
+  .week.detail .slot { cursor: pointer; }
+  .approve-n { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .apprgrid { display:grid; grid-template-columns:minmax(0,340px) minmax(0,1fr); gap:36px; align-items:start; }
+  @media (max-width: 980px) { .apprgrid { grid-template-columns:1fr; gap:20px; } }
+  .wk-nav { display: flex; align-items: center; gap: 10px; }
+  @media (max-width: 980px) { .week.detail .day { min-height: 0; } }
+  @media (max-width: 520px) { .topbar { padding: 0 12px; gap: 8px; } .topbar .where span, .userchip span:last-child { display: none; } }
+</style>
+</head>
+<body data-page="calendar" data-title="Content calendar">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Content calendar</h1>
+      <p>Approve a week of content in one step. Every item still keeps its own record, and you can send any item back first.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 3</span></div>
+  </div>
+
+  <div class="row wrap" style="margin-bottom:18px;gap:18px">
+    <div class="wk-nav">
+      <button class="btn sm" type="button">Previous week</button>
+      <b>Mon 5 to Sun 11 October 2026</b>
+      <button class="btn sm" type="button">Next week</button>
+    </div>
+    <div class="sp row" style="gap:10px">
+      <span class="small muted" id="lab-period">Approve by</span>
+      <div class="seg" role="group" aria-labelledby="lab-period">
+        <button type="button" aria-pressed="false">Item</button>
+        <button type="button" aria-pressed="false">Day</button>
+        <button type="button" aria-pressed="true">Week</button>
+      </div>
+      <a class="small" href="settings.html">Setting for Aztek Global</a>
+    </div>
+  </div>
+
+  <aside class="panel pad" aria-labelledby="h-appr" style="margin-bottom:22px">
+    <div class="apprgrid">
+      <div>
+        <h2 id="h-appr" style="font-size:18px;font-weight:600">Approve this week</h2>
+        <div class="row" style="margin-top:14px;align-items:flex-end;gap:22px">
+          <div><div class="approve-n">2</div><div class="small muted">ready to approve</div></div>
+          <div><div class="approve-n" style="color:var(--ink-3)">2</div><div class="small muted">skipped</div></div>
+        </div>
+        <button class="btn primary block" type="button" style="margin-top:16px">Approve 2 items</button>
+        <p class="small muted" style="margin-top:10px">Each approved item is recorded against its own version. Items still in production join the next approval.</p>
+      </div>
+      <ul class="list" style="margin:-14px 0">
+        <li style="align-items:flex-start;padding-left:0"><span class="dot warn" style="margin-top:7px"></span><div><b>Facebook post, Wed 18:30</b><div class="small muted">Ready. All blocking checks passed.</div></div></li>
+        <li style="align-items:flex-start;padding-left:0"><span class="dot warn" style="margin-top:7px"></span><div><b>Instagram reel, Fri 9:00</b><div class="small muted">Ready. All blocking checks passed.</div></div></li>
+        <li style="align-items:flex-start;padding-left:0"><span class="dot" style="margin-top:7px"></span><div><b>Facebook post, Sun 11:00</b><div class="small muted">Skipped. Held because the fact "100+ certified studios" was changed and awaits confirmation.</div></div></li>
+        <li style="align-items:flex-start;padding-left:0"><span class="dot danger" style="margin-top:7px"></span><div><b>Instagram post, Tue 14:00</b><div class="small muted">Skipped. Overdue and needs a new time. Open it to reschedule or send it back.</div></div></li>
+      </ul>
+    </div>
+  </aside>
+
+  <div class="week detail">
+        <div class="day"><h4>Mon <span>5</span></h4>
+          <div class="slot published"><b>Instagram reel</b>9:00<span class="st">Published</span></div>
+          <div class="slot published"><b>Facebook post</b>11:30<span class="st">Published</span></div></div>
+        <div class="day"><h4>Tue <span>6</span></h4>
+          <div class="slot published"><b>LinkedIn post</b>10:00<span class="st">Published</span></div>
+          <div class="slot late"><b>Instagram post</b>Was due 14:00<span class="st">Overdue, 1 day</span></div></div>
+        <div class="day today"><h4>Wed <span>7</span></h4>
+          <div class="slot approved"><b>YouTube short</b>17:00<span class="st">Approved</span></div>
+          <div class="slot waiting"><b>Facebook post</b>18:30<span class="st">Awaiting approval</span></div></div>
+        <div class="day"><h4>Thu <span>8</span></h4>
+          <div class="slot approved"><b>LinkedIn article</b>10:00<span class="st">Approved</span></div>
+          <div class="slot making"><b>Instagram carousel</b>13:00<span class="st">In production</span></div></div>
+        <div class="day"><h4>Fri <span>9</span></h4>
+          <div class="slot waiting"><b>Instagram reel</b>9:00<span class="st">Awaiting approval</span></div>
+          <div class="slot planned"><b>Facebook post</b>12:00<span class="st">Planned</span></div></div>
+        <div class="day"><h4>Sat <span>10</span></h4>
+          <div class="slot planned"><b>Instagram post</b>10:30<span class="st">Planned</span></div></div>
+        <div class="day"><h4>Sun <span>11</span></h4>
+          <div class="slot held"><b>Facebook post</b>11:00<span class="st">Held: a fact changed</span></div></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:#aeb7be"></i>Planned</span><span><i style="background:#7d8a96"></i>In production</span><span><i style="background:#d08a00"></i>Awaiting approval</span><span><i style="background:#b3261e"></i>Overdue</span><span><i style="background:#1f4fb4"></i>Approved and scheduled</span><span><i style="background:#1e7a4f"></i>Published</span><span><i style="background:#6b7680"></i>Held</span>
+      </div>
+
+
+  <section class="sec" aria-labelledby="h-items">
+    <div class="sec-head"><h2 id="h-items">Items this week</h2><p>9 of 12 shown, sorted by day. Published items are folded.</p></div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="t">
+        <thead><tr><th>Day and time</th><th>Item</th><th>Channel</th><th>Status</th><th>Checks</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="nowrap">Tue 6, 14:00</td><td><b>Why paint protection film is not a coating</b></td><td>Instagram post</td><td><span class="tag danger">Overdue, 1 day</span></td><td class="small">All passed</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Wed 7, 17:00</td><td><b>Three questions to ask a film studio</b></td><td>YouTube short</td><td><span class="tag info">Approved, 17:00</span></td><td class="small">All passed</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Wed 7, 18:30</td><td><b>Window film for homes: what to ask before you buy</b></td><td>Facebook post</td><td><span class="tag warn">Awaiting approval</span></td><td class="small">All passed</td><td class="right"><a class="btn sm" href="item.html">Review</a></td></tr>
+          <tr><td class="nowrap">Thu 8, 10:00</td><td><b>What a certified studio does differently</b></td><td>LinkedIn article</td><td><span class="tag info">Approved, 10:00</span></td><td class="small">All passed</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Thu 8, 13:00</td><td><b>Caring for new film in the first week</b></td><td>Instagram carousel</td><td><span class="tag">In production</span></td><td class="small muted">Not yet checked</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Fri 9, 9:00</td><td><b>How film is applied, step by step</b></td><td>Instagram reel</td><td><span class="tag warn">Awaiting approval</span></td><td class="small">All passed</td><td class="right"><a class="btn sm" href="item.html">Review</a></td></tr>
+          <tr><td class="nowrap">Fri 9, 12:00</td><td><b>Gloss, satin or matte: what the finishes mean</b></td><td>Facebook post</td><td><span class="tag plain">Planned</span></td><td class="small muted">Not yet drafted</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Sat 10, 10:30</td><td><b>Weekend wash tips for coated and filmed cars</b></td><td>Instagram post</td><td><span class="tag plain">Planned</span></td><td class="small muted">Not yet drafted</td><td class="right"><a class="btn sm" href="item.html">Open</a></td></tr>
+          <tr><td class="nowrap">Sun 11, 11:00</td><td><b>Studios, partners and countries: the network</b><div class="small muted">Held: the fact "100+ certified studios" was changed and awaits the owner's confirmation.</div></td><td>Facebook post</td><td><span class="tag plain">Held</span></td><td class="small"><span style="color:var(--danger)">Accuracy: needs review</span></td><td class="right"><a class="btn sm" href="item.html">Review</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted" style="margin-top:10px">Colours match the legend above. A held item is not published until its fact is confirmed or the item is corrected.</p>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

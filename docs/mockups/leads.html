@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads and pipeline — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+.lead-card .meta{color:var(--ink-3);font-size:13px;margin-top:2px}
+.lead-card .foot{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:12.5px;color:var(--ink-3)}
+.lead-card a{color:inherit}
+.sumline{display:flex;flex-wrap:wrap;gap:6px 26px}
+.sumline b{font-size:20px;font-weight:600;letter-spacing:-0.01em;margin-right:5px}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+.filters .field{min-width:150px}
+</style>
+</head>
+<body data-page="leads" data-title="Leads and pipeline" data-section="leads">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Leads and pipeline</h1>
+      <p>Every lead with where it came from and how far it has got. Move a lead on, or open it to read the conversation.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 4</span></div>
+  </div>
+
+  <div class="row wrap" style="margin-bottom:16px">
+    <div class="seg" role="group" aria-label="Lead type">
+      <button type="button" aria-pressed="true">Car owners</button>
+      <button type="button" aria-pressed="false">Installers and studios</button>
+      <button type="button" aria-pressed="false">Distributors abroad</button>
+    </div>
+    <span class="sp muted small">Lead types are set in the brand profile</span>
+  </div>
+
+  <div class="callout" style="margin-bottom:16px">You see only the leads assigned to you. Your role is sales contact, so leads handled by other people do not appear here.</div>
+
+  <div class="sumline" style="margin-bottom:18px">
+    <span><b>9</b><span class="sub">car-owner leads shown</span></span>
+    <span><b>3</b><span class="sub">hot, waiting for a person</span></span>
+    <span><b>12 min</b><span class="sub">median time to first reply</span></span>
+    <span class="muted small" style="align-self:center">This month, sample data</span>
+  </div>
+
+  <div class="filters" style="margin-bottom:18px">
+    <div class="field"><label for="f-src">Source</label><select id="f-src" class="input"><option>All sources</option><option>Instagram post</option><option>Form</option><option>Comment</option><option>Message</option></select></div>
+    <div class="field"><label for="f-city">City</label><select id="f-city" class="input"><option>All cities</option><option>Mumbai</option><option>Pune</option><option>Bengaluru</option></select></div>
+    <div class="field"><label for="f-age">Age</label><select id="f-age" class="input"><option>Any age</option><option>Under 1 day</option><option>1 to 7 days</option><option>Over 7 days</option></select></div>
+    <button class="btn" type="button">Clear filters</button>
+  </div>
+
+  <div class="board" aria-label="Pipeline board">
+    <div class="lane"><h3>New <span>2</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Karan</a></b><div class="meta">Pune · Form</div><div class="foot"><span>+91 98xxx xxxxx</span><span>1 hour</span></div></div>
+      <div class="lead-card"><b><a href="lead.html">Divya</a></b><div class="meta">Mumbai · Comment</div><div class="foot"><span>Agent replied</span><span>3 hours</span></div></div>
+    </div>
+    <div class="lane"><h3>Qualifying <span>2</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Imran</a></b><div class="meta">Bengaluru · Message</div><div class="foot"><span>2 questions left</span><span>1 day</span></div></div>
+      <div class="lead-card"><b><a href="lead.html">Neha</a></b><div class="meta">Pune · Instagram post</div><div class="foot"><span>Waiting for her reply</span><span>2 days</span></div></div>
+    </div>
+    <div class="lane"><h3>Hot <span>2</span></h3>
+      <div class="lead-card" style="border-left:3px solid var(--danger)"><b><a href="lead.html">Rohit</a></b><div class="meta">Mumbai · Instagram post</div><div class="foot"><span><span class="tag danger plain">Needs a person</span></span><span>35 min</span></div></div>
+      <div class="lead-card"><b><a href="lead.html">Anita</a></b><div class="meta">Pune · Form</div><div class="foot"><span>Booking offered</span><span>5 hours</span></div></div>
+    </div>
+    <div class="lane"><h3>With sales or partner <span>1</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Suresh</a></b><div class="meta">Bengaluru · Form</div><div class="foot"><span>Partner: Bengaluru</span><span>4 days</span></div></div>
+    </div>
+    <div class="lane"><h3>Won <span>1</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Meera</a></b><div class="meta">Mumbai · Message</div><div class="foot"><span>Reported by partner</span><span>12 days</span></div></div>
+    </div>
+    <div class="lane"><h3>Lost <span>1</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Vikram</a></b><div class="meta">Pune · Comment</div><div class="foot"><span>Chose another option</span><span>9 days</span></div></div>
+    </div>
+    <div class="lane"><h3>Outcome unknown <span>1</span></h3>
+      <div class="lead-card"><b><a href="lead.html">Sana</a></b><div class="meta">Mumbai · Form</div><div class="foot"><span>No report after 3 reminders</span><span>21 days</span></div></div>
+      <p class="muted tiny" style="padding:0 4px">Never counted as lost.</p>
+    </div>
+  </div>
+  <p class="muted small" style="margin-top:12px">Full phone numbers show only on the lead screen. Cards show the first name and city.</p>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

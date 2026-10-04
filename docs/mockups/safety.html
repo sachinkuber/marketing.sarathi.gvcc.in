@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kill switch and shadow mode — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="safety" data-section="settings" data-title="Kill switch and shadow mode">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Kill switch and shadow mode</h1>
+      <p>Stop work at once, or let everything run without sending anything.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 1</span></div>
+  </div>
+  <div class="callout" style="margin-bottom:24px">Turning either on, or releasing it, asks for a fresh 6-digit code from your authenticator app, even if you signed in a minute ago.</div>
+
+  <section class="sec"><div class="sec-head"><h2>Kill switch</h2><p>Choose how much to stop</p></div>
+  <div class="panel"><ul class="list">
+    <li style="flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>Whole brand</b><div class="muted small">Aztek Global: every channel and every agent</div></div><span class="tag ok plain">Off</span><button class="btn danger" type="button">Stop</button></li>
+    <li style="flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>One channel</b><div class="muted small">Choose Instagram, Facebook, LinkedIn or YouTube</div></div><span class="tag ok plain">Off</span><button class="btn danger" type="button">Stop</button></li>
+    <li style="flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>One agent</b><div class="muted small">Choose one of the 22 agents, for example the Graphic Designer</div></div><span class="tag ok plain">Off</span><button class="btn danger" type="button">Stop</button></li>
+  </ul></div>
+  <p class="small sub" style="margin-top:12px">When a switch is on, a red banner shows on every screen for the brand. Waiting work is held and nothing further is sent. Release needs your code again, and held work then resumes.</p></section>
+
+  <section class="sec"><div class="sec-head"><h2>What is held right now</h2></div>
+  <div class="panel"><div class="empty"><b>Nothing is held</b>The kill switch is off, so all work is running as planned. If you turn it on, held jobs and anything already sent appear here.</div></div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Preview: after the whole-brand switch is on</h2><p>Sample of what this section would show</p></div>
+  <div class="grid2" style="gap:24px">
+    <div class="panel"><div class="ph"><h3>Held</h3><span class="tag plain sp">14 jobs</span></div>
+      <ul class="list"><li><div><b>9 jobs waiting to make content</b><div class="muted small">Graphic Designer 4, Copywriter 3, Video 2</div></div></li>
+      <li><div><b>5 posts scheduled for today and tomorrow</b><div class="muted small">They stay in the calendar as held and are not sent</div></div></li></ul></div>
+    <div class="panel"><div class="ph"><h3>Could not be recalled</h3><span class="tag warn sp">1 in flight</span></div>
+      <div class="pb"><b>Instagram post: Film is not a coating</b><div class="muted small" style="margin-top:2px">Sent to the platform at 10:41, before the switch. A request already with a platform cannot be taken back, so check the account.</div></div></div>
+  </div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Confirm with your code</h2><p>The step you see after pressing Stop</p></div>
+  <div class="modal" style="box-shadow:none;border:1px solid var(--line)">
+    <div class="mh"><h2>Stop everything for Aztek Global</h2></div>
+    <div class="mb"><p class="sub small">Waiting work will be held and nothing further will be sent. Enter the 6-digit code from your authenticator app.</p>
+      <div class="otp" style="margin-top:14px"><span>4</span><span>8</span><span>1</span><span>0</span><span></span><span></span></div></div>
+    <div class="mf"><button class="btn" type="button">Cancel</button><button class="btn danger" type="button">Stop</button></div>
+  </div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Shadow mode</h2></div>
+  <div class="row wrap" style="gap:16px"><span class="switch" role="img" aria-label="Shadow mode is off"></span><b>Shadow mode is off</b><span class="muted small">Turning it on asks for a fresh 6-digit code</span></div>
+  <p class="sub" style="margin-top:12px;max-width:68ch">With shadow mode on, everything is made, checked and approved as usual, and nothing is sent. Use it to test a change or a new channel before anything reaches the public.</p>
+  <div class="panel pad" style="margin-top:16px"><b>Shadow period result</b>
+    <dl class="kv" style="margin-top:10px">
+      <dt>Period</dt><dd>14 days, 7 to 20 September</dd>
+      <dt>Made and approved</dt><dd>52 items, none sent</dd>
+      <dt>Sent back for changes</dt><dd>6 items</dd>
+      <dt>Result</dt><dd><span class="tag ok">Passed</span></dd>
+    </dl></div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

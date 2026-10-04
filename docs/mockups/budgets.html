@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budgets and costs — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .ceil { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:18px; align-items:end; padding:16px 20px; border-bottom:1px solid var(--line-2); }
+  .ceil:last-child { border-bottom:0; }
+  .ceil .what b { display:block; font-weight:600; }
+  .ceil .what span { color:var(--ink-3); font-size:13.5px; }
+  .m { padding:16px 0; border-bottom:1px solid var(--line-2); }
+  .m:last-child { border-bottom:0; }
+  .m .top { display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap; margin-bottom:8px; }
+  .m .v { font-weight:600; }
+  .later { border:1.5px dashed #b9c1c8; border-radius:var(--radius-m); background:#fafbfb; padding:20px 22px; }
+  @media (max-width: 760px) { .ceil { grid-template-columns:1fr 1fr; } .ceil .what { grid-column:1 / -1; } }
+  @media (max-width: 520px) { .topbar { padding: 0 12px; gap: 8px; } .topbar .where span, .userchip span:last-child { display: none; } }
+</style>
+</head>
+<body data-page="budgets" data-section="settings" data-title="Budgets and costs">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Budgets and costs</h1>
+      <p>Limits on what the agents may spend on models and tools. A run that would go over a ceiling stops and asks you.</p>
+    </div>
+    <div class="actions"><span class="phase">Ceilings now, ad caps after the pilot</span></div>
+  </div>
+
+  <div class="row wrap" style="margin-bottom:18px">
+    <span class="small muted" id="lab-cur">Show money with</span>
+    <div class="seg" role="group" aria-labelledby="lab-cur">
+      <button type="button" aria-pressed="true">Dollars first</button>
+      <button type="button" aria-pressed="false">Rupees first</button>
+    </div>
+    <span class="small muted">Both are always shown. This only sets which comes first.</span>
+  </div>
+
+  <section class="sec" aria-labelledby="h-spend">
+    <div class="sec-head"><h2 id="h-spend">Spend this month</h2><p>1 to 7 October, against the ceiling</p></div>
+    <div class="panel pad" style="padding-top:6px;padding-bottom:6px">
+      <div class="m">
+        <div class="top"><b>Model and tool cost for Aztek Global</b><span class="v">$433 · ₹36,069 of $600 · ₹49,980</span></div>
+        <div class="meter ok"><i style="width:72%"></i></div>
+        <div class="small muted" style="margin-top:6px">72% used. Models $318 · ₹26,489, tools $115 · ₹9,580.</div>
+      </div>
+      <div class="m">
+        <div class="top"><b>Most expensive run so far</b><span class="v">$1.38 · ₹115 of $2.00 · ₹167</span></div>
+        <div class="meter"><i style="width:69%"></i></div>
+        <div class="small muted" style="margin-top:6px">A video render, 4 October.</div>
+      </div>
+      <div class="m">
+        <div class="top"><b>Most expensive deliverable so far</b><span class="v">$1.12 · ₹93 of $1.50 · ₹125</span></div>
+        <div class="meter warn"><i style="width:75%"></i></div>
+        <div class="small muted" style="margin-top:6px">A LinkedIn article with three revisions. You are asked once a deliverable passes its ceiling.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-ceil">
+    <div class="sec-head"><h2 id="h-ceil">Cost ceilings</h2><p>Model and tool costs only. Ad spend is separate, below.</p></div>
+    <div class="panel">
+      <div class="ceil">
+        <div class="what"><b>Per run</b><span>One agent doing one piece of work</span></div>
+        <div class="field"><label for="c1">Dollars</label><input class="input" id="c1" value="$2.00"></div>
+        <div class="field"><label for="c1r">Rupees</label><input class="input" id="c1r" value="₹167" readonly></div>
+        <button class="btn sm" type="button">Save</button>
+      </div>
+      <div class="ceil">
+        <div class="what"><b>Per deliverable</b><span>A post, article or video, with all its revisions</span></div>
+        <div class="field"><label for="c2">Dollars</label><input class="input" id="c2" value="$1.50"></div>
+        <div class="field"><label for="c2r">Rupees</label><input class="input" id="c2r" value="₹125" readonly></div>
+        <button class="btn sm" type="button">Save</button>
+      </div>
+      <div class="ceil">
+        <div class="what"><b>Per brand per month</b><span>All model and tool costs for Aztek Global</span></div>
+        <div class="field"><label for="c3">Dollars</label><input class="input" id="c3" value="$600"></div>
+        <div class="field"><label for="c3r">Rupees</label><input class="input" id="c3r" value="₹49,980" readonly></div>
+        <button class="btn sm" type="button">Save</button>
+      </div>
+    </div>
+    <p class="small muted" style="margin-top:8px">You enter dollars. The rupee figure is worked out at today's rate and shown for reading. Changing a ceiling is recorded in the audit log.</p>
+  </section>
+
+  <section class="sec grid2" style="gap:36px;align-items:start" aria-label="Exchange rate and ad caps">
+    <div>
+      <div class="sec-head"><h2>Exchange rate</h2></div>
+      <div class="panel pad">
+        <div class="row" style="align-items:baseline"><span style="font-size:26px;font-weight:600;letter-spacing:-0.02em">₹83.3</span><span class="muted">per $1</span></div>
+        <dl class="kv" style="margin-top:12px;grid-template-columns:90px 1fr">
+          <dt>Source</dt><dd>Reserve Bank of India reference rate</dd>
+          <dt>Date</dt><dd>1 October 2026</dd>
+        </dl>
+        <div class="callout" style="margin-top:14px">Stored costs are never recalculated. Each cost keeps the rate that applied when it was recorded, so past reports do not change when the rate does.</div>
+      </div>
+    </div>
+    <div>
+      <div class="sec-head"><h2>Ad caps</h2><span class="tag plain sp">After the pilot</span></div>
+      <div class="later">
+        <p class="small muted">Paid ads are not switched on during the pilot, so no ad cap is set and nothing is spent.</p>
+        <div class="field" style="margin-top:14px">
+          <label for="adcap">Ad cap per campaign</label>
+          <input class="input" id="adcap" value="Not set" disabled>
+        </div>
+        <div class="field" style="margin-top:12px">
+          <label for="adcapm">Ad cap per brand per month</label>
+          <input class="input" id="adcapm" value="Not set" disabled>
+        </div>
+        <div class="callout" style="margin-top:14px">An agent never spends above a cap. A request to raise a cap is a new approval.</div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

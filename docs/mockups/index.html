@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screen mockups — Marketing platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .wrap-idx { max-width: 1080px; margin: 0 auto; padding: 48px 28px 90px; }
+  .wrap-idx h1 { font-size: 34px; letter-spacing: -0.025em; line-height: 1.15; max-width: 22ch; }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 62ch; margin-top: 12px; }
+  .how { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 34px 0 6px; padding: 24px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .how b { display: block; margin-bottom: 4px; }
+  .how p { color: var(--ink-2); font-size: 14.5px; }
+  .grp { margin-top: 40px; }
+  .grp h2 { font-size: 19px; margin-bottom: 4px; }
+  .grp > p { color: var(--ink-3); font-size: 14.5px; margin-bottom: 12px; }
+  .idx td:first-child a { font-weight: 600; }
+  .idx td { vertical-align: middle; }
+  @media (max-width: 760px) { .how { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-layout="plain">
+<main id="content" class="wrap-idx">
+  <h1>The product, screen by screen</h1>
+  <p class="lede">A clickable mockup of the dashboard at marketing.sarathi.gvcc.in. It shows what each screen looks like and how you move between them. Nothing here is connected to anything, and every number, name and message is made up.</p>
+
+  <div class="how">
+    <div><b>Start with Home</b><p>Home leads with results and progress, then what is waiting for you, then problems. From there the menu on the left reaches everything else.</p></div>
+    <div><b>Use the Mockup controls</b><p>The button at the bottom left of each screen switches who you are viewing as, turns on the kill switch or shadow mode, shows the overdue banner and pop-up, and narrows the page to phone width.</p></div>
+    <div><b>Read the phase tags</b><p>Each screen is tagged with the phase that builds it. Phase 1 is the foundation. The rest arrive in phases 2 to 5, after the pilot, or when the product is sold.</p></div>
+  </div>
+
+  <div class="row wrap" style="margin-top:22px;gap:10px">
+    <a class="btn primary" href="sign-in.html">Start at sign-in</a>
+    <a class="btn" href="home.html">Go to Home</a>
+    <a class="btn" href="home.html?popup=1">See the overdue pop-up</a>
+    <a class="btn" href="item.html">See an approval</a>
+  </div>
+
+  <section class="grp"><h2>Signing in</h2><p>Everyone except viewers signs in with a password and a second factor.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="sign-in.html">Sign-in</a></td><td>Everyone</td><td>1</td><td>Email and password, and what a failed attempt says</td></tr>
+      <tr><td><a href="sign-in-verify.html">Second factor</a></td><td>Everyone but viewers</td><td>1</td><td>The 6-digit code, backup codes, and a locked account</td></tr>
+      <tr><td><a href="enrol.html">Enrol a second factor</a></td><td>Everyone but viewers</td><td>1</td><td>Setting up the authenticator app and saving backup codes</td></tr>
+      <tr><td><a href="invite.html">Accept an invite</a></td><td>Invited person</td><td>1</td><td>Setting a password, and an expired invite</td></tr>
+      <tr><td><a href="recover.html">Recover a password</a></td><td>Everyone</td><td>1</td><td>The recovery email and what the link does</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Daily use</h2><p>Where you spend your time: results, then approvals.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="home.html">Home</a></td><td>Owner, admin, approver, viewer</td><td>1, filled in by 3 to 5</td><td>Results, progress, this week's calendar, what is waiting, problems</td></tr>
+      <tr><td><a href="inbox.html">Approval inbox</a></td><td>Owner, admin, approver</td><td>1</td><td>Everything waiting for a decision, with overdue items marked and bulk approval</td></tr>
+      <tr><td><a href="item.html">Item review</a></td><td>Owner, admin, approver</td><td>1, full in 3</td><td>One item as it will appear, its checks and scores, and the four decisions</td></tr>
+      <tr><td><a href="calendar.html">Content calendar</a></td><td>Owner, admin, approver, viewer</td><td>3</td><td>The week at a glance, and approving a whole week in one step</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Brand and marketing</h2><p>Setting a brand up, running campaigns, and seeing what they achieve.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="onboarding.html">Onboarding</a></td><td>Owner, admin</td><td>2</td><td>Research, the tailored questionnaire, facts and the strategy brief</td></tr>
+      <tr><td><a href="profile.html">Brand profile and facts</a></td><td>Owner, admin</td><td>2</td><td>What the product knows about the brand, and which facts are confirmed</td></tr>
+      <tr><td><a href="rules.html">Safety rules</a></td><td>Owner, admin</td><td>2</td><td>Forbidden claims, competitors not to name, pause dates</td></tr>
+      <tr><td><a href="campaigns.html">Campaigns</a></td><td>Owner, admin, approver, viewer</td><td>3</td><td>Objectives and results against targets</td></tr>
+      <tr><td><a href="visibility.html">Search and AI visibility</a></td><td>Owner, admin, approver, viewer</td><td>3</td><td>Search clicks, and whether AI answers mention the brand</td></tr>
+      <tr><td><a href="reports.html">Reports</a></td><td>Owner, admin, approver, viewer</td><td>5</td><td>Weekly and monthly reports, with what is behind each figure</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Agents and operations</h2><p>What the agents are doing, and what to do when something goes wrong.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="agents.html">Agents</a></td><td>Owner, admin</td><td>1</td><td>All 22 agents, their versions, state and cost</td></tr>
+      <tr><td><a href="run.html">Run detail</a></td><td>Owner, admin</td><td>1</td><td>One run: jobs, attempts, model calls and cost in two currencies</td></tr>
+      <tr><td><a href="dead-letters.html">Dead letters</a></td><td>Owner, admin</td><td>1</td><td>Jobs that used all their attempts</td></tr>
+      <tr><td><a href="actions.html">Unresolved actions</a></td><td>Owner, admin</td><td>3</td><td>Posts the product cannot confirm were published</td></tr>
+      <tr><td><a href="alerts.html">Alerts and incidents</a></td><td>Owner, admin</td><td>1</td><td>Open alerts, and reviewing live content after a fact changes</td></tr>
+      <tr><td><a href="safety.html">Kill switch and shadow mode</a></td><td>Owner, admin</td><td>1</td><td>Stopping everything, or producing without publishing</td></tr>
+      <tr><td><a href="audit.html">Audit log</a></td><td>Owner, admin</td><td>1</td><td>Who did what, and the check that the log was not altered</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Leads and sales</h2><p>From the first message to a recorded outcome.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="leads.html">Leads and pipeline</a></td><td>Owner, admin, sales contact</td><td>4</td><td>The pipeline for each lead type</td></tr>
+      <tr><td><a href="lead.html">Lead detail</a></td><td>Owner, admin, sales contact</td><td>4</td><td>The conversation, where the lead came from, and handing over</td></tr>
+      <tr><td><a href="replies.html">Reply log</a></td><td>Owner, admin</td><td>4</td><td>Automatic replies, held replies, and the weekly sample review</td></tr>
+      <tr><td><a href="partner.html">Partner outcome page</a></td><td>Partner, by link, no account</td><td>4</td><td>The one page a partner sees to report a result</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Settings</h2><p>Brands, people, connections and the rules agents work within.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="brands.html">All brands</a></td><td>Owner</td><td>1</td><td>Every brand, its status and what is waiting</td></tr>
+      <tr><td><a href="settings.html">Brand settings</a></td><td>Owner, admin</td><td>1</td><td>The brand's basics, and offboarding</td></tr>
+      <tr><td><a href="users.html">Users and roles</a></td><td>Owner, admin</td><td>1</td><td>Inviting people and changing what they can do</td></tr>
+      <tr><td><a href="approvals-settings.html">Approval settings</a></td><td>Owner, admin</td><td>1, bulk and week in 3</td><td>Reminders, escalation, bulk approval and calendar approval</td></tr>
+      <tr><td><a href="connections.html">Connected accounts</a></td><td>Owner, admin</td><td>3</td><td>Instagram, Facebook, LinkedIn, YouTube and search accounts</td></tr>
+      <tr><td><a href="answers.html">Approved answers</a></td><td>Owner, admin</td><td>4</td><td>The only answers automatic replies may use</td></tr>
+      <tr><td><a href="domains.html">Link domains</a></td><td>Owner, admin</td><td>3</td><td>Where content is allowed to link</td></tr>
+      <tr><td><a href="budgets.html">Budgets and costs</a></td><td>Owner, admin</td><td>After pilot</td><td>Cost ceilings and ad caps, in dollars and rupees</td></tr>
+      <tr><td><a href="data.html">Data</a></td><td>Owner, admin</td><td>4</td><td>Exporting and deleting data, and how long it is kept</td></tr>
+    </tbody></table></div></section>
+
+  <section class="grp"><h2>Selling the product</h2><p>Not part of the Aztek pilot.</p>
+    <div class="panel"><table class="t idx"><thead><tr><th>Screen</th><th>Who reaches it</th><th>Phase</th><th>What it shows</th></tr></thead><tbody>
+      <tr><td><a href="billing.html">Sign-up and billing</a></td><td>New customer, admin</td><td>For sale</td><td>Choosing a plan, agreeing terms, and the billing view</td></tr>
+    </tbody></table></div></section>
+
+  <p class="muted small" style="margin-top:36px">The screens follow the approved app flow (<code>docs/app-flow</code>). Where a screen is only partly built in its phase, the phase column says so. Screen addresses in a real build are described in the app flow, section 6; here each screen is a file.</p>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

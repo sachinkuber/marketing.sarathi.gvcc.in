@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reports — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .figs { display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:12px; }
+  .figbtn { text-align:left; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-m); padding:14px 16px; cursor:pointer; display:block; width:100%; }
+  .figbtn:hover { border-color:#8e99a3; }
+  .figbtn[aria-expanded='true'] { border-color:var(--primary); box-shadow:0 0 0 2px var(--primary-bg); }
+  .figbtn .l { display:block; font-size:13.5px; color:var(--ink-2); }
+  .figbtn .n { display:block; font-size:26px; font-weight:600; letter-spacing:-0.02em; line-height:1.15; margin-top:2px; }
+  .figbtn .n small { font-size:13px; font-weight:500; color:var(--ink-3); letter-spacing:0; }
+  .figbtn .s { display:block; font-size:12.5px; color:var(--ink-3); margin-top:2px; }
+  .bar { display:grid; grid-template-columns: 1fr 40px; gap:12px; align-items:center; }
+  tr.sel td { background:#f6f9ff; }
+  @media (max-width: 1200px) { .figs { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 520px) { .topbar { padding: 0 12px; gap: 8px; } .topbar .where span, .userchip span:last-child { display: none; } }
+</style>
+</head>
+<body data-page="reports" data-title="Reports">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Reports</h1>
+      <p>A weekly and a monthly report for each brand: what was made, what it reached, and what the agents will change next.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 5</span></div>
+  </div>
+
+  <section class="sec" aria-labelledby="h-list">
+    <div class="sec-head"><h2 id="h-list">All reports</h2><p>Aztek Global</p></div>
+    <div class="panel" style="overflow-x:auto"><table class="t">
+      <thead><tr><th>Report</th><th>Period</th><th>Kind</th><th>Ready</th><th></th></tr></thead>
+      <tbody>
+        <tr class="sel"><td><b>Week 5</b></td><td class="nowrap">28 Sep to 4 Oct</td><td>Weekly</td><td class="nowrap">Mon 5 Oct, 8:00</td><td class="right"><a class="btn sm" href="#latest">Opened below</a></td></tr>
+        <tr><td><b>Week 4</b></td><td class="nowrap">21 to 27 Sep</td><td>Weekly</td><td class="nowrap">Mon 28 Sep, 8:00</td><td class="right"><button class="btn sm" type="button">Open</button></td></tr>
+        <tr><td><b>September 2026</b></td><td class="nowrap">1 to 30 Sep</td><td>Monthly</td><td class="nowrap">Thu 1 Oct, 8:00</td><td class="right"><button class="btn sm" type="button">Open</button></td></tr>
+        <tr><td><b>Week 3</b></td><td class="nowrap">14 to 20 Sep</td><td>Weekly</td><td class="nowrap">Mon 21 Sep, 8:00</td><td class="right"><button class="btn sm" type="button">Open</button></td></tr>
+      </tbody></table></div>
+  </section>
+
+  <section class="sec" id="latest" aria-labelledby="h-latest">
+    <div class="sec-head"><h2 id="h-latest">Weekly report: week 5, 28 September to 4 October</h2><p>Aztek Global</p><button class="btn sm sp" type="button">Download</button></div>
+
+    <div class="figs" role="group" aria-label="Headline figures. Select a figure to see what is behind it.">
+      <button class="figbtn" type="button" aria-expanded="false" aria-controls="drill"><span class="l">Output</span><span class="n">11 <small>items published</small></span><span class="s">46 this month</span></button>
+      <button class="figbtn" type="button" aria-expanded="false" aria-controls="drill"><span class="l">Reach</span><span class="n">52,300 <small>people</small></span><span class="s">Up 8% on week 4</span></button>
+      <button class="figbtn" type="button" aria-expanded="true" aria-controls="drill"><span class="l">Leads</span><span class="n">38 <small>qualified, this month</small></span><span class="s">9 this week</span></button>
+      <button class="figbtn" type="button" aria-expanded="false" aria-controls="drill"><span class="l">Pipeline</span><span class="n">12 <small>open opportunities</small></span><span class="s">Value not recorded yet</span></button>
+      <button class="figbtn" type="button" aria-expanded="false" aria-controls="drill"><span class="l">Spend, this month</span><span class="n">$433 <small>₹36,069</small></span><span class="s">Model and tools. Ads $0 · ₹0</span></button>
+    </div>
+
+    <div class="panel" id="drill" style="margin-top:14px" role="region" aria-label="What is behind 38 qualified leads">
+      <div class="ph"><h3>What is behind the 38 qualified leads</h3><span class="sp small muted">This month to 4 October</span></div>
+      <div class="pb">
+        <div class="grid2" style="gap:36px">
+          <div>
+            <h4 style="font-size:14px;font-weight:600;margin-bottom:10px">By lead type</h4>
+            <table class="t" style="font-size:14px"><thead><tr><th style="padding-left:0">Lead type</th><th class="num">Leads</th><th class="num">Share</th></tr></thead><tbody>
+              <tr><td style="padding-left:0">Car owners</td><td class="num">24</td><td class="num">63%</td></tr>
+              <tr><td style="padding-left:0">Installers and studios</td><td class="num">10</td><td class="num">26%</td></tr>
+              <tr><td style="padding-left:0">Distributors abroad</td><td class="num">4</td><td class="num">11%</td></tr>
+            </tbody></table>
+          </div>
+          <div>
+            <h4 style="font-size:14px;font-weight:600;margin-bottom:10px">By the content that led to them</h4>
+            <table class="t" style="font-size:14px"><thead><tr><th style="padding-left:0">Content</th><th class="num">Leads</th></tr></thead><tbody>
+              <tr><td style="padding-left:0">Why paint protection film is not a coating<div class="tiny muted">Instagram post</div></td><td class="num">9</td></tr>
+              <tr><td style="padding-left:0">Three questions to ask a film studio<div class="tiny muted">YouTube short</div></td><td class="num">8</td></tr>
+              <tr><td style="padding-left:0">What a certified studio does differently<div class="tiny muted">LinkedIn article</div></td><td class="num">7</td></tr>
+              <tr><td style="padding-left:0">How film is applied, step by step<div class="tiny muted">Instagram reel</div></td><td class="num">6</td></tr>
+              <tr><td style="padding-left:0">Other content, 11 items</td><td class="num">3</td></tr>
+              <tr><td style="padding-left:0">Phone and walk-in, self-reported<div class="tiny muted">Reported separately, no link to content</div></td><td class="num">5</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:14px">Each lead is credited to the last non-direct touch before it was created, within 30 days. The first touch is stored too. A lead's name and phone are in <a href="leads.html">Leads</a>.</p>
+      </div>
+    </div>
+    <p class="small muted" style="margin-top:8px">Select any figure above to see its content, leads and sales. Leads is open as an example.</p>
+
+    <h3 style="font-size:16px;font-weight:600;margin:34px 0 10px">Results against targets</h3>
+    <div class="panel" style="overflow-x:auto"><table class="t" style="min-width:640px">
+      <thead><tr><th>Measure</th><th class="num">Result</th><th class="num">Target</th><th>Progress</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><b>Qualified leads</b></td><td class="num">38</td><td class="num">31, baseline</td><td style="width:20%"><div class="meter ok"><i style="width:100%"></i></div></td><td><span class="tag ok">On target</span></td></tr>
+        <tr><td><b>Content published</b></td><td class="num">46</td><td class="num">40, baseline</td><td><div class="meter ok"><i style="width:100%"></i></div></td><td><span class="tag ok">On target</span></td></tr>
+        <tr><td><b>Organic search clicks</b></td><td class="num">1,240</td><td class="num">Growth on 410</td><td><div class="meter"><i style="width:68%"></i></div></td><td><span class="tag info">Growing</span></td></tr>
+        <tr><td><b>AI answers that mention Aztek</b></td><td class="num">18%</td><td class="num">Growth on 5%</td><td><div class="meter"><i style="width:36%"></i></div></td><td><span class="tag info">Growing</span></td></tr>
+        <tr><td><b>Cost per qualified lead</b></td><td class="num">$11.40 · ₹950</td><td class="num">Below $18.20 · ₹1,520</td><td><div class="meter ok"><i style="width:63%"></i></div></td><td><span class="tag ok">Below baseline</span></td></tr>
+        <tr><td><b>Items waiting more than 2 days</b></td><td class="num">2</td><td class="num">0</td><td><div class="meter danger"><i style="width:100%"></i></div></td><td><span class="tag danger">Off target</span></td></tr>
+      </tbody></table></div>
+    <p class="small muted" style="margin-top:8px">Spend uses ₹83.3 per $1. Pipeline value is not shown until deal values are recorded.</p>
+
+    <h3 style="font-size:16px;font-weight:600;margin:34px 0 10px">What the agents will change next</h3>
+    <ul class="list panel">
+      <li style="align-items:flex-start"><div><b>Make more of what led to leads</b><div class="small muted">Instagram posts that explain a difference, such as film and coating, led to the most leads. The strategist will plan 3 more this month.</div></div></li>
+      <li style="align-items:flex-start"><div><b>Test new calls to action on link clicks</b><div class="small muted">Tagged link clicks are behind plan in the film basics campaign. The copywriter will test two wordings and compare them.</div></div></li>
+      <li style="align-items:flex-start"><div><b>Fix pages that search shows but people do not open</b><div class="small muted">The SEO specialist will propose new titles for 2 pages. They arrive in your inbox for approval.</div></div></li>
+    </ul>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+<script>
+  // Mockup behaviour: one figure open at a time, panel hides when none is selected.
+  (function () {
+    var btns = document.querySelectorAll('.figbtn'), drill = document.getElementById('drill');
+    btns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        var open = b.getAttribute('aria-expanded') === 'true';
+        btns.forEach(function (x) { x.setAttribute('aria-expanded', 'false'); });
+        b.setAttribute('aria-expanded', open ? 'false' : 'true');
+        drill.style.display = open ? 'none' : '';
+      });
+    });
+  })();
+</script>
+</body>
+</html>

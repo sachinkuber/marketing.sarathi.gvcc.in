@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approval settings — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="approvals-settings" data-section="settings" data-title="Approval settings">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Approval settings</h1>
+      <p>When approvers are reminded, what happens when no one answers, and which items can be approved together.</p>
+    </div>
+    <div class="actions"><span class="phase">Phases 1 and 3</span></div>
+  </div>
+
+  <section class="sec"><div class="sec-head"><h2>Reminders</h2></div>
+  <div class="panel pad"><div class="grid3" style="gap:16px">
+    <div class="field"><label for="r1">First reminder after</label><select class="input" id="r1"><option>24 hours</option><option>12 hours</option><option>48 hours</option></select></div>
+    <div class="field"><label for="r2">Gap between reminders</label><select class="input" id="r2"><option>24 hours</option><option>12 hours</option><option>48 hours</option></select></div>
+    <div class="field"><label for="r3">Number of reminders</label><select class="input" id="r3"><option>3</option><option>2</option><option>1</option></select></div>
+  </div><p class="muted small" style="margin-top:12px">Defaults shown. The owner asked for 2 to 3 reminders.</p></div>
+  <h3 style="font-size:15px;font-weight:600;margin:24px 0 12px">Example: an item that waits and waits</h3>
+  <ol class="timeline">
+    <li class="done"><b>Mon 9:00</b> Item is ready and waiting for approval</li>
+    <li class="done"><b>Tue 9:00</b> Reminder 1 <span class="muted small">24 hours later</span></li>
+    <li class="done"><b>Wed 9:00</b> Reminder 2</li>
+    <li class="done"><b>Thu 9:00</b> Reminder 3</li>
+    <li class="now"><b>Fri 9:00</b> Escalated, marked overdue <span class="muted small">24 hours after the last reminder</span></li>
+  </ol></section>
+
+  <section class="sec"><div class="sec-head"><h2>What escalation means</h2></div>
+  <p class="sub" style="max-width:72ch">The item is marked overdue and goes to the next person up: from a brand approver to the brand admin, and from there to the platform owner. Where the platform owner is already the approver, as for Aztek, the item is marked overdue and its place in the calendar is held. A banner shows on every screen until each overdue item is approved or rejected.</p>
+  <div class="callout warn" style="margin-top:14px;max-width:72ch"><b>Silence is never approval.</b> Escalation changes who is asked. It never makes the decision.<br>Example: a post planned for Tuesday that nobody has approved by Tuesday is not posted on Tuesday. It shows as overdue and goes out only after someone approves it.</div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Approve together</h2><p>Which kinds of item can be approved in one go</p></div>
+  <div class="panel"><div style="overflow-x:auto"><table class="t"><thead><tr><th>Kind of item</th><th>Bulk approval</th><th></th></tr></thead><tbody>
+    <tr><td><b>Organic posts</b><div class="tiny muted">Instagram, Facebook and LinkedIn</div></td><td><span class="switch on" role="img" aria-label="Organic posts: on"></span></td><td></td></tr>
+    <tr><td><b>Carousels</b><div class="tiny muted"></div></td><td><span class="switch on" role="img" aria-label="Carousels: on"></span></td><td></td></tr>
+    <tr><td><b>Short videos</b><div class="tiny muted">Each one is watched before approval</div></td><td><span class="switch" role="img" aria-label="Short videos: off"></span></td><td></td></tr>
+    <tr><td><b>Articles</b><div class="tiny muted"></div></td><td><span class="switch" role="img" aria-label="Articles: off"></span></td><td></td></tr>
+    <tr><td><b>Budgets</b><div class="tiny muted">Always approved one at a time</div></td><td><span class="switch" role="img" aria-label="Budgets: off"></span></td><td><span class="tag plain">Locked off</span></td></tr>
+    <tr><td><b>Contracts</b><div class="tiny muted">Always approved one at a time</div></td><td><span class="switch" role="img" aria-label="Contracts: off"></span></td><td><span class="tag plain">Locked off</span></td></tr>
+    <tr><td><b>Strategy brief</b><div class="tiny muted">Always approved one at a time</div></td><td><span class="switch" role="img" aria-label="Strategy brief: off"></span></td><td><span class="tag plain">Locked off</span></td></tr>
+    <tr><td><b>Verified facts</b><div class="tiny muted">Always approved one at a time</div></td><td><span class="switch" role="img" aria-label="Verified facts: off"></span></td><td><span class="tag plain">Locked off</span></td></tr>
+  </tbody></table></div></div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Calendar approval period</h2><p>What one approval of the calendar covers</p></div>
+  <div class="seg" role="group" aria-label="Calendar approval period"><button type="button" aria-pressed="false">Item</button><button type="button" aria-pressed="false">Day</button><button type="button" aria-pressed="true">Week</button></div>
+  <p class="muted small" style="margin-top:10px">Default is week. Approving a week approves each item in it, and each item can still be opened and rejected on its own.</p></section>
+  <div style="margin-top:28px"><button class="btn primary" type="button">Save changes</button></div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

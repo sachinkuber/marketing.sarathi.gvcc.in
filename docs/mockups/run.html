@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents / Run — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="run" data-nav="agents" data-title="Agents / Run">
+<main id="content">
+  <div class="crumbs"><a href="agents.html">Agents</a> / Copywriter and Content Manager / Run</div>
+  <div class="page-head">
+    <div>
+      <h1>Run for the Instagram carousel</h1>
+      <p>One run of the Copywriter and Content Manager agent: its jobs, the model calls it made and what they cost.</p>
+    </div>
+    <div class="actions"><span class="tag info">Running</span><span class="phase">Phase 1</span></div>
+  </div>
+  <div class="panel pad"><dl class="kv" style="grid-template-columns:repeat(4,minmax(0,auto));gap:6px 28px;justify-content:start">
+    <dt>Run</dt><dd>run 4271</dd>
+    <dt>Brand</dt><dd>Aztek Global</dd>
+    <dt>Agent version</dt><dd>Copywriter and Content Manager v6</dd>
+    <dt>Started by</dt><dd>Agency Head agent, for Thursday's plan</dd>
+    <dt>Started</dt><dd>Wed 7 Oct, 10:05</dd>
+    <dt>State</dt><dd><span class="tag info">Running</span> 2 of 3 jobs done</dd>
+  </dl></div>
+
+  <section class="sec"><div class="sec-head"><h2>Jobs and attempts</h2><p>An attempt that stops reporting is taken back and tried again</p></div>
+  <div class="panel"><div style="overflow-x:auto"><table class="t">
+    <thead><tr><th>Job</th><th>Attempt</th><th>Result</th><th>Notes</th></tr></thead><tbody>
+    <tr><td><b>Write the caption</b><div class="tiny muted">Instagram carousel, Thursday</div></td><td>1</td><td><span class="tag ok plain">Done 10:07</span></td><td class="sub">Sent to checks</td></tr>
+    <tr><td rowspan="2"><b>Write alternatives A and B</b><div class="tiny muted">Two other versions to compare</div></td><td>1</td><td><span class="tag warn plain">Taken back 10:12</span></td><td class="sub">The worker stopped reporting for 90 seconds, so the job was taken back.</td></tr>
+    <tr><td>2</td><td><span class="tag ok plain">Done 10:16</span></td><td class="sub">Started again on another worker</td></tr>
+    <tr><td><b>List the claims in the caption</b><div class="tiny muted">For the accuracy check</div></td><td>1</td><td><span class="tag info plain">Running</span></td><td class="sub">Started 10:17</td></tr>
+    </tbody></table></div></div></section>
+
+  <section class="sec"><div class="sec-head"><h2>Model calls</h2><p>Every request to a model, with its cost</p></div>
+  <div class="panel"><div style="overflow-x:auto"><table class="t">
+    <thead><tr><th>Step</th><th>Request fingerprint</th><th>Status</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Cost</th></tr></thead><tbody>
+    <tr><td>Caption, first draft</td><td>a41f…9c20</td><td><span class="tag ok plain">Succeeded</span></td><td class="num">2,140</td><td class="num">610</td><td class="num nowrap">$0.031 · ₹2.58</td></tr>
+    <tr><td>Caption, revision</td><td>5be0…1d77</td><td><span class="tag ok plain">Succeeded</span></td><td class="num">2,900</td><td class="num">540</td><td class="num nowrap">$0.036 · ₹3.00</td></tr>
+    <tr><td>Alternative A, attempt 1</td><td>c902…e4b1</td><td><span class="tag warn plain">Result not recorded</span></td><td class="num">1,980</td><td class="num">0</td><td class="num nowrap">$0.012 · ₹1.00</td></tr>
+    <tr style="background:var(--warn-bg)"><td>Alternative A, attempt 2<div class="tiny" style="margin-top:4px"><span class="tag warn">Possible duplicate</span></div></td><td>c902…e4b1</td><td><span class="tag ok plain">Succeeded</span></td><td class="num">1,980</td><td class="num">590</td><td class="num nowrap">$0.029 · ₹2.42</td></tr>
+    <tr><td>Alternative B</td><td>7d15…03aa</td><td><span class="tag ok plain">Succeeded</span></td><td class="num">2,210</td><td class="num">640</td><td class="num nowrap">$0.030 · ₹2.50</td></tr>
+    <tr><td>Claims list</td><td>e66c…b812</td><td><span class="tag info plain">In progress</span></td><td class="num muted">Pending</td><td class="num muted">Pending</td><td class="num muted">Pending</td></tr>
+    </tbody>
+    <tfoot><tr><td colspan="3" class="strong" style="padding:12px 16px">Totals so far</td><td class="num strong">11,210</td><td class="num strong">2,380</td><td class="num strong nowrap">$0.138 · ₹11.50</td></tr></tfoot>
+  </table></div></div>
+  <p class="small sub" style="margin-top:10px"><b>Why one call is flagged.</b> Alternative A was asked twice with the same fingerprint, and the first attempt never recorded a result. It may have been billed as well, so the cost is counted for both until someone confirms.</p></section>
+
+  <section class="sec"><div class="sec-head"><h2>Audit entries for this run</h2></div>
+  <ol class="timeline">
+    <li class="done"><b>10:05</b> Run started by the Agency Head agent <span class="muted small">Copywriter v6</span></li>
+    <li class="done"><b>10:07</b> Caption written and sent to checks</li>
+    <li class="done"><b>10:12</b> Job "Write alternatives A and B" taken back after a lost heartbeat</li>
+    <li class="done"><b>10:12</b> Model call c902…e4b1 flagged as a possible duplicate</li>
+    <li class="done"><b>10:16</b> Alternatives A and B written</li>
+    <li class="now"><b>10:17</b> Job "List the claims in the caption" started</li>
+  </ol></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit log — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="audit" data-section="settings" data-title="Audit log">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Audit log</h1>
+      <p>A record of who did what, kept so it cannot be changed quietly afterwards.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 1</span></div>
+  </div>
+  <div class="panel pad">
+    <div class="grid3" style="gap:16px">
+      <div class="field"><label for="f-person">Person</label><select class="input" id="f-person"><option>Everyone</option><option>Sachin, owner</option><option>Brand admin</option><option>Platform and agents</option></select></div>
+      <div class="field"><label for="f-action">Action</label><select class="input" id="f-action"><option>Any action</option><option>Approvals and rejections</option><option>Settings changes</option><option>Sign-ins</option><option>Safety and kill switch</option></select></div>
+      <div class="field"><label for="f-time">Time</label><select class="input" id="f-time"><option>Last 7 days</option><option>Last 30 days</option><option>This pilot</option></select></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:18px"><div style="overflow-x:auto"><table class="t">
+    <thead><tr><th>Time</th><th>Who</th><th>What</th><th>Subject</th></tr></thead><tbody><tr><td class="nowrap">Wed 7 Oct, 10:16</td><td>Copywriter agent</td><td>Finished a job</td><td class="sub">Write alternatives A and B, run 4271</td></tr><tr><td class="nowrap">Wed 7 Oct, 10:12</td><td>Platform</td><td>Took back a job after a lost heartbeat</td><td class="sub">Write alternatives A and B, attempt 1</td></tr><tr><td class="nowrap">Wed 7 Oct, 09:30</td><td>Sachin, owner</td><td>Approved an item</td><td class="sub">LinkedIn post: three questions to ask a studio</td></tr><tr><td class="nowrap">Wed 7 Oct, 08:40</td><td>Platform</td><td>Opened an incident</td><td class="sub">Verified fact: 100+ certified studios</td></tr><tr><td class="nowrap">Wed 7 Oct, 08:36</td><td>Sachin, owner</td><td>Edited a verified fact</td><td class="sub">Verified fact: 100+ certified studios</td></tr><tr><td class="nowrap">Tue 6 Oct, 17:20</td><td>Platform</td><td>Moved a job to dead letters</td><td class="sub">Write the LinkedIn article draft</td></tr><tr><td class="nowrap">Tue 6 Oct, 15:35</td><td>Platform</td><td>Marked an action as unresolved</td><td class="sub">Facebook post: What happens in a studio visit</td></tr><tr><td class="nowrap">Tue 6 Oct, 11:05</td><td>Brand admin</td><td>Changed a reminder setting</td><td class="sub">First reminder after: 12 hours to 24 hours</td></tr><tr><td class="nowrap">Mon 5 Oct, 16:10</td><td>Sachin, owner</td><td>Rejected an item with a note</td><td class="sub">Instagram carousel: caption too long</td></tr><tr><td class="nowrap">Mon 5 Oct, 09:02</td><td>Sachin, owner</td><td>Signed in</td><td class="sub">From Pune, new browser</td></tr><tr><td class="nowrap">Sun 4 Oct, 20:44</td><td>Sachin, owner</td><td>Invited a user</td><td class="sub">Brand approver (sample)</td></tr><tr><td class="nowrap">Fri 2 Oct, 11:20</td><td>Sachin, owner</td><td>Marked an action as posted</td><td class="sub">LinkedIn post: Why film is not a coating</td></tr></tbody></table></div></div>
+  <p class="muted small" style="margin-top:8px">Showing 12 of 4,812 entries. Open an entry to see the before and after.</p>
+
+  <div class="grid2" style="margin-top:38px;gap:44px">
+    <section>
+      <div class="sec-head"><h2>Chain check</h2></div>
+      <div class="row wrap"><span class="tag ok">Verified</span><span class="sub small">Every entry links to the one before it. Last checked Wed 7 Oct, 06:00.</span></div>
+      <dl class="kv" style="margin-top:14px;grid-template-columns:110px 1fr">
+        <dt>Last export</dt><dd>Wed 7 Oct, 00:00</dd>
+        <dt>Kept in</dt><dd>Write-once storage: entries can be added but not changed or deleted</dd>
+      </dl>
+      <div style="margin-top:16px"><button class="btn primary" type="button">Verify now</button></div>
+    </section>
+    <section>
+      <div class="sec-head"><h2>How long entries are kept</h2></div>
+      <p class="sub">Proposed: 2 years, then removed. Entries about a person can be anonymised earlier if that person's data is deleted, without breaking the chain.</p>
+      <p class="muted small" style="margin-top:8px">The owner has not confirmed this period yet.</p>
+    </section>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Second factor — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body data-layout="bare" data-page="sign-in-verify">
+<main id="content" class="bare">
+<div class="side">
+  <div class="row" style="gap:10px;font-weight:600">Marketing platform</div>
+  <div><h2>Marketing work, done and checked. You approve.</h2><p>Sign in to see results, approve what goes live, and step in when a lead needs a person.</p></div>
+  <div class="small" style="color:#8c97a1">Mockup: every screen uses sample data.</div>
+</div>
+<div class="main"><div class="box">
+  <div><h1>Enter your code</h1><p class="muted" style="margin-top:4px">Open your authenticator app and type the 6-digit code for this platform.</p></div>
+  <div class="stack" style="gap:16px">
+    <div class="otp" role="group" aria-label="6-digit code"><span>4</span><span>8</span><span>1</span><span>9</span><span></span><span></span></div>
+    <a class="btn primary block" href="home.html">Verify</a>
+    <a class="small" href="#backup" style="text-align:center">Use a backup code instead</a>
+  </div>
+  <p class="muted small">A backup code works once. You are told by email when one is used.</p>
+  <hr class="rule" style="margin:18px 0 6px">
+  <div id="state-locked" class="stack" style="gap:12px">
+    <p class="small muted">State shown after too many wrong codes</p>
+    <h2 style="font-size:20px;font-weight:600">This account is locked for now</h2>
+    <div class="callout danger" role="alert"><b>Too many wrong codes.</b> Sign-in is locked for 15 minutes. The attempts are recorded.</div>
+    <ul class="stack" style="gap:6px;list-style:disc;padding-left:20px">
+      <li>Wait 15 minutes, then sign in again. The lock lifts by itself.</li>
+      <li>If you lost your authenticator app, use a backup code after the lock lifts.</li>
+      <li>If you have no backup codes left, ask the platform owner to reset your second factor.</li>
+    </ul>
+    <button class="btn block" type="button" disabled>Verify</button>
+  </div>
+</div></div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

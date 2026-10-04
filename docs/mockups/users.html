@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users and roles — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>.wrap-t{overflow-x:auto}.wrap-t table{min-width:900px}.frm{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:16px;align-items:end}@media (max-width:980px){.frm{grid-template-columns:1fr}}</style>
+</head>
+<body data-page="users" data-section="settings" data-title="Users and roles">
+<main id="content">
+  <div class="page-head">
+    <div><h1>Users and roles</h1><p>Who can sign in to Aztek Global, and what each person can do.</p></div>
+    <div class="actions"><span class="phase">Phase 1</span></div>
+  </div>
+
+  <div class="callout">Changing a role, removing a user or resetting a second factor asks for your own fresh 6-digit code first.</div>
+
+  <section class="sec" aria-labelledby="h1"><div class="sec-head"><h2 id="h1">People</h2><p>5 active, 1 invite pending</p></div>
+    <div class="panel wrap-t"><table class="t">
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Second factor</th><th>Last sign-in</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+        <tr><td>Sachin</td><td>sachin@example.com</td><td><span class="tag info plain">Platform owner</span></td><td><span class="tag ok">Enrolled</span></td><td>Today, 9:12</td><td><span class="tag ok">Active</span></td><td><span class="muted small">This is you</span></td></tr>
+        <tr><td>Meera</td><td>meera@example.com</td><td><span class="tag info plain">Brand admin</span></td><td><span class="tag ok">Enrolled</span></td><td>Yesterday, 17:40</td><td><span class="tag ok">Active</span></td><td><div class="row wrap" style="gap:6px"><button class="btn sm" type="button">Change role</button><button class="btn sm" type="button">Reset second factor</button><button class="btn sm danger" type="button">Remove</button></div></td></tr>
+        <tr><td>Anil</td><td>anil@example.com</td><td><span class="tag plain">Brand approver</span></td><td><span class="tag ok">Enrolled</span></td><td>Today, 8:03</td><td><span class="tag ok">Active</span></td><td><div class="row wrap" style="gap:6px"><button class="btn sm" type="button">Change role</button><button class="btn sm" type="button">Reset second factor</button><button class="btn sm danger" type="button">Remove</button></div></td></tr>
+        <tr><td>Rahul</td><td>rahul@example.com</td><td><span class="tag plain">Sales contact</span></td><td><span class="tag warn">Not enrolled</span></td><td>3 Oct 2026</td><td><span class="tag ok">Active</span></td><td><div class="row wrap" style="gap:6px"><button class="btn sm" type="button">Change role</button><button class="btn sm" type="button">Reset second factor</button><button class="btn sm danger" type="button">Remove</button></div></td></tr>
+        <tr><td>Kavya</td><td>kavya@example.com</td><td><span class="tag plain">Viewer</span></td><td><span class="muted">Not required</span></td><td>1 Oct 2026</td><td><span class="tag ok">Active</span></td><td><div class="row wrap" style="gap:6px"><button class="btn sm" type="button">Change role</button><button class="btn sm danger" type="button">Remove</button></div></td></tr>
+        <tr><td class="muted">Not yet accepted</td><td>priya@example.com</td><td><span class="tag plain">Brand approver</span></td><td class="muted">Not set up</td><td class="muted">Never</td><td><span class="tag warn">Invite pending</span><div class="small muted">Expires 9 Oct 2026, 11:00</div></td><td><div class="row wrap" style="gap:6px"><button class="btn sm" type="button">Send again</button><button class="btn sm danger" type="button">Remove</button></div></td></tr>
+      </tbody></table></div>
+    <p class="muted small" style="margin-top:10px">Viewers sign in with email and password only, so they show no second factor. The platform owner is shown here but cannot be changed by a brand admin.</p></section>
+
+  <section class="sec" aria-labelledby="h2"><div class="sec-head"><h2 id="h2">Invite user</h2><p>An invite lasts 72 hours and works once</p></div>
+    <div class="panel pad"><form class="frm" onsubmit="return false">
+      <div class="field"><label for="ie">Email</label><input class="input" id="ie" type="email" placeholder="name@example.com"></div>
+      <div class="field"><label for="ir">Role</label><select class="input" id="ir"><option>Brand approver</option><option>Brand admin</option><option>Sales contact</option><option>Viewer</option></select></div>
+      <button class="btn primary" type="button">Send invite</button>
+    </form></div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

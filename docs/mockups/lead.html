@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lead — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+.msg{max-width:84%;padding:10px 13px;border-radius:12px;font-size:14.5px;display:grid;gap:5px}
+.msg.cust{background:var(--muted-bg);justify-self:start;border-bottom-left-radius:3px}
+.msg.agent{background:var(--primary-bg);justify-self:end;border-bottom-right-radius:3px}
+.msg .by{font-size:12.5px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.note{justify-self:center;text-align:center;font-size:13.5px;color:var(--warn);background:var(--warn-bg);border-radius:99px;padding:5px 14px;max-width:96%}
+.convo{display:grid;gap:12px}
+.routes{display:grid;gap:8px}
+.routes label{display:flex;gap:9px;align-items:flex-start;font-size:14.5px;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-s)}
+.routes label:has(input:checked){border-color:var(--primary);background:var(--primary-bg)}
+@media (max-width:640px){.kv{grid-template-columns:1fr;gap:2px 0}.kv dd{margin-bottom:8px}.msg{max-width:96%}}
+</style>
+</head>
+<body data-nav="leads" data-page="lead" data-title="Leads / Lead" data-section="leads">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <div class="crumbs"><a href="leads.html">Leads and pipeline</a> / Rohit</div>
+      <h1>Rohit, Mumbai</h1>
+      <p>Car-owner lead from an Instagram post. Hot 35 minutes ago and waiting for a person.</p>
+    </div>
+    <div class="actions"><span class="tag danger">Hot · needs a person</span><span class="phase">Phase 4</span></div>
+  </div>
+
+  <div class="split wide-r">
+    <div class="stack-l">
+      <div class="panel">
+        <div class="ph"><h3>Conversation</h3><span class="tag ok sp">Agent is replying</span></div>
+        <div class="pb convo">
+          <div class="msg cust"><div class="by"><b>Rohit</b> · Instagram message · 10:12</div>Hi, saw your post on paint protection film. I have a new SUV. Is it worth putting on?</div>
+          <div class="msg agent"><div class="by"><span class="tag info plain">Automatic</span> From approved answer: "What paint protection film is" · 10:12</div>Thanks for asking, Rohit. Paint protection film is a clear layer that sits over the paint and takes stone chips and scratches. Whether it suits your car depends on how you use it. Can I ask which city you are in and when you collect the car?</div>
+          <div class="msg cust"><div class="by"><b>Rohit</b> · 10:15</div>Mumbai. Collecting next week. I want it done before I take it out on the highway.</div>
+          <div class="msg agent"><div class="by"><span class="tag info plain">Automatic</span> From approved answer: "Where to find certified studios" · 10:16</div>That timing works well, as film is best fitted before the car is used much. We have certified studios in Mumbai. Would you like a visit booked so a studio can look at the car?</div>
+          <div class="msg cust"><div class="by"><b>Rohit</b> · 10:31</div>Yes, and can someone tell me the price and how long the warranty is?</div>
+          <div class="note">Handover note: the customer asked for a price and warranty terms. No approved answer covers these, so the agent stopped and flagged a person.</div>
+        </div>
+        <div class="pb" style="border-top:1px solid var(--line-2)">
+          <div class="field"><label for="reply">Your reply</label>
+            <textarea id="reply" class="input" placeholder="Type a reply. It sends as a person, not as the agent."></textarea>
+            <span class="hint">Until you take over, the agent keeps replying from approved answers only.</span></div>
+          <div class="row wrap" style="margin-top:12px"><button class="btn primary" type="button">Take over</button><span class="muted small">Stops the agent replying to this lead. You can hand it back later.</span><button class="btn sp" type="button" disabled>Send reply</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-l">
+      <div class="panel">
+        <div class="ph"><h3>Details</h3></div>
+        <div class="pb">
+          <dl class="kv">
+            <dt>Lead type</dt><dd>Car owner</dd>
+            <dt>Phone</dt><dd>+91 98xxx xxxxx <span class="muted small">(shown in full to sales contacts)</span></dd>
+            <dt>Source</dt><dd>Instagram post, message</dd>
+            <dt>Consent</dt><dd>Agreed to be contacted by message · 7 Oct 2026, 10:12 <span class="muted small">Recorded when he sent the first message</span></dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>How this lead arrived</h3><span class="muted small sp">Touches in order</span></div>
+        <div class="pb">
+          <ul class="timeline">
+            <li class="done"><b>First touch</b> · 2 Oct<div class="muted small">Viewed Instagram reel "Installing film: what happens on the day"</div></li>
+            <li class="done"><b>Link click</b> · 5 Oct<div class="muted small">Tagged link in post "Why paint protection film is not a coating"</div></li>
+            <li class="now"><b>Lead created</b> · 7 Oct<div class="muted small">Message on the same post. Credited to this post, the last non-direct touch.</div></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>Qualification</h3><span class="tag danger sp">Hot</span></div>
+        <div class="pb">
+          <ul class="stack" style="gap:7px;font-size:14.5px">
+            <li>Owns a new car and has a collection date next week</li>
+            <li>In a city with a certified studio</li>
+            <li>Asked to book a visit</li>
+            <li>Asked for price and warranty, which only a person can answer</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>Pipeline stage</h3></div>
+        <div class="pb stack">
+          <div class="field"><label for="stage">Stage</label><select id="stage" class="input"><option>New</option><option>Qualifying</option><option selected>Hot</option><option>With sales or partner</option><option>Won</option><option>Lost</option></select></div>
+          <div class="field"><span class="lab">Route for this lead</span>
+            <div class="routes" role="radiogroup" aria-label="Route">
+              <label><input type="radio" name="route"> <span><b>Agent books</b><br><span class="muted small">The agent offers a time and confirms the visit</span></span></label>
+              <label><input type="radio" name="route"> <span><b>Hand to sales</b><br><span class="muted small">Rahul, sales contact, is notified and takes over</span></span></label>
+              <label><input type="radio" name="route" checked> <span><b>Route to a partner</b><br><span class="muted small">Partner studio, Mumbai. The partner gets the lead and an outcome link, no account needed.</span></span></label>
+            </div>
+          </div>
+          <div class="field"><label for="partner">Partner</label><select id="partner" class="input"><option>Studio A, Mumbai (nearest)</option><option>Studio B, Thane</option></select></div>
+          <button class="btn primary" type="button">Route lead</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph"><h3>Outcome</h3><span class="muted small sp">Not recorded yet</span></div>
+        <div class="pb stack">
+          <div class="seg" role="group" aria-label="Outcome"><button type="button" aria-pressed="false">Won</button><button type="button" aria-pressed="false">Lost</button></div>
+          <div class="grid2" style="gap:12px">
+            <div class="field"><label for="val">Value</label><input id="val" class="input" placeholder="Amount in rupees"><span class="hint">Shown with the dollar value</span></div>
+            <div class="field"><label for="dt">Date</label><input id="dt" class="input" type="date"></div>
+          </div>
+          <button class="btn" type="button">Save outcome</button>
+          <p class="muted small">If a partner has the lead and does not report, it shows as outcome unknown, never as lost.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dead letters — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+
+</head>
+<body data-page="dead-letters" data-section="agents" data-title="Dead letters">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Dead letters</h1>
+      <p>Jobs that used all their attempts. Nothing here is retried until a person decides.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 1</span></div>
+  </div>
+  <p class="strong" style="margin-bottom:14px">2 jobs need a decision</p>
+  <div class="stack">
+    <div class="panel"><div class="pb">
+      <div class="row wrap"><b>Render the Instagram reel, 9:16</b><span class="tag danger plain">Failed 5 of 5 attempts</span><span class="sp muted small">Last attempt Wed 7 Oct, 08:52</span></div>
+      <div class="muted small" style="margin-top:2px">Aztek Global · Videographer and Video Editor v3</div>
+      <div class="callout danger" style="margin-top:12px">The render service stopped: not enough memory for a 60 second clip at 1080 by 1920.</div>
+      <p class="small sub" style="margin-top:10px">Requeue tries again with the same input. Cancel closes the job and sends the reel back to the Agency Head agent to be re-planned. Friday's reel is waiting on this.</p>
+      <div class="row wrap" style="margin-top:14px"><button class="btn primary" type="button">Requeue</button><button class="btn" type="button">Cancel</button></div>
+    </div></div>
+    <div class="panel"><div class="pb">
+      <div class="row wrap"><b>Write the LinkedIn article draft</b><span class="tag danger plain">Failed 3 of 3 attempts</span><span class="sp muted small">Last attempt Tue 6 Oct, 17:20</span></div>
+      <div class="muted small" style="margin-top:2px">Aztek Global · Copywriter and Content Manager v6</div>
+      <div class="callout danger" style="margin-top:12px">The draft came back without its required disclosure field, so it failed the format check each time.</div>
+      <p class="small sub" style="margin-top:10px">Requeue tries again. If it fails again the cause is likely in the instructions, not chance, so consider cancelling and raising it with the platform owner.</p>
+      <div class="row wrap" style="margin-top:14px"><button class="btn primary" type="button">Requeue</button><button class="btn" type="button">Cancel</button></div>
+    </div></div>
+  </div>
+
+  <section class="sec"><div class="sec-head"><h2>When nothing is wrong</h2><p>What this page shows with no dead letters</p></div>
+    <div class="panel"><div class="empty"><b>No jobs have used all their attempts</b>Failed jobs are retried automatically. If one runs out of attempts it appears here with its error, and you will get an alert.</div></div>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

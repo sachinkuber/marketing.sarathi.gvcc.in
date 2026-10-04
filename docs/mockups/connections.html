@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connected accounts — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .acct { display:grid; grid-template-columns: 150px minmax(0,1fr); gap:10px 18px; padding:18px 20px; border-bottom:1px solid var(--line-2); align-items:start; }
+  .acct:last-child { border-bottom:0; }
+  .acct.lost { box-shadow: inset 3px 0 0 var(--danger); background:#fffafa; }
+  .acct.soon { box-shadow: inset 3px 0 0 #d08a00; }
+  .acct .name { font-weight:600; }
+  .acct dl.kv { grid-template-columns: 100px 1fr; gap:4px 14px; font-size:14px; }
+  .acct .btns { grid-column:2; display:flex; gap:8px; flex-wrap:wrap; }
+  @media (max-width: 760px) { .acct { grid-template-columns: 1fr; } .acct .btns { grid-column:1; } }
+  @media (max-width: 520px) { .topbar { padding: 0 12px; gap: 8px; } .topbar .where span, .userchip span:last-child { display: none; } }
+</style>
+</head>
+<body data-page="connections" data-section="settings" data-title="Connected accounts">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Connected accounts</h1>
+      <p>The platforms the agents publish to and read results from. You can see what each connection can do and when it expires.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 3</span></div>
+  </div>
+
+  <div class="split wide-r" style="gap:32px">
+    <div>
+      <div class="panel">
+        <div class="acct">
+          <div><div class="name">Instagram</div><span class="tag ok" style="margin-top:6px">Connected</span></div>
+          <dl class="kv"><dt>Account</dt><dd>@aztek.global</dd><dt>Permissions</dt><dd>Publish posts and reels, read comments and insights</dd><dt>Expires</dt><dd>2 December 2026, in 56 days</dd></dl>
+          <div class="btns"><button class="btn sm" type="button">Reconnect</button><button class="btn sm" type="button">Disconnect</button></div>
+        </div>
+        <div class="acct">
+          <div><div class="name">Facebook</div><span class="tag ok" style="margin-top:6px">Connected</span></div>
+          <dl class="kv"><dt>Account</dt><dd>Aztek Global (page)</dd><dt>Permissions</dt><dd>Publish posts, read comments, messages and insights</dd><dt>Expires</dt><dd>2 December 2026, in 56 days</dd></dl>
+          <div class="btns"><button class="btn sm" type="button">Reconnect</button><button class="btn sm" type="button">Disconnect</button></div>
+        </div>
+        <div class="acct soon">
+          <div><div class="name">LinkedIn</div><span class="tag warn" style="margin-top:6px">Expires in 6 days</span></div>
+          <div>
+            <dl class="kv"><dt>Account</dt><dd>Aztek Global (company page)</dd><dt>Permissions</dt><dd>Publish posts and articles, read comments and analytics</dd><dt>Expires</dt><dd>13 October 2026</dd></dl>
+            <p class="small" style="margin-top:10px;color:var(--warn)">Reconnect before it expires, or posts to LinkedIn will be held.</p>
+          </div>
+          <div class="btns"><button class="btn sm primary" type="button">Reconnect</button><button class="btn sm" type="button">Disconnect</button></div>
+        </div>
+        <div class="acct lost">
+          <div><div class="name">YouTube</div><span class="tag danger" style="margin-top:6px">Connection lost</span></div>
+          <div>
+            <dl class="kv"><dt>Account</dt><dd>Aztek Global (channel)</dd><dt>Permissions</dt><dd>None right now. Google ended the access on 5 October.</dd><dt>Expires</dt><dd>Ended</dd></dl>
+            <div class="callout danger" style="margin-top:10px"><b>2 scheduled items are held</b>, including the short due today at 17:00. To fix this, choose Reconnect and sign in on Google's screen. Held items go back to their slots once the channel is connected.</div>
+          </div>
+          <div class="btns"><button class="btn sm primary" type="button">Reconnect</button></div>
+        </div>
+      </div>
+
+      <h3 style="font-size:16px;font-weight:600;margin:30px 0 4px">Measurement accounts</h3>
+      <p class="small muted" style="margin-bottom:12px">Read-only. These feed the visibility page and reports. The agents cannot change anything in them.</p>
+      <div class="panel">
+        <div class="acct">
+          <div><div class="name">Search Console</div><span class="tag ok" style="margin-top:6px">Connected</span></div>
+          <dl class="kv"><dt>Account</dt><dd>aztek.global (domain property)</dd><dt>Permissions</dt><dd>Read search clicks, impressions and page status</dd><dt>Expires</dt><dd>No expiry. Renewed automatically.</dd></dl>
+          <div class="btns"><button class="btn sm" type="button">Reconnect</button><button class="btn sm" type="button">Disconnect</button></div>
+        </div>
+        <div class="acct">
+          <div><div class="name">Analytics</div><span class="tag ok" style="margin-top:6px">Connected</span></div>
+          <dl class="kv"><dt>Account</dt><dd>Aztek Global (web property)</dd><dt>Permissions</dt><dd>Read visits, sources and goals</dd><dt>Expires</dt><dd>No expiry. Renewed automatically.</dd></dl>
+          <div class="btns"><button class="btn sm" type="button">Reconnect</button><button class="btn sm" type="button">Disconnect</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-l">
+      <div class="panel pad">
+        <h2 style="font-size:18px;font-weight:600">Connect an account</h2>
+        <div class="field" style="margin-top:14px">
+          <label for="plat">Platform</label>
+          <select class="input" id="plat"><option>Instagram</option><option>Facebook</option><option>LinkedIn</option><option>YouTube</option><option>Search Console</option><option>Analytics</option></select>
+        </div>
+        <button class="btn primary block" type="button" style="margin-top:14px">Connect</button>
+        <p class="small muted" style="margin-top:10px">Disconnecting takes effect at once. Items scheduled for that account are held.</p>
+      </div>
+      <div>
+        <h3 style="font-size:15px;font-weight:600;margin-bottom:8px">How connecting works</h3>
+        <ol class="stack small sub" style="padding-left:18px;list-style:decimal">
+          <li>Choose a platform and select Connect.</li>
+          <li>The second-factor code is asked first. Enter the 6-digit code from your authenticator app.</li>
+          <li>The platform's own screen opens. You sign in there and agree to the permissions it lists.</li>
+          <li>You return here, and the account shows as connected with its permissions and expiry.</li>
+        </ol>
+        <div class="callout" style="margin-top:14px">You sign in on the platform's own screen. No password is ever typed into this dashboard. If you cancel on the platform's screen, nothing changes and the account shows as Not connected.</div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

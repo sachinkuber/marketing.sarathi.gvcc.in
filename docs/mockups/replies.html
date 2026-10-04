@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reply log — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body data-page="replies" data-title="Reply log" data-section="leads">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Reply log</h1>
+      <p>Routine comments and messages the agent answered on its own, using approved answers only. Unusual or negative ones wait for you.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 4</span></div>
+  </div>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Held for approval</h2><p>2 waiting. These are not sent until you decide.</p><a class="more" href="inbox.html">Open in the inbox</a></div>
+    <div class="panel"><ul class="list">
+      <li><div style="flex:1"><b>Comment on Instagram: "Mine peeled after a month, this is a scam"</b><div class="muted small">Negative. A complaint gets an acknowledgement and an invitation to continue in private, then goes to a person.</div></div><span class="tag danger">Negative</span><a class="btn sm" href="item.html">Review reply</a></li>
+      <li><div style="flex:1"><b>Message on Facebook: "Do you have a studio in Nagpur?"</b><div class="muted small">No approved answer covers this city. Confidence 41%, below the threshold of 70%.</div></div><span class="tag warn">Unusual</span><a class="btn sm" href="item.html">Review reply</a></li>
+    </ul></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Sent automatically</h2><p>Today and yesterday</p></div>
+    <div class="panel"><div style="overflow-x:auto"><table class="t">
+      <thead><tr><th>Time</th><th>Channel</th><th>Question summary</th><th>Answer used</th><th class="num">Confidence</th></tr></thead>
+      <tbody>
+        <tr><td class="nowrap">Today 10:16</td><td>Instagram message</td><td>Where can I find a certified studio in Mumbai</td><td>Where to find certified studios</td><td class="num">92%</td></tr>
+        <tr><td class="nowrap">Today 09:48</td><td>Instagram comment</td><td>How do I book a visit</td><td>How to book a visit</td><td class="num">96%</td></tr>
+        <tr><td class="nowrap">Today 09:05</td><td>Facebook comment</td><td>What is paint protection film</td><td>What paint protection film is</td><td class="num">94%</td></tr>
+        <tr><td class="nowrap">Yesterday 18:22</td><td>Facebook message</td><td>Is window film only for cars</td><td>Window film for homes and offices</td><td class="num">83%</td></tr>
+        <tr><td class="nowrap">Yesterday 15:40</td><td>Instagram comment</td><td>Where do I see more examples</td><td>Where to find more information</td><td class="num">88%</td></tr>
+        <tr><td class="nowrap">Yesterday 11:03</td><td>LinkedIn comment</td><td>How does a studio become a partner</td><td>Becoming a partner studio</td><td class="num">79%</td></tr>
+      </tbody></table></div></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Weekly sample review</h2><p>10 percent of automatic replies this week, picked at random. 3 of 3 shown.</p></div>
+    <div class="callout" style="margin-bottom:14px"><b>What "Wrong" does.</b> That answer is paused at once, so the agent stops using it. An incident is opened for you to review, and the reply goes to the sample record. "Looks right" only records your check.</div>
+    <div class="panel"><ul class="list">
+      <li style="flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>"How do I book a visit"</b><div class="muted small">Instagram comment · Today 09:48 · Answer used: How to book a visit</div><div class="small sub" style="margin-top:6px">Reply sent: "Thanks for asking. You can book a visit from the studio page on aztek.global, or send us a message with your city and we will point you to a studio."</div></div><span class="row"><button class="btn sm ok" type="button">Looks right</button><button class="btn sm danger" type="button">Wrong</button></span></li>
+      <li style="flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>"What is paint protection film"</b><div class="muted small">Facebook comment · Today 09:05 · Answer used: What paint protection film is</div><div class="small sub" style="margin-top:6px">Reply sent: "It is a clear film fitted over car paint to help guard against stone chips and light scratches. A studio can tell you whether it suits your car."</div></div><span class="row"><button class="btn sm ok" type="button">Looks right</button><button class="btn sm danger" type="button">Wrong</button></span></li>
+      <li style="flex-wrap:wrap"><div style="flex:1;min-width:240px"><b>"How does a studio become a partner"</b><div class="muted small">LinkedIn comment · Yesterday 11:03 · Answer used: Becoming a partner studio</div><div class="small sub" style="margin-top:6px">Reply sent: "Thank you for your interest. Please send us a message with your studio name and city, and a person will contact you."</div></div><span class="row"><span class="tag ok">Looks right · checked by you</span></span></li>
+    </ul></div>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

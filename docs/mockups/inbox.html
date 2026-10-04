@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approval inbox — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body data-page="inbox" data-title="Approval inbox">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Approval inbox</h1>
+      <p>Nothing here goes live until you approve it. Items that wait too long are escalated and marked overdue; they are never approved by silence.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 1 · bulk and week approval in phase 3</span></div>
+  </div>
+
+  <div class="row wrap" style="margin-bottom:16px">
+    <div class="seg" role="group" aria-label="Filter">
+      <button type="button" aria-pressed="true">All 7</button>
+      <button type="button" aria-pressed="false">Overdue 2</button>
+      <button type="button" aria-pressed="false">Posts 4</button>
+      <button type="button" aria-pressed="false">Articles 1</button>
+      <button type="button" aria-pressed="false">Replies 1</button>
+      <button type="button" aria-pressed="false">Questions 1</button>
+    </div>
+    <span class="sp muted small">Oldest first</span>
+    <a class="btn" href="calendar.html">Approve a week</a>
+  </div>
+
+  <div class="callout" style="margin-bottom:16px" id="bulkbar">
+    <div class="row wrap"><b>3 selected</b><span class="sub small">All are social posts, which your approval settings allow in bulk. Each is approved against the exact version you saw.</span>
+      <span class="sp row"><button class="btn sm" type="button">Reject selected</button><button class="btn sm primary" type="button">Approve selected</button></span></div>
+  </div>
+
+  <div class="panel">
+    <ul class="inbox">
+      <li class="late"><input type="checkbox" aria-label="Select" checked><div class="thumb t2">IG</div>
+        <div><b><a href="item.html" style="color:inherit">Why paint protection film is not a coating</a></b><div class="muted small">Instagram post · 3 reminders sent · escalated to you</div></div>
+        <div class="right"><span class="tag danger">Overdue · 4 days</span><div class="muted tiny" style="margin-top:3px">All checks passed</div></div></li>
+      <li class="late"><input type="checkbox" aria-label="Select"><div class="thumb t4">in</div>
+        <div><b><a href="item.html" style="color:inherit">What a certified studio does differently</a></b><div class="muted small">LinkedIn article · 3 reminders sent · escalated to you</div></div>
+        <div class="right"><span class="tag danger">Overdue · 3 days</span><div class="muted tiny" style="margin-top:3px">Bulk approval not allowed for articles</div></div></li>
+      <li><input type="checkbox" aria-label="Select" checked><div class="thumb">FB</div>
+        <div><b><a href="item.html" style="color:inherit">Window film for homes: what to ask before you buy</a></b><div class="muted small">Facebook post · reminder 1 sent</div></div>
+        <div class="right"><span class="tag warn">Waiting · 26 hours</span></div></li>
+      <li><input type="checkbox" aria-label="Select" checked><div class="thumb t3">IG</div>
+        <div><b><a href="item.html" style="color:inherit">Installing film: what happens on the day</a></b><div class="muted small">Instagram reel · 2 variants, one picked by the checker</div></div>
+        <div class="right"><span class="tag warn">Waiting · 9 hours</span></div></li>
+      <li><input type="checkbox" aria-label="Select"><div class="thumb t2">YT</div>
+        <div><b><a href="item.html" style="color:inherit">How clear film is kept clear</a></b><div class="muted small">YouTube short · needs a fact: warranty conditions</div></div>
+        <div class="right"><span class="tag warn">Waiting · 6 hours</span></div></li>
+      <li><input type="checkbox" aria-label="Select" disabled><div class="thumb" style="background:#d8dde2;color:#48535d">↩</div>
+        <div><b><a href="item.html" style="color:inherit">Reply to a comment: "Do you have a studio in Pune?"</a></b><div class="muted small">Public reply · no approved answer covers this city</div></div>
+        <div class="right"><span class="tag warn">Waiting · 2 hours</span></div></li>
+      <li><input type="checkbox" aria-label="Select" disabled><div class="thumb" style="background:#d8dde2;color:#48535d">?</div>
+        <div><b><a href="item.html" style="color:inherit">Question from the research agent</a></b><div class="muted small">"Can we say the film is self-healing?" Needs your answer, not an approval.</div></div>
+        <div class="right"><span class="tag info">Question</span></div></li>
+    </ul>
+  </div>
+  <p class="muted small" style="margin-top:12px">Reminders and the overdue limit are set per brand in <a href="approvals-settings.html">Approval settings</a>. Defaults: reminders after 24 hours and every 24 hours after that, three of them, then escalation.</p>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

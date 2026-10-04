@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>.seg{flex-wrap:wrap}.src .tag{justify-self:start}
+.steps.seven > li{font-size:13.5px}
+.q{padding:18px 0;border-bottom:1px solid var(--line-2)}
+.q:last-child{border-bottom:0}
+.q .why{color:var(--ink-3);font-size:13.5px;margin-top:2px}
+.src{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 14px;align-items:center}
+@media (max-width:980px){.steps.seven{flex-direction:column;gap:10px}.steps.seven>li{padding:0 0 0 26px}.steps.seven>li::before{display:none}.steps.seven>li::after{top:3px}.src{grid-template-columns:auto 1fr}.src .tag{grid-column:2}}
+</style>
+</head>
+<body data-page="onboarding" data-nav="home" data-title="Onboarding">
+<main id="content">
+  <div class="page-head">
+    <div><h1>Onboarding: Aztek Global</h1><p>Seven stages, one page. You are on the questionnaire. Nothing is published until the strategy brief is approved.</p></div>
+    <div class="actions"><span class="phase">Phase 2</span></div>
+  </div>
+
+  <ol class="steps seven" aria-label="Onboarding stages">
+    <li class="done"><b>Intake</b>Site and links added</li>
+    <li class="done"><b>Research</b>5 of 6 sources read</li>
+    <li class="done"><b>Draft profile</b>Reviewed</li>
+    <li class="now"><b>Questionnaire</b>14 of 24 answered</li>
+    <li><b>Verified facts</b>Not started</li>
+    <li><b>Strategy brief</b>Not started</li>
+    <li><b>Approval</b>Not started</li>
+  </ol>
+
+  <section class="sec" aria-labelledby="h-res">
+    <div class="sec-head"><h2 id="h-res">Research progress</h2><p>Finished. You can leave this page and come back.</p></div>
+    <div class="panel"><ul class="list">
+      <li><div class="src" style="width:100%"><span class="dot ok"></span><div><b>Website: aztek.global</b><div class="muted small">38 pages read</div></div><span class="tag ok">Read</span></div></li>
+      <li><div class="src" style="width:100%"><span class="dot ok"></span><div><b>Instagram profile</b><div class="muted small">Bio and recent posts read</div></div><span class="tag ok">Read</span></div></li>
+      <li><div class="src" style="width:100%"><span class="dot ok"></span><div><b>Facebook page</b><div class="muted small">About section and recent posts read</div></div><span class="tag ok">Read</span></div></li>
+      <li><div class="src" style="width:100%"><span class="dot ok"></span><div><b>LinkedIn page</b><div class="muted small">About section read</div></div><span class="tag ok">Read</span></div></li>
+      <li><div class="src" style="width:100%"><span class="dot ok"></span><div><b>Product brochure (PDF)</b><div class="muted small">12 pages read</div></div><span class="tag ok">Read</span></div></li>
+      <li><div class="src" style="width:100%"><span class="dot danger"></span><div><b>YouTube channel</b><div class="muted small">Could not be read. The channel link did not open. What this means: nothing from the channel is in the draft profile, so the questions below ask about it instead.</div></div><span class="tag danger">Could not read</span></div></li>
+    </ul></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" type="button">Try the YouTube link again</button><button class="btn sm ghost" type="button">Change the link</button></div>
+  </section>
+
+  <section class="sec" aria-labelledby="h-q">
+    <div class="sec-head"><h2 id="h-q">Questionnaire</h2><p>6 of the remaining questions. Only the gaps are asked.</p></div>
+    <div class="callout" style="margin-bottom:6px">Answers marked <b>Guess</b> were suggested from research. Check each one. A guess is not a fact until you confirm it.</div>
+    <div class="panel pad">
+      <div class="q"><div class="field"><label for="q1">Which products should the first 90 days focus on?</label>
+        <div class="checks"><label><input type="checkbox" checked> Paint protection film</label><label><input type="checkbox" checked> Architectural window film</label><label><input type="checkbox"> Both equally</label></div></div>
+        <p class="why">Why we ask: it decides what the content calendar covers first. <span class="tag info plain">Guess</span></p></div>
+      <div class="q"><div class="field"><label for="q2">Who do you most want to reach?</label>
+        <select class="input" id="q2"><option>Car owners</option><option selected>Installers and studios who could join as partners</option><option>Distributors abroad</option></select></div>
+        <p class="why">Why we ask: it sets the tone and the call to action on most posts. <span class="tag info plain">Guess</span></p></div>
+      <div class="q"><div class="field"><label for="q3">Which channel matters most right now?</label>
+        <div class="seg" role="group" aria-label="Channel"><button type="button" aria-pressed="true">Instagram</button><button type="button" aria-pressed="false">Facebook</button><button type="button" aria-pressed="false">LinkedIn</button><button type="button" aria-pressed="false">YouTube</button></div></div>
+        <p class="why">Why we ask: it decides where the first posts go and how often. <span class="tag info plain">Guess</span></p></div>
+      <div class="q"><div class="field"><label for="q4">How should a car owner be told where to buy or fit the film?</label>
+        <select class="input" id="q4"><option>Choose one</option><option>Send them to the studio finder on the website</option><option>Ask them to send a message and a person replies</option><option>Both</option></select></div>
+        <p class="why">Why we ask: a lead needs a clear next step, and we will not invent one. Not answered yet.</p></div>
+      <div class="q"><div class="field"><label for="q5">What do you want us to say about the YouTube channel?</label>
+        <textarea class="input" id="q5" placeholder="For example: is it active, and what is it for?"></textarea></div>
+        <p class="why">Why we ask: the channel could not be read, so we know nothing about it. Not answered yet.</p></div>
+      <div class="q"><div class="field"><label for="q6">Is there a topic we should avoid talking about, besides what the safety rules already cover?</label>
+        <textarea class="input" id="q6">Pricing and discounts.</textarea></div>
+        <p class="why">Why we ask: it feeds the safety rulebook. You can edit the rulebook later. <span class="tag info plain">Guess</span></p></div>
+    </div>
+    <div class="row wrap" style="margin-top:14px;gap:14px">
+      <div style="flex:1;min-width:220px"><div class="small"><b>14 of 24 answered</b> <span class="muted">· saved a minute ago</span></div><div class="meter"><i style="width:58%"></i></div></div>
+      <button class="btn" type="button">Save and return later</button>
+      <a class="btn primary" href="profile.html">Continue to verified facts</a>
+    </div>
+    <p class="muted small" style="margin-top:8px">In the live product, Continue stays off until every required question is answered. Answers save as they are typed.</p>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

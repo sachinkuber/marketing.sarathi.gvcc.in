@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link domains — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>.url{word-break:break-all;background:var(--ground);border:1px solid var(--line);border-radius:var(--radius-s);padding:10px 12px;font-size:14px}.url b{color:var(--primary-dark);font-weight:600}</style>
+</head>
+<body data-page="domains" data-title="Link domains" data-section="settings">
+<main id="content">
+  <div class="page-head">
+    <div>
+      <h1>Link domains</h1>
+      <p>The sites content may link to. A domain must be approved here before any item with a link to it can go live.</p>
+    </div>
+    <div class="actions"><span class="phase">Phase 3</span></div>
+  </div>
+
+  <div class="panel"><div style="overflow-x:auto"><table class="t">
+    <thead><tr><th>Domain</th><th>Used for</th><th>Added</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      <tr><td><b>aztek.global</b></td><td>The main website</td><td class="nowrap">Pilot start</td><td><span class="tag ok">Approved</span></td><td><button class="btn sm" type="button">Remove</button></td></tr>
+      <tr><td><b>instagram.com/aztek.global</b></td><td>The brand's social profile</td><td class="nowrap">Pilot start</td><td><span class="tag ok">Approved</span></td><td><button class="btn sm" type="button">Remove</button></td></tr>
+      <tr><td><b>events.example.org</b></td><td>An event page a studio wants to link</td><td class="nowrap">5 Oct 2026</td><td><span class="tag warn">Pending your approval</span></td><td class="nowrap"><button class="btn sm primary" type="button">Approve</button> <button class="btn sm" type="button">Reject</button></td></tr>
+    </tbody></table></div></div>
+  <p class="muted small" style="margin-top:10px">Until the pending domain is approved, any item that links to it is held at the format check.</p>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Add a domain</h2></div>
+    <form class="panel pad" onsubmit="return false" style="max-width:720px"><div class="row wrap" style="align-items:end">
+      <div class="field" style="flex:1;min-width:220px"><label for="dom">Domain</label><input id="dom" class="input" placeholder="example.com"><span class="hint">Only the domain, without the page address</span></div>
+      <div class="field" style="flex:1;min-width:220px"><label for="why">What it is for</label><input id="why" class="input" placeholder="Partner studio website"></div>
+      <button class="btn primary" type="submit">Add domain</button></div></form>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>How links are checked</h2></div>
+    <div class="grid2">
+      <div class="stack">
+        <p>Every link in every item is checked against this list before it can go live. A link to a domain that is not approved fails the check and the item does not reach the approver.</p>
+        <p>The product then adds the tracking tags itself. Nobody types them by hand. They are all lowercase, with words joined by hyphens.</p>
+      </div>
+      <div class="stack">
+        <div class="small strong">Example: a link in an Instagram post, as tagged</div>
+        <div class="url">https://aztek.global/studios<b>?utm_source=instagram&amp;utm_medium=organic-social&amp;utm_campaign=aztek-leads-202610-ppf-monsoon&amp;utm_content=item-0417</b></div>
+        <div class="row wrap"><span class="tag ok">Domain approved</span><span class="tag info">Tagged automatically</span></div>
+        <p class="muted small">utm_term is added only for paid items. Campaign names follow brand, objective, month and name.</p>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

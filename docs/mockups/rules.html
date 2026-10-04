@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Safety rules — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 12px;font-size:14px}.wrap-t{overflow-x:auto}.wrap-t table{min-width:560px}</style>
+</head>
+<body data-page="rules" data-section="settings" data-title="Safety rules">
+<main id="content">
+  <div class="page-head">
+    <div><h1>Safety rules</h1><p>What the agents must never say or do for Aztek Global. Every item is checked before anything is approved.</p></div>
+    <div class="actions"><span class="phase">Phase 2</span></div>
+  </div>
+
+  <div class="callout danger"><b>Disparaging a competitor is never allowed.</b> This rule is fixed and cannot be turned off. Naming a competitor at all is controlled by the list below.</div>
+
+  <section class="sec" aria-labelledby="h1"><div class="sec-head"><h2 id="h1">Forbidden topics and claims</h2><p>Content that touches these is blocked</p></div>
+    <div class="panel"><ul class="list">
+      <li><div><b>Prices, discounts and offers</b><div class="muted small">Not stated unless a person supplies and confirms them</div></div><button class="btn sm sp" type="button">Edit</button></li>
+      <li><div><b>Warranty terms and guarantees</b><div class="muted small">Not stated unless confirmed on the verified-facts list</div></div><button class="btn sm sp" type="button">Edit</button></li>
+      <li><div><b>Claims that are not on the verified-facts list</b><div class="muted small">Numbers, awards, customers and results</div></div><button class="btn sm sp" type="button">Edit</button></li>
+      <li><div><b>Comparisons that say another product is worse</b><div class="muted small">Always blocked</div></div><span class="tag danger sp">Fixed</span></li>
+    </ul></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" type="button">Add a topic or claim</button></div></section>
+
+  <section class="sec" aria-labelledby="h2"><div class="sec-head"><h2 id="h2">Competitors not to be named</h2><p>The five names below are still to be confirmed</p></div>
+    <div class="panel pad stack" style="gap:14px">
+      <div class="chips"><span class="chip">UltrashieldX <span class="tag warn plain">To be confirmed</span></span><span class="chip">Cosmo PPF / Sunshield <span class="tag warn plain">To be confirmed</span></span><span class="chip">Intakt PPF <span class="tag warn plain">To be confirmed</span></span><span class="chip">XPEL <span class="tag warn plain">To be confirmed</span></span><span class="chip">3M India <span class="tag warn plain">To be confirmed</span></span></div>
+      <div class="row wrap"><button class="btn sm primary" type="button">Confirm the list</button><button class="btn sm" type="button">Add a name</button><span class="muted small">Until confirmed, the names are treated as forbidden anyway.</span></div>
+    </div></section>
+
+  <section class="sec grid2" style="gap:44px" aria-label="Tone and words">
+    <div><div class="sec-head"><h2>Tone limits</h2></div>
+      <div class="panel"><ul class="list">
+        <li>Plain and practical. No superlatives such as best or number one.</li>
+        <li>No fear tactics about damage or theft.</li>
+        <li>No pressure to buy now.</li>
+      </ul></div></div>
+    <div><div class="sec-head"><h2>Words to avoid</h2></div>
+      <div class="panel pad stack" style="gap:12px"><div class="chips"><span class="chip">best</span><span class="chip">cheapest</span><span class="chip">guaranteed</span><span class="chip">unbreakable</span><span class="chip">permanent</span><span class="chip">number one</span></div><div class="row"><button class="btn sm" type="button">Add a word</button></div></div></div>
+  </section>
+
+  <section class="sec" aria-labelledby="h3"><div class="sec-head"><h2 id="h3">Pause dates</h2><p>Nothing is posted on these dates</p><button class="btn sm sp" type="button" style="margin-left:auto">Add a pause date</button></div>
+    <div class="panel wrap-t"><table class="t">
+      <thead><tr><th>Dates</th><th>Reason</th><th>Applies to</th><th></th></tr></thead>
+      <tbody>
+        <tr><td>20 to 22 Oct 2026</td><td>Diwali holiday</td><td>All channels</td><td class="right"><button class="btn sm" type="button">Remove</button></td></tr>
+        <tr><td>25 Dec 2026</td><td>Public holiday</td><td>All channels</td><td class="right"><button class="btn sm" type="button">Remove</button></td></tr>
+        <tr><td>26 Jan 2027</td><td>Republic Day</td><td>Instagram, Facebook</td><td class="right"><button class="btn sm" type="button">Remove</button></td></tr>
+      </tbody></table></div></section>
+
+  <section class="sec" aria-labelledby="h4"><div class="sec-head"><h2 id="h4">Pause all scheduled posts</h2></div>
+    <div class="panel pad row" style="gap:16px;align-items:flex-start"><span class="switch" role="switch" aria-checked="false" aria-label="Pause all scheduled posts" tabindex="0"></span>
+      <div><b>Off</b><p class="muted small" style="margin-top:2px">Turn this on to hold every scheduled post on every channel. Nothing is deleted and nothing is published. Turn it off and the held posts return to the calendar for you to approve again. For a full stop that also halts the agents, use the kill switch.</p></div></div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>
