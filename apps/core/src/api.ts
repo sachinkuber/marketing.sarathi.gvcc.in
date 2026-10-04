@@ -63,6 +63,7 @@ export function createApi(
   })
   registerBrandRoutes(table, { pool: deps.pool })
   registerUserRoutes(table, {
+    auth: deps.auth,
     pool: deps.pool,
     mailer: deps.mailer,
     audit: deps.audit,

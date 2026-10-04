@@ -1,12 +1,13 @@
 import type { Pool } from '@mkt/db'
 import { z } from 'zod'
+import { verifySecondFactorCode } from '../access/step-up.ts'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
 import { createInvite } from '../auth/invites.ts'
-import { emailHash } from '../auth/options.ts'
+import { emailHash, type Auth } from '../auth/options.ts'
 import { principalOf } from '../auth/session.ts'
 import type { AuditSink, Mailer } from '../ports.ts'
-import { listMembers } from '../users/service.ts'
+import { changeMemberRole, listMembers, removeMember } from '../users/service.ts'
 import { inputOf, validate } from '../validate.ts'
 
 export const ROLES = ['brand_admin', 'approver', 'sales_contact', 'viewer'] as const
@@ -14,7 +15,13 @@ export const ROLES = ['brand_admin', 'approver', 'sales_contact', 'viewer'] as c
 const brandParams = z.strictObject({ brandId: z.uuid() })
 const inviteBody = z.strictObject({ email: z.email().max(254), role: z.enum(ROLES) })
 
+const memberParams = z.strictObject({ brandId: z.uuid(), userId: z.uuid() })
+const code = z.string().regex(/^\d{6}$/)
+const roleBody = z.strictObject({ role: z.enum(ROLES), code })
+const removeBody = z.strictObject({ code })
+
 export interface UserRouteDeps {
+  auth: Auth
   pool: Pool
   mailer: Mailer
   audit: AuditSink
@@ -65,6 +72,57 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
             }),
         })
         res.status(201).json({ id: invite.id, expiresAt: invite.expiresAt })
+      },
+    ],
+  })
+
+  table.add({
+    method: 'patch',
+    path: '/brands/:brandId/users/:userId',
+    access: { kind: 'permission', permission: 'manage_users' },
+    summary: 'Change a person’s role in a brand (asks for the actor’s own code)',
+    handlers: [
+      validate({ params: memberParams, body: roleBody }),
+      async (req, res) => {
+        const { body, params } = inputOf<{
+          body: z.infer<typeof roleBody>
+          params: z.infer<typeof memberParams>
+        }>(res)
+        const actor = principalOf(res)
+        await verifySecondFactorCode(deps.auth, req, body.code)
+        const result = await changeMemberRole(deps.pool, deps.audit, {
+          brandId: brandContextOf(res).brandId,
+          actorId: actor.userId,
+          actorIsPlatformOwner: actor.isPlatformOwner,
+          targetId: params.userId,
+          role: body.role,
+        })
+        res.json({ userId: result.userId, role: result.role })
+      },
+    ],
+  })
+
+  table.add({
+    method: 'delete',
+    path: '/brands/:brandId/users/:userId',
+    access: { kind: 'permission', permission: 'manage_users' },
+    summary: 'Remove a person from a brand (asks for the actor’s own code)',
+    handlers: [
+      validate({ params: memberParams, body: removeBody }),
+      async (req, res) => {
+        const { body, params } = inputOf<{
+          body: z.infer<typeof removeBody>
+          params: z.infer<typeof memberParams>
+        }>(res)
+        const actor = principalOf(res)
+        await verifySecondFactorCode(deps.auth, req, body.code)
+        await removeMember(deps.pool, deps.audit, {
+          brandId: brandContextOf(res).brandId,
+          actorId: actor.userId,
+          actorIsPlatformOwner: actor.isPlatformOwner,
+          targetId: params.userId,
+        })
+        res.status(204).end()
       },
     ],
   })
