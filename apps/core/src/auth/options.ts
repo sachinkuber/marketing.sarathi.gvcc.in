@@ -122,6 +122,17 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         if (ctx.path === '/two-factor/disable') {
           throw new APIError('FORBIDDEN', { message: 'The second factor cannot be turned off.' })
         }
+        // SEC-1 and spec 7: every sign-in asks for the second factor. With trustDevice the library would
+        // set a signed trust_device cookie and skip the second factor from that browser for 30 days.
+        // That flag on these routes is the only thing in the library that creates the cookie.
+        if (
+          SECOND_FACTOR_PATHS.includes(ctx.path) &&
+          (ctx.body as { trustDevice?: unknown } | undefined)?.trustDevice
+        ) {
+          throw new APIError('FORBIDDEN', {
+            message: 'A device cannot be remembered; the second factor is asked every time.',
+          })
+        }
         const key = await limitedKey(ctx)
         if (key && deps.limiter.check(key) > 0) {
           const email = bodyEmail(ctx.body)
