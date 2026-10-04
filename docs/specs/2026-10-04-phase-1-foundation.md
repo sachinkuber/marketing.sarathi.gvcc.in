@@ -2,14 +2,15 @@
 
 | Document control | |
 |---|---|
-| Version | 4 |
+| Version | 5 |
 | Status | **Approved** |
-| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 4 approved"). Replaces version 3. |
+| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 5 approved"). Replaces version 4. The change was approved as described in the queue trial findings, section 5. |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
 | Canonical source | `docs/specs/2026-10-04-phase-1-foundation.md`. The Word file is generated from it. |
 | Implements | Architecture version 2, section 19, phase 1. Master PRD version 3. App flow version 2. Tech stack version 1. All approved on 2026-10-04. |
+| Changes in version 5 | The per-brand job limit is enforced per worker process, not globally, following the queue trial (`docs/trials/2026-10-04-queue-trial.md`). Sections 3, 9.2, 9.3 and 19 only. |
 | Changes in version 4 | Stack replaced by the approved Tech stack version 1 (section 3). Phase 1 items from the approved App flow version 2 added: approval reminders and escalation, approval settings, the overdue pop-up and banner, the alerts screen and the Home layout (sections 2, 5, 8, 10.6, 15). Four acceptance tests and one work package added. |
 | Changes in version 3 | Queue design made consistent: an opaque scheduling key per brand, the queue library's own heartbeats and group concurrency, and low-latency dispatch. Job tokens bound to one attempt. Honest guarantee about repeated model calls, with a model-call ledger. Four acceptance tests added or reworded. |
 | Changes in version 2 | Exact content-hash rules; immutable payload separated from lifecycle state; pinned stack versions; sign-in schema as a controlled migration; job inputs moved out of the queue; expanded acceptance tests with measurable load criteria; corrected work packages. |
@@ -91,7 +92,7 @@ The stack is set by the approved **Tech stack version 1** (`docs/tech-stack/2026
 **Findings from checking the libraries**
 
 - **Passkeys.** The sign-in library enforces the second factor on password sign-in but not on passkey sign-in by default. Phase 1 ships password plus authenticator-app code only. Passkeys are added later with the extra enforcement written and tested. This narrows architecture decision 006 for phase 1.
-- **Queue: correction to version 2 of this spec.** Version 2 said the queue library has no worker heartbeat and no per-brand control. That was wrong. Version 12 provides automatic worker heartbeats, a concurrency limit per job group enforced in the database across all workers, and dispatch by database notification. Phase 1 uses these and writes no heartbeat or fairness code of its own (section 9). The documentation checked was for the newest release; package 0 confirms each feature on the pinned 12.30.0.
+- **Queue: correction to version 2 of this spec.** Version 2 said the queue library has no worker heartbeat and no per-brand control. That was wrong. Version 12 provides automatic worker heartbeats, concurrency limits per job group, and dispatch by database notification. Phase 1 uses these and writes no heartbeat or fairness code of its own (section 9). A trial on the pinned 12.30.0 confirmed heartbeats, transactional send, dead letters and notification dispatch. It also showed that the global group limit is not strict, which is why section 9.2 uses the per-process limit.
 
 ## 4. Repository layout
 
@@ -220,8 +221,8 @@ Implements architecture 7.
 | Attempts and waits | The library's retry limit and growing delay |
 | Dead letter | A dead-letter queue per class; listed on the dashboard with requeue and cancel |
 | Priority | One queue per class; workers drain higher classes first |
-| Per-brand concurrency | The library's group concurrency limit, keyed on the scheduling key and enforced in the database across all workers |
-| Fairness | A brand at its limit is skipped by the fetch, so a large backlog in one brand cannot occupy workers needed by another. Strict rotation between brands is not built. Test 29 decides whether it is needed. |
+| Per-brand concurrency | The library's per-process group limit, keyed on the scheduling key. It is exact inside one worker process. Each process is given the brand's cap divided by the number of worker processes for that job class, so the total never exceeds the cap. The number of processes per class is fixed in configuration. The library's global group limit is not used: the trial showed it is exceeded when several job slots fetch at once. |
+| Fairness | Every worker process runs several job slots, never one. A brand at its limit is skipped, so a large backlog in one brand cannot occupy slots needed by another. Strict rotation between brands is not built. Test 29 proves this, run with one worker process and with two. |
 | Low-latency dispatch | Interactive and publishing queues use database notification, so a worker is woken when a job arrives. Listening needs its own long-lived database connection, which does not go through the transaction pooler. Polling remains as a backstop. Production and bulk queues poll. |
 | Backpressure | The core checks queue depth before creating production and bulk jobs; a shared limiter slows workers on a provider rate limit |
 | Cancellation | A flag in `job_control`, returned to the worker by the core before each model call, between steps and before posting a result |
@@ -237,7 +238,7 @@ Implements architecture 7.
 | Production | Polling every 2 seconds | 90 seconds | 30 seconds | 30 minutes | 3 |
 | Bulk | Polling every 2 seconds | 90 seconds | 30 seconds | 2 hours | 3 |
 
-These match architecture 7.2: a refresh every 20 or 30 seconds, and a job treated as abandoned after three missed refreshes. Group concurrency per brand starts at 2 interactive, 2 publishing, 3 production and 1 bulk.
+These match architecture 7.2: a refresh every 20 or 30 seconds, and a job treated as abandoned after three missed refreshes. The per-brand caps start at 2 interactive, 2 publishing, 3 production and 1 bulk. Phase 1 runs one worker process per job class, so each process is given the whole cap. With more processes, the cap is divided between them; a cap smaller than the number of processes is not allowed.
 
 ### 9.4 Attempts and the attempt token
 
@@ -573,7 +574,7 @@ Sizes are relative: S small, M medium, L large.
 
 | # | Risk | Response |
 |---|---|---|
-| 1 | The queue library's group concurrency does not prevent one brand delaying another | Test 29 decides. If it fails, add rotation between brands in the fetch, or fall back to our own job table behind the same interface. |
+| 1 | The per-process limit does not keep one brand from delaying another under real load | The trial showed it does at small scale. Test 29 decides at full scale. If it fails, add rotation between brands, or fall back to our own job table behind the same interface. |
 | 2 | A pinned version does not work with another, or the pinned queue release lacks a feature section 9 relies on | Package 0 confirms the set and each queue feature; any substitution is recorded here and in the Tech stack document before other work starts |
 | 3 | The shared server has too little headroom | Inspect before deployment; move to a separate server if so |
 | 4 | Row-level security is bypassed by a forgotten code path | Forced policies, write conditions, brand-scoped foreign keys, the `withBrand` build check and role-level tests |

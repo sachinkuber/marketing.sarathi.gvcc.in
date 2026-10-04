@@ -663,6 +663,6 @@ New workflows only. `Sarathi Access Sync` and `Sarathi — Jira CEO snapshot` ar
 
 ## 22. What comes next
 
-1. Phase 1 spec: `docs/specs/2026-10-04-phase-1-foundation.md`, version 4, approved 2026-10-04. It tightens section 13.3: the worker's token is bound to one attempt of a job, not only to the job.
+1. Phase 1 spec: `docs/specs/2026-10-04-phase-1-foundation.md`, version 5, approved 2026-10-04. It tightens section 13.3: the worker's token is bound to one attempt of a job, not only to the job.
 2. An estimate per phase.
 3. Phase 1 implementation plan, then build.

@@ -5,7 +5,7 @@
 | Date | 2026-10-04 |
 | Prepared by | Claude Code |
 | Purpose | Check, before the milestone 1 task plan is written, that the queue library behaves as Phase 1 spec version 4, section 9, assumes |
-| Status | Findings for the owner. One finding needs a change to the approved spec. |
+| Status | Acted on. The owner approved Phase 1 spec version 5 on 2026-10-04, which makes the change in section 5. |
 
 ## 1. What was tested
 
