@@ -1190,7 +1190,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
     const scoped = stack.core.routes.list().filter((r) => r.path.includes(':brandId'))
-    expect(scoped.length).toBeGreaterThanOrEqual(2)
+    expect(scoped.length).toBeGreaterThanOrEqual(1) // raised as each users route arrives (Tasks 6 and 7)
   })
 
   it('answers 404 to a member of brand A for every route when the path names brand B', async () => {
