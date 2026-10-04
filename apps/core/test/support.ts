@@ -46,21 +46,27 @@ export interface Stack {
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   server: TestServer
-  // What the service logged at level error and above, one JSON line each.
+  // What the service logged at level warn and above, one JSON line each.
   logs: string[]
   newClient(): TestClient
   close(): Promise<void>
 }
 
 export async function createStack(
-  options: { now?: () => number; mailer?: MemoryMailer | ThrowingMailer } = {},
+  options: {
+    now?: () => number
+    mailer?: MemoryMailer | ThrowingMailer
+    audit?: MemoryAudit
+    // Keep the library's own log lines, routed as in production, instead of switching them off.
+    libraryLog?: boolean
+  } = {},
 ): Promise<Stack> {
   await requireDatabase()
   const db = await createTestDatabase()
   const appPool = createPool(db.urlFor('app'))
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = options.mailer ?? new MemoryMailer()
-  const audit = new MemoryAudit()
+  const audit = options.audit ?? new MemoryAudit()
   const logs: string[] = []
   const limiter = new AttemptLimiter({
     maxFailures: LOCK_MAX_FAILURES,
@@ -78,13 +84,13 @@ export async function createStack(
   }
   const core = buildCore({
     config,
-    logger: createLogger('error', { write: (line: string) => void logs.push(line) }),
+    logger: createLogger('warn', { write: (line: string) => void logs.push(line) }),
     appPool,
     authPool,
     mailer,
     audit,
     limiter,
-    authLogger: { disabled: true },
+    authLogger: options.libraryLog ? undefined : { disabled: true },
   })
   const server = await startTestServer(core.app)
   return {

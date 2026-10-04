@@ -9,6 +9,7 @@ import { AttemptLimiter } from './auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from './auth/policy.ts'
 import { createAuth, type Auth } from './auth/options.ts'
 import type { Config } from './config.ts'
+import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 
@@ -20,6 +21,7 @@ export interface CoreDeps {
   mailer: Mailer
   audit: AuditSink
   limiter?: AttemptLimiter
+  // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']
 }
 
@@ -35,7 +37,7 @@ export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Rout
     mailer: deps.mailer,
     audit: deps.audit,
     limiter,
-    logger: deps.authLogger,
+    logger: deps.authLogger ?? libraryLogger(deps.logger),
     // The error only: the message and the address stay out of the log.
     onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
   })

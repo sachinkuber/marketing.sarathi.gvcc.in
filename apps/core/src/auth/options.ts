@@ -22,7 +22,8 @@ export interface AuthDeps {
   mailer: Mailer
   audit: AuditSink
   limiter: AttemptLimiter
-  // Left unset in production; tests pass { disabled: true } to keep the library's warnings out of the output.
+  // Production passes libraryLogger (the service logger); tests pass { disabled: true }. Unset, the library
+  // writes to the console, outside the redacting logger.
   logger?: BetterAuthOptions['logger']
   // Told when a notification could not be sent. Gets only the error, never the message or the address.
   onMailFailure?: (error: unknown) => void
@@ -101,6 +102,10 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
     basePath: '/api/auth',
     secret: deps.secret,
     logger: deps.logger,
+    // An error that is not the library's own (a database or audit failure) is passed on to the service's
+    // error handler, which logs it and answers 500. Without this the library's router prints it with
+    // console.error, outside the redacting logger.
+    onAPIError: { throw: true },
     trustedOrigins: [deps.baseURL],
     database: deps.pool,
     advanced: {
