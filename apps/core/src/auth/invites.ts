@@ -1,4 +1,4 @@
-import { withBrand, type Pool } from '@mkt/db'
+import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { createHash, randomBytes } from 'node:crypto'
 import { AppError } from '../errors.ts'
 import type { Mailer } from '../ports.ts'
@@ -14,7 +14,17 @@ export function hashInviteToken(token: string): Buffer {
 export async function createInvite(
   pool: Pool,
   mailer: Mailer,
-  input: { brandId: string; email: string; role: Role; invitedBy: string; origin: string },
+  input: {
+    brandId: string
+    email: string
+    role: Role
+    invitedBy: string
+    origin: string
+    // Runs inside the same transaction, after the insert. If it throws (for example the audit entry cannot
+    // be written) the invite is rolled back and no mail is sent.
+    inside?: (client: PoolClient, invite: { id: string }) => Promise<void>
+    onMailFailure?: (error: unknown) => void
+  },
 ): Promise<{ id: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url')
   const email = input.email.trim().toLowerCase()
@@ -25,13 +35,24 @@ export async function createInvite(
        returning id, expires_at`,
       [input.brandId, email, input.role, hashInviteToken(token), INVITE_HOURS, input.invitedBy],
     )
-    return result.rows[0] as { id: string; expires_at: Date }
+    const created = result.rows[0] as { id: string; expires_at: Date }
+    await input.inside?.(client, { id: created.id })
+    return created
   })
-  await mailer.send({
-    to: email,
-    subject: 'You have been invited',
-    text: `You have been invited. Open this link to set a password:\n${input.origin}/accept-invite?token=${token}\nThe link works once and expires in ${INVITE_HOURS} hours.`,
-  })
+  try {
+    await mailer.send({
+      to: email,
+      subject: 'You have been invited',
+      text: `You have been invited. Open this link to set a password:\n${input.origin}/accept-invite?token=${token}\nThe link works once and expires in ${INVITE_HOURS} hours.`,
+    })
+  } catch (error) {
+    // An invite nobody was told about is worse than none: take it back, and tell the person who asked.
+    await withBrand(pool, input.brandId, (client) =>
+      client.query('delete from app.invite where id = $1', [row.id]),
+    )
+    input.onMailFailure?.(error)
+    throw new AppError(502, 'mail_not_sent', 'The invite email could not be sent, so no invite was made.')
+  }
   return { id: row.id, expiresAt: row.expires_at }
 }
 

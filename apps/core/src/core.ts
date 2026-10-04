@@ -63,7 +63,16 @@ export function buildCore(deps: CoreDeps): {
     },
   })
   const { router: api, table: routes } = createApi(
-    { auth, pool: deps.appPool, secret: config.authSecret, limiter, audit: deps.audit },
+    {
+      auth,
+      pool: deps.appPool,
+      secret: config.authSecret,
+      limiter,
+      audit: deps.audit,
+      mailer: deps.mailer,
+      origin: config.publicOrigin,
+      onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+    },
     deps.extraRoutes,
   )
   const app = createApp({

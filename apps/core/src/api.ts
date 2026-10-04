@@ -5,9 +5,10 @@ import { principalOf } from './auth/session.ts'
 import type { AttemptLimiter } from './auth/limiter.ts'
 import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
-import type { AuditSink } from './ports.ts'
+import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
+import { registerUserRoutes } from './routes/users.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -15,6 +16,10 @@ export interface ApiDeps {
   secret: string
   limiter: AttemptLimiter
   audit: AuditSink
+  mailer: Mailer
+  // The configured public origin: invite links never use anything from the request.
+  origin: string
+  onMailFailure?: (error: unknown) => void
 }
 
 export interface ApiContext {
@@ -57,6 +62,13 @@ export function createApi(
     audit: deps.audit,
   })
   registerBrandRoutes(table, { pool: deps.pool })
+  registerUserRoutes(table, {
+    pool: deps.pool,
+    mailer: deps.mailer,
+    audit: deps.audit,
+    origin: deps.origin,
+    onMailFailure: deps.onMailFailure,
+  })
 
   extra?.(table, { auth: deps.auth, pool: deps.pool })
   return { router: table.build({ auth: deps.auth, pool: deps.pool }), table }
