@@ -2,7 +2,7 @@ import { requireDatabase } from '@mkt/test-support'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestDatabase, type TestDatabase } from '../src/testing.ts'
 
-const POLICY = "(brand_id = (current_setting('app.brand_id'::text, true))::uuid)"
+const POLICY = "(brand_id = (NULLIF(current_setting('app.brand_id'::text, true), ''::text))::uuid)"
 
 describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)', () => {
   let db: TestDatabase

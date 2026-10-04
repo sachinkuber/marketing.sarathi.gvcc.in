@@ -1,5 +1,7 @@
 -- Up Migration
 -- Row-level security on every table that carries brand_id, the same policy on each.
+-- nullif: after a transaction that set the brand, a pooled connection keeps an empty setting,
+-- and casting an empty string to uuid would raise an error instead of matching nothing.
 do $$
 declare t text;
 begin
@@ -10,7 +12,7 @@ begin
     execute format('alter table app.%I enable row level security', t);
     execute format('alter table app.%I force row level security', t);
     execute format(
-      'create policy brand_isolation on app.%I using (brand_id = current_setting(''app.brand_id'', true)::uuid) with check (brand_id = current_setting(''app.brand_id'', true)::uuid)',
+      'create policy brand_isolation on app.%I using (brand_id = nullif(current_setting(''app.brand_id'', true), '''')::uuid) with check (brand_id = nullif(current_setting(''app.brand_id'', true), '''')::uuid)',
       t);
   end loop;
 end $$;
@@ -19,8 +21,8 @@ end $$;
 alter table app.brand enable row level security;
 alter table app.brand force row level security;
 create policy brand_isolation on app.brand
-  using (id = current_setting('app.brand_id', true)::uuid)
-  with check (id = current_setting('app.brand_id', true)::uuid);
+  using (id = nullif(current_setting('app.brand_id', true), '')::uuid)
+  with check (id = nullif(current_setting('app.brand_id', true), '')::uuid);
 
 -- Grants. Run-time roles own nothing.
 grant select, insert, update, delete on
