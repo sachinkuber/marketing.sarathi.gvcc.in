@@ -37,17 +37,26 @@ describe('checkRepo', () => {
 
   it('finds a range in a nested package and ignores node_modules', () => {
     dir = mkdtempSync(join(tmpdir(), 'pins-'))
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'root', devDependencies: { a: '1.0.0' } }))
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name: 'root', devDependencies: { a: '1.0.0' } }),
+    )
     mkdirSync(join(dir, 'packages', 'x'), { recursive: true })
     writeFileSync(
       join(dir, 'packages', 'x', 'package.json'),
       JSON.stringify({ name: '@mkt/x', dependencies: { b: '^2.0.0', root: '*' } }),
     )
     mkdirSync(join(dir, 'node_modules', 'dep'), { recursive: true })
-    writeFileSync(join(dir, 'node_modules', 'dep', 'package.json'), JSON.stringify({ dependencies: { c: '^3.0.0' } }))
+    writeFileSync(
+      join(dir, 'node_modules', 'dep', 'package.json'),
+      JSON.stringify({ dependencies: { c: '^3.0.0' } }),
+    )
 
     expect(checkRepo(dir)).toEqual([
-      { file: join('packages', 'x', 'package.json'), problems: [{ section: 'dependencies', name: 'b', spec: '^2.0.0' }] },
+      {
+        file: join('packages', 'x', 'package.json'),
+        problems: [{ section: 'dependencies', name: 'b', spec: '^2.0.0' }],
+      },
     ])
   })
 })
