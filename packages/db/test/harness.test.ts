@@ -22,7 +22,8 @@ describe('test database', () => {
     const result = await db.admin.query(
       "select rolname, rolsuper, rolbypassrls, rolcanlogin from pg_roles where rolname like 'mkt\\_%' order by 1",
     )
-    const byName = Object.fromEntries(result.rows.map((r) => [r.rolname, r]))
+    const byName: Record<string, { rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean }> =
+      Object.fromEntries(result.rows.map((r) => [r.rolname, r]))
     expect(Object.keys(byName).sort()).toEqual([
       'mkt_app',
       'mkt_audit_writer',
@@ -36,7 +37,7 @@ describe('test database', () => {
       expect(role.rolsuper, name).toBe(false)
       expect(role.rolbypassrls, name).toBe(false)
     }
-    expect(byName.mkt_definer.rolcanlogin).toBe(false)
+    expect(byName.mkt_definer?.rolcanlogin).toBe(false)
   })
 
   it('lets the application role connect and refuses it creating a table', async () => {
