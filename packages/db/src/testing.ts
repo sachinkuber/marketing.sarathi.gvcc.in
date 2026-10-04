@@ -64,3 +64,40 @@ export async function createTestDatabase(): Promise<TestDatabase> {
     },
   }
 }
+
+// Creates a brand and one row in each of the main brand-scoped tables, as the table owner, with the brand set.
+export async function seedBrand(db: TestDatabase, id: string, slug: string): Promise<void> {
+  const client = new pg.Client({ connectionString: db.urlFor('migration') })
+  await client.connect()
+  try {
+    await client.query('begin')
+    await client.query("select set_config('app.brand_id', $1, true)", [id])
+    await client.query('insert into app.brand (id, name, slug) values ($1, $2, $2)', [id, slug])
+    await client.query(
+      "insert into app.membership (brand_id, user_id, role) values ($1, gen_random_uuid(), 'approver')",
+      [id],
+    )
+    await client.query(
+      "insert into app.invite (brand_id, email, role, token_hash, expires_at, invited_by) values ($1, $2, 'viewer', gen_random_bytes(32), now() + interval '72 hours', gen_random_uuid())",
+      [id, `${slug}@example.test`],
+    )
+    const item = await client.query(
+      "insert into app.content_item (brand_id, kind) values ($1, 'summary') returning id",
+      [id],
+    )
+    await client.query(
+      "insert into app.content_version (brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1, $2, 1, '{}', 'sha256:x', 'cv1', 'system')",
+      [id, item.rows[0].id],
+    )
+    await client.query(
+      "insert into app.kill_switch (brand_id, scope, active, set_by) values ($1, 'brand', false, gen_random_uuid())",
+      [id],
+    )
+    await client.query('commit')
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined)
+    throw error
+  } finally {
+    await client.end()
+  }
+}
