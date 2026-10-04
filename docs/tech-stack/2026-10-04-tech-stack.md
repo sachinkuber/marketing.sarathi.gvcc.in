@@ -2,9 +2,10 @@
 
 | Document control | |
 |---|---|
-| Version | 1 |
+| Version | 2 |
 | Status | **Approved** |
-| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("tech-stack approved"). The approval covers the two changes of tool and the exceptions in section 3. |
+| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("tech stack version 2 approved"). Version 1 was approved the same day. |
+| Changes in version 2 | ESLint 9.39.5 replaced by 10.10.0. A trial install showed version 9 is marked "no longer supported" by its publisher. |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
@@ -19,7 +20,7 @@ Every figure in this document was looked up on 2026-10-04: weekly downloads and 
 **Rules applied**
 
 1. **Most widely used tool for the job**, measured by weekly downloads, unless an approved architecture decision rules it out.
-2. **A major version that has been out for about a year or more.** Where the newest major is younger than that, the previous one is used.
+2. **A major version that has been out for about a year or more.** Where the newest major is younger than that, the previous one is used, provided its publisher still supports it.
 3. **No release younger than 30 days.** The pinned version is the newest release in the chosen major that was at least 30 days old on 2026-10-04.
 4. **Security fixes are the exception to rule 3.** A security patch is taken as soon as it has been reviewed and the tests pass.
 5. **Fewer moving parts.** Where a tool that already ships with something we use does the job, no extra tool is added.
@@ -80,7 +81,7 @@ Section 3 lists every place where a choice does not fully meet these rules, and 
 |---|---|---|---|---|
 | Unit and integration tests | Vitest | 4.1.11 | 135.4 million a week. The 4 line since October 2025. | More than twice the use of Jest (56.4 million). Version 5 came out on 30 September 2026 and is too new. |
 | Browser tests | Playwright | 1.63.0 | 82.4 million a week, in use since 2020 | About eleven times the use of Cypress (7.3 million) |
-| Code checks | ESLint | 9.39.5 | 193.3 million a week. The 9 line since April 2024. | Version 10 came out in February 2026 |
+| Code checks | ESLint, with typescript-eslint 8.69.0 | 10.10.0 | 193.3 million a week | See section 3. Version 9 is no longer supported by its publisher, so it gets no fixes. |
 | Formatting | Prettier | 3.9.6 | 165.3 million a week. The 3 line since July 2023. | The standard formatter |
 | Secret scanning | gitleaks, in the automated checks | Recorded at setup | — | Stops a key being committed |
 | Automated checks | GitHub Actions | — | Already used for the Aztek site | Depends on owner item A7 (code hosting) |
@@ -104,6 +105,7 @@ Section 3 lists every place where a choice does not fully meet these rules, and 
 | **pg-boss 12.30.0** | Major version 12 is 11 months old, just under a year, and releases come often | The features the approved design relies on (worker heartbeats, per-group concurrency, notification dispatch) were confirmed against the version 12 documentation. Version 10 is older but those features are not confirmed there. | The first work package confirms each feature on this exact version before anything is built on it. The queue sits behind our own interface. |
 | **Next.js 16.3.4** | Major version 16 is 12 months old, right at the limit. Version 15 is older and still maintained. | It matches the Aztek site, so there is one set of conventions to know. | Its bundled documentation is read before any code is written. Version 15.5 is the fallback. |
 | **Anthropic SDK 0.124.0** | Version number below 1.0 | It is the provider's official library and there is no alternative with the same support | The first work package confirms this version works with `claude-opus-5-5`. If it does not, the newest version is used as a stated exception to the 30-day rule. |
+| **ESLint 10.10.0** | Major version 10 is 8 months old, under the one-year rule | Version 9, which met the rule, is marked "no longer supported". An unsupported tool is a worse risk than a younger one. It only checks code; it is not part of the running product. | The release is 30 days old. The TypeScript plugin pinned with it supports version 10. |
 | **PostgreSQL 17.11** | The newest maintenance release, so it may be under 30 days old | Maintenance releases are security and bug fixes (rule 4) | Tested like any other change |
 
 ## 4. What this changes in the approved Phase 1 spec

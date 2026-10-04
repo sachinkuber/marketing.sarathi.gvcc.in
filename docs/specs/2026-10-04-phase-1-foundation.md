@@ -10,6 +10,7 @@
 | Prepared by | Claude Code |
 | Canonical source | `docs/specs/2026-10-04-phase-1-foundation.md`. The Word file is generated from it. |
 | Implements | Architecture version 2, section 19, phase 1. Master PRD version 3. App flow version 2. Tech stack version 1. All approved on 2026-10-04. |
+| Correction after approval | 2026-10-04: section 3 now copies ESLint 10.10.0 from Tech stack version 2, which the owner approved. No other change. |
 | Changes in version 5 | The per-brand job limit is enforced per worker process, not globally, following the queue trial (`docs/trials/2026-10-04-queue-trial.md`). Sections 3, 9.2, 9.3 and 19 only. |
 | Changes in version 4 | Stack replaced by the approved Tech stack version 1 (section 3). Phase 1 items from the approved App flow version 2 added: approval reminders and escalation, approval settings, the overdue pop-up and banner, the alerts screen and the Home layout (sections 2, 5, 8, 10.6, 15). Four acceptance tests and one work package added. |
 | Changes in version 3 | Queue design made consistent: an opaque scheduling key per brand, the queue library's own heartbeats and group concurrency, and low-latency dispatch. Job tokens bound to one attempt. Honest guarantee about repeated model calls, with a model-call ledger. Four acceptance tests added or reworded. |
@@ -48,7 +49,7 @@ Aztek is created as the first brand. A second test brand with its own rows is cr
 
 ## 3. Pinned stack
 
-The stack is set by the approved **Tech stack version 1** (`docs/tech-stack/2026-10-04-tech-stack.md`), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts.
+The stack is set by the approved **Tech stack version 2** (`docs/tech-stack/2026-10-04-tech-stack.md`), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts.
 
 | Component | Selection | Version |
 |---|---|---|
@@ -68,7 +69,7 @@ The stack is set by the approved **Tech stack version 1** (`docs/tech-stack/2026
 | Model SDK | Anthropic TypeScript SDK; model `claude-opus-5-5` | 0.124.0 |
 | Unit and integration tests | Vitest, against a real Postgres of the pinned version | 4.1.11 |
 | Browser tests | Playwright | 1.63.0 |
-| Code checks and formatting | ESLint; Prettier | 9.39.5; 3.9.6 |
+| Code checks and formatting | ESLint; Prettier | 10.10.0; 3.9.6 |
 | Logger | pino with pino-http, with a redaction list | 10.3.1; 11.0.0 |
 | Sending email | Nodemailer | 9.1.1 |
 | Error tracker | Sentry Node SDK; personal data scrubbed before sending | 10.73.0 |

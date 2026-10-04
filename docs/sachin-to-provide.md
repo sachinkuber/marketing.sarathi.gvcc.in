@@ -188,6 +188,7 @@ These are my recommendations from PRD section 21. Each works as a starting point
 | Content guidelines version 2 | Approved as written | 2026-10-04 |
 | Phase 1 spec version 4 | Approved, then replaced by version 5 | 2026-10-04 |
 | Phase 1 spec version 5 | Approved: per-process brand limit, after the queue trial | 2026-10-04 |
+| Tech stack version 2 | Approved: ESLint 10.10.0 in place of the unsupported 9.39.5 | 2026-10-04 |
 | Cost currency | Every cost recorded in both US dollars and Indian rupees | 2026-10-04 |
 | Retention of job inputs and notifications | 90 days | 2026-10-04 |
 | Database schema version 2 | Approved. Later-phase tables stay provisional. | 2026-10-04 |
