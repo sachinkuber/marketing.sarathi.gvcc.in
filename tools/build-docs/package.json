@@ -8,7 +8,7 @@
     "phase1": "node md2docx.js ../../docs/specs/2026-10-04-phase-1-foundation.md ../../docs/specs/phase-1-foundation.docx"
   },
   "dependencies": {
-    "@mermaid-js/mermaid-cli": "*",
-    "docx": "*"
+    "@mermaid-js/mermaid-cli": "12.0.0",
+    "docx": "9.8.1"
   }
 }
