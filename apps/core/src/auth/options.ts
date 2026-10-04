@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { twoFactor } from 'better-auth/plugins'
-import type { AuditSink, Mailer } from '../ports.ts'
+import type { AuditSink, MailMessage, Mailer } from '../ports.ts'
 import { attemptKey, type AttemptLimiter } from './limiter.ts'
 import {
   BACKUP_CODE_COUNT,
@@ -24,6 +24,20 @@ export interface AuthDeps {
   limiter: AttemptLimiter
   // Left unset in production; tests pass { disabled: true } to keep the library's warnings out of the output.
   logger?: BetterAuthOptions['logger']
+  // Told when a notification could not be sent. Gets only the error, never the message or the address.
+  onMailFailure?: (error: unknown) => void
+}
+
+// Mail fails open: a notification that cannot be sent is reported and never changes the answer, so a
+// known and an unknown address still look the same, and a used backup code still signs the person in.
+// The audit sink is the opposite (fail-closed): its calls below are left unguarded on purpose, so an
+// attempt that cannot be recorded is refused.
+async function safeSend(deps: AuthDeps, message: MailMessage): Promise<void> {
+  try {
+    await deps.mailer.send(message)
+  } catch (error) {
+    deps.onMailFailure?.(error)
+  }
 }
 
 const AUDITED: Record<string, string> = {
@@ -102,7 +116,7 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
       resetPasswordTokenExpiresIn: RESET_LINK_SECONDS,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, token }) => {
-        await deps.mailer.send({
+        await safeSend(deps, {
           to: user.email,
           subject: 'Reset your password',
           text: `Open this link to choose a new password:\n${deps.baseURL}/reset-password?token=${token}\nThe link works once and expires in 30 minutes. You will still be asked for your second factor when you sign in.`,
@@ -176,7 +190,7 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
           ...(email ? { detail: { emailHash: emailHash(email) } } : {}),
         })
         if (ctx.path === '/two-factor/verify-backup-code' && !failed && user) {
-          await deps.mailer.send({
+          await safeSend(deps, {
             to: user.email,
             subject: 'A backup code was used to sign in',
             text: 'A backup code was just used to sign in to your account. If this was not you, contact the platform owner.',

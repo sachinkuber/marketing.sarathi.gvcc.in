@@ -13,7 +13,7 @@ import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../src/auth
 import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
 import type { MailMessage } from '../src/ports.ts'
-import { MemoryAudit, MemoryMailer } from '../src/testing.ts'
+import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 
 export interface TestServer {
   url: string
@@ -41,22 +41,27 @@ export interface Stack {
   db: TestDatabase
   appPool: Pool
   authPool: Pool
-  mailer: MemoryMailer
+  mailer: MemoryMailer | ThrowingMailer
   audit: MemoryAudit
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   server: TestServer
+  // What the service logged at level error and above, one JSON line each.
+  logs: string[]
   newClient(): TestClient
   close(): Promise<void>
 }
 
-export async function createStack(options: { now?: () => number } = {}): Promise<Stack> {
+export async function createStack(
+  options: { now?: () => number; mailer?: MemoryMailer | ThrowingMailer } = {},
+): Promise<Stack> {
   await requireDatabase()
   const db = await createTestDatabase()
   const appPool = createPool(db.urlFor('app'))
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
-  const mailer = new MemoryMailer()
+  const mailer = options.mailer ?? new MemoryMailer()
   const audit = new MemoryAudit()
+  const logs: string[] = []
   const limiter = new AttemptLimiter({
     maxFailures: LOCK_MAX_FAILURES,
     windowMs: LOCK_WINDOW_MS,
@@ -73,7 +78,7 @@ export async function createStack(options: { now?: () => number } = {}): Promise
   }
   const core = buildCore({
     config,
-    logger: createLogger('silent'),
+    logger: createLogger('error', { write: (line: string) => void logs.push(line) }),
     appPool,
     authPool,
     mailer,
@@ -91,6 +96,7 @@ export async function createStack(options: { now?: () => number } = {}): Promise
     limiter,
     core,
     server,
+    logs,
     newClient: () => new TestClient(server.url, ORIGIN),
     async close() {
       await server.close()

@@ -36,6 +36,8 @@ export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Rout
     audit: deps.audit,
     limiter,
     logger: deps.authLogger,
+    // The error only: the message and the address stay out of the log.
+    onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
   })
   const guard = requestGuard({
     allowedOrigins: [config.publicOrigin],
