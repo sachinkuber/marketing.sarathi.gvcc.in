@@ -85,13 +85,18 @@ export async function seedBrand(db: TestDatabase, id: string, slug: string): Pro
     await client.query('begin')
     await client.query("select set_config('app.brand_id', $1, true)", [id])
     await client.query('insert into app.brand (id, name, slug) values ($1, $2, $2)', [id, slug])
-    await client.query(
-      "insert into app.membership (brand_id, user_id, role) values ($1, gen_random_uuid(), 'approver')",
-      [id],
+    const user = await client.query(
+      `insert into auth."user" (name, email, "emailVerified") values ($1, $2, true) returning id`,
+      [slug, `${slug}@example.test`],
     )
+    const userId = user.rows[0].id as string
+    await client.query("insert into app.membership (brand_id, user_id, role) values ($1, $2, 'approver')", [
+      id,
+      userId,
+    ])
     await client.query(
-      "insert into app.invite (brand_id, email, role, token_hash, expires_at, invited_by) values ($1, $2, 'viewer', gen_random_bytes(32), now() + interval '72 hours', gen_random_uuid())",
-      [id, `${slug}@example.test`],
+      "insert into app.invite (brand_id, email, role, token_hash, expires_at, invited_by) values ($1, $2, 'viewer', gen_random_bytes(32), now() + interval '72 hours', $3)",
+      [id, `${slug}@example.test`, userId],
     )
     const item = await client.query(
       "insert into app.content_item (brand_id, kind) values ($1, 'summary') returning id",

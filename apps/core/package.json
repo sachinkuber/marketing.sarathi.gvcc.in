@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "auth:schema": "node src/auth/print-schema.ts"
+  },
   "dependencies": {
     "@mkt/db": "*",
     "better-auth": "1.7.2",
