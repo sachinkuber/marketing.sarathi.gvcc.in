@@ -1,0 +1,21 @@
+# Development and test database only. Bound to the machine it runs on; never used in production.
+name: mkt-dev
+services:
+  postgres:
+    # PostgreSQL 17.11
+    image: postgres@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    environment:
+      POSTGRES_USER: mkt
+      POSTGRES_PASSWORD: mkt_dev_only
+      POSTGRES_DB: mkt_dev
+    ports:
+      - '127.0.0.1:54329:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mkt -d mkt_dev']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - mkt_dev_pg:/var/lib/postgresql/data
+volumes:
+  mkt_dev_pg:

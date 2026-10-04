@@ -1,0 +1,15 @@
+{
+  "name": "@mkt/queue-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mkt/test-support": "*",
+    "kysely": "0.29.5",
+    "pg": "8.23.0",
+    "pg-boss": "12.30.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

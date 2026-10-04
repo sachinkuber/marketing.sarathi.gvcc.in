@@ -1,0 +1,8 @@
+node_modules
+package-lock.json
+dist
+coverage
+docs
+*.docx
+*.xlsx
+.superpowers
