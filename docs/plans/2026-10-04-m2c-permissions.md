@@ -41,7 +41,7 @@ Not in this plan, and why:
 - A password, a code, a token or an address must never reach the log or an audit entry; audit entries hold `emailHash`, never the address.
 - The milestone is merged by the executor once its checks pass and its reviews are clean (owner's standing instruction, 2026-10-04); every ruling goes into the pull request and `docs/progress.md`.
 
-## Decisions the owner should confirm
+## Decisions the owner confirmed (all seven accepted, 2026-10-04)
 
 1. **Resetting a second factor is the platform owner's alone.** Spec section 7 and app-flow 5.2 say the platform owner resets it; app-flow 5.3 lists it among the actions of "platform owner, brand admin". The spec is binding, so a brand admin asks the owner. Proposed: follow the spec.
 2. **Nobody can change or remove their own membership through these routes,** and the last brand admin of a brand cannot be demoted or removed (add another admin first). This stops a brand locking itself out. Proposed: accept.
