@@ -29,6 +29,9 @@ create index "twoFactor_userId_idx" on "twoFactor" ("userId");
 
 create unique index "account_issuer_accountId_uidx" on "account" ("issuer", "accountId");
 -- END generated
+-- Back to the default, so nothing after this (or a later migration run in the same transaction, as the
+-- node-pg-migrate command line does by default) lands in auth.
+set local search_path to default;
 
 grant select, insert, update, delete on all tables in schema auth to mkt_app;
 
