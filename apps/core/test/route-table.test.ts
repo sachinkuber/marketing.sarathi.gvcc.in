@@ -121,6 +121,45 @@ describe('RouteTable', () => {
       expect(() => declare('/invites/accept', { kind: 'public' })).not.toThrow()
     })
 
+    it('refuses path syntax beyond literal segments and plain :name parameters', () => {
+      // path-to-regexp (Express 5) reads {optional}, *wildcard, (regex), ? and escapes: any of them can make a
+      // path match brand URLs without the segment rule above seeing it.
+      for (const path of [
+        '/brands{/:id}',
+        '/{brands}/:id',
+        '/brands*rest',
+        '/*rest',
+        '/:x(brands)',
+        '/a.b',
+        '/a%62',
+      ]) {
+        for (const kind of ['enrolled', 'public'] as const) {
+          expect(() => declare(path, { kind }), `${kind} ${path}`).toThrow(/only letters, digits/)
+        }
+      }
+      for (const kind of ['enrolled', 'public'] as const) {
+        expect(() => declare('/x/:brandId?', { kind }), kind).toThrow(
+          /spelled exactly :brandId|only letters, digits/,
+        )
+      }
+    })
+
+    it('allows every legitimate route the service has under the character rule', () => {
+      expect(() => declare('/brands', { kind: 'enrolled' })).not.toThrow()
+      expect(() => declare('/brands/:brandId', { kind: 'member' })).not.toThrow()
+      for (const path of [
+        '/brands/:brandId/users',
+        '/brands/:brandId/users/invites',
+        '/brands/:brandId/users/:userId',
+      ]) {
+        expect(() => declare(path, perm)).not.toThrow()
+      }
+      expect(() => declare('/users/:userId/second-factor/reset', { kind: 'platform_owner' })).not.toThrow()
+      expect(() => declare('/session', { kind: 'signed_in' })).not.toThrow()
+      expect(() => declare('/invites/lookup', { kind: 'public' })).not.toThrow()
+      expect(() => declare('/invites/accept', { kind: 'public' })).not.toThrow()
+    })
+
     it('requires the brand check to start the path', () => {
       expect(() => declare('/things/brands/:brandId/x', { kind: 'member' })).toThrow(
         /must continue|under \/brands/,

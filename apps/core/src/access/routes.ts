@@ -52,6 +52,13 @@ export class RouteTable {
         throw new Error(`${where}: the brands segment must be spelled in lowercase`)
       }
     }
+    // Only literal segments and plain :name parameters. path-to-regexp (Express 5) also reads {optional},
+    // *wildcard, (regex), ? and escapes, any of which can match a brand URL without the rules here seeing it.
+    if (!/^[A-Za-z0-9_\-/:]*$/.test(route.path)) {
+      throw new Error(
+        `${where}: a route path may use only letters, digits, '-', '_', '/' and plain :name parameters`,
+      )
+    }
     const underBrand = segments[0] === 'brands' && segments[1] === ':brandId'
     const brandsAt = segments.indexOf('brands')
     const brandsHasChild = brandsAt >= 0 && brandsAt < segments.length - 1
