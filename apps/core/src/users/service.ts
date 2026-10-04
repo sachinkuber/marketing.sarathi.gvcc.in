@@ -64,13 +64,23 @@ interface Actor {
 }
 
 // Everything below runs in one transaction with the brand set. The brand's membership rows are locked first,
-// so two requests that would together leave the brand with no admin cannot both pass the check.
-async function lockMembers(client: PoolClient, brandId: string) {
+// always in the same order (so two such transactions cannot deadlock), so two requests that would together
+// leave the brand with no admin cannot both pass the check.
+async function lockMembers(client: PoolClient, input: Actor) {
   const result = await client.query(
-    'select user_id, role from app.membership where brand_id = $1 for update',
-    [brandId],
+    'select user_id, role from app.membership where brand_id = $1 order by user_id for update',
+    [input.brandId],
   )
-  return result.rows as { user_id: string; role: Role }[]
+  const members = result.rows as { user_id: string; role: Role }[]
+  // The actor's right to act was read from the session before this transaction. A colleague may have demoted
+  // or removed them since: under the lock, check again, before anything else.
+  if (
+    !input.actorIsPlatformOwner &&
+    !members.some((m) => m.user_id === input.actorId && m.role === 'brand_admin')
+  ) {
+    throw new AppError(403, 'forbidden', 'You do not have permission to do this.')
+  }
+  return members
 }
 
 async function guardTarget(client: PoolClient, input: Actor, members: { user_id: string; role: Role }[]) {
@@ -100,7 +110,7 @@ export async function changeMemberRole(
   input: Actor & { role: Role },
 ): Promise<{ userId: string; role: Role; changed: boolean }> {
   return withBrand(pool, input.brandId, async (client) => {
-    const members = await lockMembers(client, input.brandId)
+    const members = await lockMembers(client, input)
     const target = await guardTarget(client, input, members)
     if (target.role === input.role) return { userId: input.targetId, role: input.role, changed: false }
     if (target.role === 'brand_admin' && lastAdmin(members)) {
@@ -130,7 +140,7 @@ export async function changeMemberRole(
 
 export async function removeMember(pool: Pool, audit: AuditSink, input: Actor): Promise<void> {
   await withBrand(pool, input.brandId, async (client) => {
-    const members = await lockMembers(client, input.brandId)
+    const members = await lockMembers(client, input)
     const target = await guardTarget(client, input, members)
     if (target.role === 'brand_admin' && lastAdmin(members)) {
       throw new AppError(
