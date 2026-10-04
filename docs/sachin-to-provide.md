@@ -25,7 +25,7 @@ None of these stops development. All of them stop deployment.
 | A4 | Off-server backup storage | The storage service and bucket to use, and credentials limited to that bucket | One server is one point of failure. Daily encrypted backups must live somewhere else. A restored backup is part of gate 0. | Open |
 | A5 | Write-once storage for the audit log | A bucket with object lock (no overwrite or delete during retention), or agreement that I choose one | An audit table inside the same database can be altered by anyone who controls the database. The off-server copy is what makes tampering detectable. | Open |
 | A6 | Sending address for notifications | The address the product sends from (for example `noreply@...`) and the sending service or SMTP account | You and later client approvers are told by email when something waits for approval or an alert fires | Open |
-| A7 | Code hosting | A GitHub (or other) repository for this project, and access for me to push | The code and documents currently exist only on your laptop. A remote copy is needed for safety and for automated tests. | Open |
+| A7 | Code hosting | A GitHub (or other) repository for this project, and access for me to push | The code and documents currently exist only on your laptop. A remote copy is needed for safety and for automated tests. | Done |
 | A8 | Permission to commit | A yes or no: may I commit the approved documents and, later, code to the local repository as work progresses? | Nothing has been committed so far because you have not asked for it | Done |
 | A10 | Error-tracking account | A Sentry account (or agreement that I create one) and a project for the product | Errors in the product are reported there so failures are never silent. Personal data is removed before anything is sent. | Open |
 | A11 | Second alert channel | Which channel urgent alerts should also go to, besides email: for example SMS, Telegram or a phone push service | An alert that only goes to email can be missed. You are the only responder. | Open |
@@ -192,3 +192,4 @@ These are my recommendations from PRD section 21. Each works as a starting point
 | Database schema version 2 | Approved. Later-phase tables stay provisional. | 2026-10-04 |
 | Phased implementation plan version 1 | Approved, with its assumption that Claude Code builds and the owner reviews | 2026-10-04 |
 | Permission to commit (A8) | Yes | 2026-10-04 |
+| Code hosting (A7) | Private GitHub repository `sachinkuber/marketing.sarathi.gvcc.in` | 2026-10-04 |
