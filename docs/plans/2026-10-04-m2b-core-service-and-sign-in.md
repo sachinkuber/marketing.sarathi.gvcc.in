@@ -50,7 +50,7 @@ The spec says "idle timeout", "lockout" and so on without figures. These are pro
 | Lockout | 5 failures within 15 minutes lock that key for 15 minutes |
 | Backup codes issued at enrolment | 10, each 10 characters |
 
-## Decisions the owner should confirm
+## Decisions the owner confirmed (all five accepted, 2026-10-04)
 
 1. **Lockout is held in the process's memory.** It resets when the core service restarts. A lockout that survives restarts needs a table that the database schema document does not have. Proposed: accept this in phase 1.
 2. **An invite to an email that already has an account is refused at acceptance** (409). Adding an existing user to a second brand needs a "sign in first" flow that the app-flow document does not describe. Proposed: out of phase 1; the first two brands each have their own users.
