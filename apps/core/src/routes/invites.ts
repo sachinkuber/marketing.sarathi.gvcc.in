@@ -28,14 +28,24 @@ export function inviteRoutes(deps: {
   router.post('/lookup', validate({ body: lookupBody }), async (req, res) => {
     const { body } = inputOf<{ body: z.infer<typeof lookupBody> }>(res)
     const key = attemptKey('/invites/accept', req.ip ?? 'unknown')
-    if (deps.limiter.check(key) > 0)
+    if (deps.limiter.check(key) > 0) {
+      await deps.audit.record({
+        action: 'auth.locked_out',
+        actor: null,
+        outcome: 'failure',
+        detail: { path: '/invites/lookup' },
+      })
       throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
+    }
+    let found: Awaited<ReturnType<typeof lookupInvite>>
     try {
-      res.json(await lookupInvite(deps.pool, body.token))
+      found = await lookupInvite(deps.pool, body.token)
     } catch (error) {
       deps.limiter.fail(key)
+      await deps.audit.record({ action: 'auth.invite_lookup', actor: null, outcome: 'failure' })
       throw error
     }
+    res.json(found)
   })
   router.post('/accept', validate({ body: acceptBody }), async (req, res) => {
     const { body } = inputOf<{ body: z.infer<typeof acceptBody> }>(res)
@@ -49,21 +59,23 @@ export function inviteRoutes(deps: {
       })
       throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
     }
+    let accepted: Awaited<ReturnType<typeof acceptInvite>>
     try {
-      const accepted = await acceptInvite(deps.auth, deps.pool, body)
-      deps.limiter.succeed(key)
-      await deps.audit.record({
-        action: 'auth.invite_accepted',
-        actor: accepted.userId,
-        brandId: accepted.brandId,
-        outcome: 'success',
-      })
-      res.status(201).json({ userId: accepted.userId })
+      accepted = await acceptInvite(deps.auth, deps.pool, body)
     } catch (error) {
       deps.limiter.fail(key)
       await deps.audit.record({ action: 'auth.invite_accepted', actor: null, outcome: 'failure' })
       throw error
     }
+    // The account exists now: a failure to write the audit entry is not a failed attempt.
+    deps.limiter.succeed(key)
+    await deps.audit.record({
+      action: 'auth.invite_accepted',
+      actor: accepted.userId,
+      brandId: accepted.brandId,
+      outcome: 'success',
+    })
+    res.status(201).json({ userId: accepted.userId })
   })
   return router
 }

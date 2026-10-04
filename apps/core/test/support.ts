@@ -172,9 +172,9 @@ export class TestClient {
     if (options.body !== undefined) headers['content-type'] = 'application/json'
     const origin = options.origin === undefined ? this.origin : options.origin
     if (origin) headers.origin = origin
-    if (this.cookies.size > 0) {
-      headers.cookie = [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ')
-    }
+    const cookies = [...this.cookies].map(([name, value]) => `${name}=${value}`)
+    if (options.headers?.cookie) cookies.push(options.headers.cookie)
+    if (cookies.length > 0) headers.cookie = cookies.join('; ')
     if (options.csrf !== false && this.csrf) headers['x-csrf-token'] = this.csrf
     const res = await fetch(this.base + path, {
       method,

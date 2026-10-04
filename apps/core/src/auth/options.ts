@@ -1,7 +1,7 @@
 import type { Pool } from '@mkt/db'
 import { createHash } from 'node:crypto'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { twoFactor } from 'better-auth/plugins'
 import type { AuditSink, Mailer } from '../ports.ts'
 import { attemptKey, type AttemptLimiter } from './limiter.ts'
@@ -34,20 +34,47 @@ const AUDITED: Record<string, string> = {
   '/reset-password': 'auth.password_reset',
 }
 
+function bodyEmail(body: unknown): string | null {
+  const email = (body as { email?: unknown } | undefined)?.email
+  return typeof email === 'string' ? email : null
+}
+
 export function emailHash(email: string): string {
   return createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 16)
 }
 
+type HookContext = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0]
+
+const SECOND_FACTOR_PATHS = ['/two-factor/verify-totp', '/two-factor/verify-backup-code']
+const TWO_FACTOR_COOKIE = 'two_factor'
+
+// The account a second-factor guess is aimed at: the user in the session (enrolment) or the user the
+// pending sign-in belongs to (the signed cookie the library set after the password step names a
+// verification record whose value is the user id). Nothing the caller controls, such as extra cookies,
+// changes it, and a new sign-in does not start a new count.
+async function secondFactorUserId(ctx: HookContext): Promise<string | null> {
+  const session = await getSessionFromCtx(ctx).catch(() => null)
+  if (session?.user.id) return session.user.id
+  const cookie = ctx.context.createAuthCookie(TWO_FACTOR_COOKIE)
+  const signed = await ctx.getSignedCookie(cookie.name, ctx.context.secret)
+  if (!signed) return null
+  const pending = await ctx.context.internalAdapter.findVerificationValue(signed)
+  return pending?.value ?? null
+}
+
 // What a lockout is counted against. Sign-in and recovery: the address. A second-factor guess: the
-// pending sign-in it belongs to, which is named by the cookie the library set after the password step.
-function limitedKey(path: string, body: unknown, headers: Headers | undefined): string | null {
-  const email = (body as { email?: unknown } | undefined)?.email
-  if ((path === '/sign-in/email' || path === '/request-password-reset') && typeof email === 'string') {
-    return attemptKey(path, email)
+// account, shared by the code and backup-code routes.
+async function limitedKey(ctx: HookContext): Promise<string | null> {
+  const email = (ctx.body as { email?: unknown } | undefined)?.email
+  if (
+    (ctx.path === '/sign-in/email' || ctx.path === '/request-password-reset') &&
+    typeof email === 'string'
+  ) {
+    return attemptKey(ctx.path, email)
   }
-  if (path === '/two-factor/verify-totp' || path === '/two-factor/verify-backup-code') {
-    const cookie = headers?.get('cookie')
-    return cookie ? attemptKey(path, createHash('sha256').update(cookie).digest('hex')) : null
+  if (SECOND_FACTOR_PATHS.includes(ctx.path)) {
+    const userId = await secondFactorUserId(ctx)
+    return userId ? attemptKey('/two-factor', userId) : null
   }
   return null
 }
@@ -95,13 +122,14 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         if (ctx.path === '/two-factor/disable') {
           throw new APIError('FORBIDDEN', { message: 'The second factor cannot be turned off.' })
         }
-        const key = limitedKey(ctx.path, ctx.body, ctx.headers)
+        const key = await limitedKey(ctx)
         if (key && deps.limiter.check(key) > 0) {
+          const email = bodyEmail(ctx.body)
           await deps.audit.record({
             action: 'auth.locked_out',
             actor: null,
             outcome: 'failure',
-            detail: { path: ctx.path },
+            detail: { path: ctx.path, ...(email ? { emailHash: emailHash(email) } : {}) },
           })
           throw new APIError('TOO_MANY_REQUESTS', { message: 'Too many attempts. Try again later.' })
         }
@@ -112,15 +140,18 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         const returned = ctx.context.returned
         const failed = returned instanceof APIError
         const user = ctx.context.newSession?.user ?? ctx.context.session?.user
-        const key = limitedKey(ctx.path, ctx.body, ctx.headers)
+        let key = await limitedKey(ctx)
+        // A finished second-factor step has used up the pending challenge, so the account comes from the new session.
+        if (!key && !failed && user && SECOND_FACTOR_PATHS.includes(ctx.path))
+          key = attemptKey('/two-factor', user.id)
         if (key) {
-          if (failed) deps.limiter.fail(key)
+          // A reset request always answers the same, so it is counted whatever the outcome: that is what
+          // stops someone filling a person's inbox with reset mail.
+          if (failed || ctx.path === '/request-password-reset') deps.limiter.fail(key)
+          // Only a finished second-factor step clears the account's count; a correct password never does.
           else deps.limiter.succeed(key)
         }
-        const email =
-          typeof (ctx.body as { email?: unknown } | undefined)?.email === 'string'
-            ? (ctx.body as { email: string }).email
-            : null
+        const email = bodyEmail(ctx.body)
         await deps.audit.record({
           action,
           actor: user?.id ?? null,
