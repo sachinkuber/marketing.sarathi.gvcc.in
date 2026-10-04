@@ -9,6 +9,7 @@ import { buildCore } from '../src/core.ts'
 import { createLogger } from '../src/logger.ts'
 import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
+import type { MailMessage } from '../src/ports.ts'
 import { MemoryAudit, MemoryMailer } from '../src/testing.ts'
 
 export interface TestServer {
@@ -186,4 +187,10 @@ export class TestClient {
     if (reply.status === 200 && !reply.json?.twoFactorRedirect) await this.refreshCsrf()
     return reply
   }
+}
+
+export function tokenFromMail(message: MailMessage): string {
+  const match = /[?&]token=([A-Za-z0-9_-]+)/.exec(message.text)
+  if (!match) throw new Error('no token in the message')
+  return match[1] as string
 }

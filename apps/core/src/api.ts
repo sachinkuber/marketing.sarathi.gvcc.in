@@ -3,6 +3,7 @@ import { Router } from 'express'
 import { enrolmentGate, loadPrincipal, principalOf } from './auth/session.ts'
 import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
+import { inviteRoutes } from './routes/invites.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -26,7 +27,8 @@ export function createApiRouter(deps: ApiDeps): Router {
     })
   })
 
-  // PUBLIC ROUTES (no session) are added above this line.
+  api.use('/invites', inviteRoutes({ auth: deps.auth, pool: deps.pool }))
+  // Public routes (no session) are added above this line.
 
   // Everything below needs a session, and for most roles a completed enrolment.
   api.use(loadPrincipal(deps.auth, deps.pool), enrolmentGate)
