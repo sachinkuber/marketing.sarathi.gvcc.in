@@ -141,7 +141,7 @@ These are my recommendations from PRD section 21. Each works as a starting point
 | H14 | Backups | Daily; kept 30 days; restore tested monthly | Sets storage cost and how much data could be lost | Open |
 | H15 | Availability | 99.5 percent a month on one server | A higher figure needs a second server | Open |
 | H16 | Incident response | Severity 1 within 1 hour, 2 within 4 hours, 3 next working day | Depends on E10 | Open |
-| H17 | Model | `claude-opus-5-5` for every agent to start | Cheaper models for high-volume agents are your decision once real costs are measured | Open |
+| H17 | Model | `claude-opus-5-5` for every agent to start | Cheaper models for high-volume agents are your decision once real costs are measured | Done |
 
 ## 9. How to hand over secrets
 
