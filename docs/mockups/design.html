@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .wrap-idx { max-width: 1080px; margin: 0 auto; padding: 40px 28px 90px; }
+  .wrap-idx h1 { font-size: 32px; letter-spacing: -0.025em; line-height: 1.15; max-width: 24ch; }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 64ch; margin-top: 12px; }
+  .nav-top { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:28px; font-size:14.5px }
+  .sec2 { margin-top: 44px; }
+  .sec2 h2 { font-size: 21px; margin-bottom: 4px; }
+  .sec2 > p { color: var(--ink-2); max-width: 68ch; margin-bottom: 16px; }
+  .sw { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .sw > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); overflow: hidden; }
+  .sw i { display:block; height: 56px; }
+  .sw span { display:block; padding: 10px 12px; font-size: 13.5px; color: var(--ink-2); }
+  .sw b { color: var(--ink); display:block; font-size: 14px }
+  .rules { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 22px; }
+  .rules b { display:block; margin-bottom: 3px }
+  .rules p { color: var(--ink-2); font-size: 14.5px }
+  .demo { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 20px; }
+  .demo .row { gap: 10px; }
+  .scale div { margin-bottom: 10px; }
+</style>
+</head>
+<body data-layout="plain">
+<main id="content" class="wrap-idx">
+  <div class="nav-top"><a href="index.html">All screens</a> <a href="journey.html">Product flow</a> <a href="home.html">Go to Home</a></div>
+  <h1>How the dashboard is designed</h1>
+  <p class="lede">This is a tool for someone who checks in for a few minutes a day and has to make safe decisions quickly. The design is calm and plain so that the things that need attention are the only things that stand out.</p>
+
+  <section class="sec2"><h2>Colour</h2><p>A cool light background, white panels, a dark gunmetal menu, and one blue for actions. Red, amber and green are kept for meaning only, so when you see one it is telling you something.</p>
+    <div class="sw">
+      <div><i style="background:#f2f3f4"></i><span><b>Ground</b>#f2f3f4, behind everything</span></div>
+      <div><i style="background:#ffffff;border-bottom:1px solid #d9dee2"></i><span><b>Surface</b>#ffffff, panels and forms</span></div>
+      <div><i style="background:#1d242a"></i><span><b>Rail</b>#1d242a, the menu</span></div>
+      <div><i style="background:#1f4fb4"></i><span><b>Action blue</b>#1f4fb4, the one thing to click</span></div>
+      <div><i style="background:#1e7a4f"></i><span><b>Good</b>#1e7a4f, passed, healthy</span></div>
+      <div><i style="background:#8f5600"></i><span><b>Waiting</b>#8f5600, needs a decision</span></div>
+      <div><i style="background:#b3261e"></i><span><b>Problem</b>#b3261e, overdue, failed</span></div>
+    </div></section>
+
+  <section class="sec2"><h2>Type</h2><p>One family, Schibsted Grotesk, in sentence case throughout. No capitals for labels, no monospace, no emoji.</p>
+    <div class="demo scale">
+      <div style="font-size:32px;font-weight:700;letter-spacing:-0.025em">Page title, 32 bold</div>
+      <div style="font-size:21px;font-weight:600">Section heading, 21 semibold</div>
+      <div style="font-size:16px;font-weight:600">Panel heading, 16 semibold</div>
+      <div style="font-size:15px">Body text, 15 regular. Nothing here goes live until you approve it.</div>
+      <div class="muted small">Supporting text, 14 grey. Reminders and the overdue limit are set per brand.</div>
+    </div></section>
+
+  <section class="sec2"><h2>Parts you will see on every screen</h2><p>A small set of parts reused everywhere, so each screen feels familiar.</p>
+    <div class="demo">
+      <div class="row wrap" style="margin-bottom:16px"><button class="btn primary" type="button">Approve selected</button><button class="btn ok" type="button">Approve</button><button class="btn" type="button">Ask for changes</button><button class="btn danger" type="button">Reject</button><button class="btn ghost" type="button">Cancel</button></div>
+      <div class="row wrap" style="margin-bottom:16px"><span class="tag ok">All passed</span><span class="tag warn">Waiting · 9 hours</span><span class="tag danger">Overdue · 4 days</span><span class="tag info">Question</span><span class="tag plain">Planned</span></div>
+      <div class="callout warn" style="margin-bottom:16px"><b>2 items are overdue for approval.</b> They stay unapproved and unpublished until someone decides.</div>
+      <div class="row wrap"><span class="score"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><span class="muted small">A 1 to 5 quality score</span></div>
+    </div></section>
+
+  <section class="sec2"><h2>Principles</h2><p>These shaped the layout of every screen.</p>
+    <div class="rules">
+      <div><b>Results first</b><p>Home opens with results and progress, then what is waiting for you, then problems.</p></div>
+      <div><b>You always know what you are approving</b><p>The item is shown as it will appear, with the checks, scores and the exact version fingerprint.</p></div>
+      <div><b>Silence never approves</b><p>Late items are reminded, escalated and marked overdue, with a banner and pop-up. They are never approved or published by default.</p></div>
+      <div><b>A button says what it does</b><p>Approve, Reject, Reconnect. The same action has the same name everywhere.</p></div>
+      <div><b>Errors give a next step</b><p>An empty or failed state says what happened and what to do, without apologising.</p></div>
+      <div><b>Works on a phone</b><p>Approvals can be done on a narrow screen. Use the Mockup controls to switch to phone width.</p></div>
+      <div><b>Stop is always in reach</b><p>The Stop button sits in the top bar on every screen.</p></div>
+      <div><b>Roles see only their part</b><p>Switch role in Mockup controls to see how the menu and screens change.</p></div>
+    </div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product flow — Marketing platform mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css">
+<style>
+  .wrap-idx { max-width: 1080px; margin: 0 auto; padding: 40px 28px 90px; }
+  .wrap-idx h1 { font-size: 32px; letter-spacing: -0.025em; line-height: 1.15; max-width: 24ch; }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 64ch; margin-top: 12px; }
+  .nav-top { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:28px; font-size:14.5px }
+  .loop { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 0; margin: 28px 0 8px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); overflow: hidden; }
+  .loop > div { padding: 18px 16px; border-right: 1px solid var(--line-2); }
+  .loop > div:last-child { border-right: 0; }
+  .loop b { display:block; margin-bottom:4px; }
+  .loop p { font-size: 14px; color: var(--ink-2); }
+  .loop .you { background: var(--primary-bg); }
+  .jr { margin-top: 44px; }
+  .jr h2 { font-size: 21px; margin-bottom: 4px; }
+  .jr > p { color: var(--ink-2); max-width: 68ch; margin-bottom: 16px; }
+  .chain { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .stepc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .stepc.you { border-color: var(--primary); box-shadow: inset 3px 0 0 var(--primary); }
+  .stepc .who { font-size: 13px; color: var(--ink-3); }
+  .stepc b { font-size: 15px; }
+  .stepc p { font-size: 14px; color: var(--ink-2); flex: 1; }
+  .stepc a.btn { align-self: flex-start; }
+  .key { display:flex; gap:18px; flex-wrap:wrap; font-size:14px; color:var(--ink-2); margin: 14px 0 0 }
+  .key i { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; background: var(--surface); border:1px solid var(--line) }
+  .key i.y { border-color: var(--primary); background: var(--primary-bg) }
+  @media (max-width: 860px) { .loop { grid-template-columns: 1fr; } .loop > div { border-right:0; border-bottom:1px solid var(--line-2); } }
+</style>
+</head>
+<body data-layout="plain">
+<main id="content" class="wrap-idx">
+  <div class="nav-top"><a href="index.html">All screens</a> <a href="design.html">The design</a> <a href="home.html">Go to Home</a></div>
+  <h1>How the product works, start to finish</h1>
+  <p class="lede">The agents do the work. You decide what goes live. This page follows the main journeys step by step. Each card opens the screen where that step happens. Cards with a blue edge are the steps where a person has to act.</p>
+
+  <div class="loop">
+    <div><b>1. Learn the brand</b><p>Research the website and channels, ask a tailored questionnaire, confirm facts, write the strategy brief.</p></div>
+    <div><b>2. Plan</b><p>Turn the brief into campaigns and a weekly content calendar.</p></div>
+    <div><b>3. Make</b><p>Agents write, design and check each item against safety rules and quality scores.</p></div>
+    <div class="you"><b>4. You approve</b><p>Nothing goes live without a decision. Silence never approves. Late items escalate and show as overdue.</p></div>
+    <div><b>5. Publish and learn</b><p>Post, track leads and results, report, and feed what worked into the next plan.</p></div>
+  </div>
+  <div class="key"><span><i class="y"></i>A person acts here</span><span><i></i>The product does this</span></div>
+
+  <section class="jr"><h2>A. Getting in</h2><p>Everyone except viewers signs in with a password and a second factor. Invited people set their own password.</p>
+    <div class="chain">
+      <div class="stepc"><span class="who">Invited person</span><b>Accept the invite</b><p>Sets a password. An expired link says what to do next.</p><a class="btn sm" href="invite.html">Open invite</a></div>
+      <div class="stepc you"><span class="who">Person</span><b>Set up the second factor</b><p>Scan the QR code, enter a code, save ten backup codes. Nothing else opens until this is done.</p><a class="btn sm" href="enrol.html">Open enrolment</a></div>
+      <div class="stepc you"><span class="who">Person</span><b>Sign in</b><p>Email and password, then the 6-digit code. Five wrong tries lock the account for 15 minutes.</p><a class="btn sm" href="sign-in.html">Open sign-in</a></div>
+      <div class="stepc"><span class="who">Person</span><b>Recover a password</b><p>One-use link by email, valid 30 minutes. Ends all sessions.</p><a class="btn sm" href="recover.html">Open recovery</a></div>
+    </div></section>
+
+  <section class="jr"><h2>B. Setting up a brand</h2><p>Done once per brand. The questionnaire is written for that brand after the research, and every answer says why it is asked.</p>
+    <div class="chain">
+      <div class="stepc you"><span class="who">Owner</span><b>Add the brand</b><p>Name, website and channels.</p><a class="btn sm" href="brands.html">Open brands</a></div>
+      <div class="stepc"><span class="who">Agents</span><b>Research and ask</b><p>Market research agent reads the site and channels, then drafts the questionnaire.</p><a class="btn sm" href="onboarding.html">Open onboarding</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Confirm facts and rules</b><p>Each claim the agents may use is confirmed, corrected or left out. Forbidden claims and competitors are set.</p><a class="btn sm" href="profile.html">Open brand facts</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Connect accounts</b><p>Instagram, Facebook, LinkedIn, YouTube, search tools. No passwords typed into the dashboard.</p><a class="btn sm" href="connections.html">Open connections</a></div>
+      <div class="stepc"><span class="who">Agents</span><b>Strategy and campaigns</b><p>Brief, objectives and targets, then a calendar.</p><a class="btn sm" href="campaigns.html">Open campaigns</a></div>
+    </div></section>
+
+  <section class="jr"><h2>C. A piece of content, from idea to live</h2><p>This is the loop you will use most. Every item is approved against the exact version you saw.</p>
+    <div class="chain">
+      <div class="stepc"><span class="who">Agents</span><b>Planned on the calendar</b><p>Each item has a day, a channel and a purpose.</p><a class="btn sm" href="calendar.html">Open calendar</a></div>
+      <div class="stepc"><span class="who">Agents</span><b>Made and checked</b><p>Seven blocking checks must pass. Six quality scores are recorded.</p><a class="btn sm" href="run.html">See a run</a></div>
+      <div class="stepc you"><span class="who">Approver</span><b>Waiting in the inbox</b><p>Reminders go out, then escalation. Posts can be approved in bulk if the brand allows it.</p><a class="btn sm" href="inbox.html">Open inbox</a></div>
+      <div class="stepc you"><span class="who">Approver</span><b>Review and decide</b><p>See it as it will appear. Approve, edit, ask for changes, or reject.</p><a class="btn sm" href="item.html">Open an item</a></div>
+      <div class="stepc"><span class="who">Product</span><b>Publish and confirm</b><p>If a post cannot be confirmed it is never sent twice. It waits for your decision.</p><a class="btn sm" href="actions.html">Open unresolved actions</a></div>
+    </div></section>
+
+  <section class="jr"><h2>D. A lead, from first message to outcome</h2><p>The agent answers routine questions from approved answers only. Anything else is held for a person.</p>
+    <div class="chain">
+      <div class="stepc"><span class="who">Product</span><b>Lead arrives</b><p>Source and consent are recorded.</p><a class="btn sm" href="leads.html">Open pipeline</a></div>
+      <div class="stepc"><span class="who">Agent</span><b>Replies and qualifies</b><p>Automatic replies use approved answers. A weekly sample is checked by a person.</p><a class="btn sm" href="replies.html">Open reply log</a></div>
+      <div class="stepc you"><span class="who">Sales contact</span><b>Take over or route</b><p>Hand to a salesperson, or route to a partner.</p><a class="btn sm" href="lead.html">Open a lead</a></div>
+      <div class="stepc you"><span class="who">Partner</span><b>Report the outcome</b><p>One page, no account: won, lost or not yet.</p><a class="btn sm" href="partner.html">Open partner page</a></div>
+      <div class="stepc"><span class="who">Product</span><b>Counted in reports</b><p>Credited to the last non-direct touch.</p><a class="btn sm" href="reports.html">Open reports</a></div>
+    </div></section>
+
+  <section class="jr"><h2>E. When something goes wrong</h2><p>Every problem has a screen and a plain next step.</p>
+    <div class="chain">
+      <div class="stepc"><span class="who">Product</span><b>An alert appears</b><p>Banner, bell and Alerts. A changed fact triggers a review of live content.</p><a class="btn sm" href="alerts.html">Open alerts</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Look at the failed job</b><p>Jobs that used all attempts wait for a decision.</p><a class="btn sm" href="dead-letters.html">Open dead letters</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Stop everything</b><p>The Stop button halts all agents, or one brand or channel. Shadow mode makes without publishing.</p><a class="btn sm" href="safety.html">Open safety</a></div>
+      <div class="stepc"><span class="who">Product</span><b>Everything is recorded</b><p>Tamper-evident audit log of who did what.</p><a class="btn sm" href="audit.html">Open audit log</a></div>
+    </div></section>
+
+  <section class="jr"><h2>F. Running and growing the business</h2><p>Cost control, people and data, plus the parts used when the product is sold to outside clients.</p>
+    <div class="chain">
+      <div class="stepc"><span class="who">Owner</span><b>Watch results</b><p>Results and progress first, then what is waiting, then problems.</p><a class="btn sm" href="home.html">Open Home</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Set approval rules</b><p>Reminder timing, escalation, bulk and week approval.</p><a class="btn sm" href="approvals-settings.html">Open approval settings</a></div>
+      <div class="stepc you"><span class="who">Owner</span><b>Watch costs</b><p>Ceilings and caps in dollars and rupees.</p><a class="btn sm" href="budgets.html">Open budgets</a></div>
+      <div class="stepc you"><span class="who">Client</span><b>Sign up and pay</b><p>For outside clients: plan, terms, billing.</p><a class="btn sm" href="billing.html">Open billing</a></div>
+    </div></section>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>
