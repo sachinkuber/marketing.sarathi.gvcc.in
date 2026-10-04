@@ -8,6 +8,7 @@ import {
   BACKUP_CODE_LENGTH,
   PASSWORD_MAX,
   PASSWORD_MIN,
+  RESET_LINK_SECONDS,
   SESSION_IDLE_SECONDS,
   SESSION_REFRESH_SECONDS,
 } from './policy.ts'
@@ -38,6 +39,15 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
       disableSignUp: true,
       minPasswordLength: PASSWORD_MIN,
       maxPasswordLength: PASSWORD_MAX,
+      resetPasswordTokenExpiresIn: RESET_LINK_SECONDS,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, token }) => {
+        await deps.mailer.send({
+          to: user.email,
+          subject: 'Reset your password',
+          text: `Open this link to choose a new password:\n${deps.baseURL}/reset-password?token=${token}\nThe link works once and expires in 30 minutes. You will still be asked for your second factor when you sign in.`,
+        })
+      },
     },
     session: { expiresIn: SESSION_IDLE_SECONDS, updateAge: SESSION_REFRESH_SECONDS },
     plugins: [
