@@ -12,8 +12,12 @@ const server = await startServer(config, {
 })
 logger.info({ url: server.url }, 'core service started')
 
+let stopping = false
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
+    // A repeated signal (a second Ctrl-C, or SIGTERM after SIGINT) does not start a second stop.
+    if (stopping) return
+    stopping = true
     logger.info({ signal }, 'stopping')
     server.stop().then(
       () => process.exit(0),

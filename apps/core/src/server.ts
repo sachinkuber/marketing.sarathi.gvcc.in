@@ -32,19 +32,34 @@ export async function startServer(
     mailer: deps.mailer,
     audit: deps.audit,
   })
-  const server = await new Promise<Server>((resolve) => {
-    const listening = app.listen(config.port, () => resolve(listening))
-  })
+  let server: Server
+  try {
+    // Express 5 calls this back with the error when listening fails (for example EADDRINUSE).
+    server = await new Promise<Server>((resolve, reject) => {
+      const listening = app.listen(config.port, (error?: Error) =>
+        error ? reject(error) : resolve(listening),
+      )
+    })
+  } catch (error) {
+    await Promise.allSettled([appPool.end(), authPool.end()])
+    throw error
+  }
   const { port } = server.address() as AddressInfo
+  // A second signal, or a second caller, waits for the same stop instead of closing twice.
+  let stopping: Promise<void> | undefined
+  const stop = async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()))
+      server.closeAllConnections()
+    })
+    await appPool.end()
+    await authPool.end()
+  }
   return {
     url: `http://127.0.0.1:${port}`,
-    async stop() {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()))
-        server.closeAllConnections()
-      })
-      await appPool.end()
-      await authPool.end()
+    stop() {
+      stopping ??= stop()
+      return stopping
     },
   }
 }

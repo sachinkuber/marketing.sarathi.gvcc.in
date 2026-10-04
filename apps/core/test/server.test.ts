@@ -91,4 +91,50 @@ describe('startServer', () => {
       await db.drop()
     }
   })
+
+  const configFor = (databaseUrl: string, port: number) => ({
+    nodeEnv: 'test' as const,
+    port,
+    databaseUrl,
+    authSecret: 'z'.repeat(48),
+    publicOrigin: 'https://app.example.test',
+    logLevel: 'silent' as const,
+  })
+
+  it('rejects when the port is taken, and closes both pools', async () => {
+    await requireDatabase()
+    const db = await createTestDatabase()
+    const logger = createLogger('silent')
+    const deps = { logger, mailer: new UnconfiguredMailer(), audit: new LogAudit(logger) }
+    const first = await startServer(configFor(db.urlFor('app'), 0), deps)
+    try {
+      created.length = 0
+      const port = Number(new URL(first.url).port)
+      const second = startServer(configFor(db.urlFor('app'), port), deps)
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('never settled')), 3000))
+      await expect(Promise.race([second, timeout])).rejects.toMatchObject({ code: 'EADDRINUSE' })
+      expect(created).toHaveLength(2)
+      for (const pool of created) expect((pool as unknown as { ended: boolean }).ended).toBe(true)
+    } finally {
+      await first.stop()
+      await db.drop()
+    }
+  })
+
+  it('can be stopped twice', async () => {
+    await requireDatabase()
+    const db = await createTestDatabase()
+    const logger = createLogger('silent')
+    const server = await startServer(configFor(db.urlFor('app'), 0), {
+      logger,
+      mailer: new UnconfiguredMailer(),
+      audit: new LogAudit(logger),
+    })
+    try {
+      await Promise.all([server.stop(), server.stop()])
+      await expect(server.stop()).resolves.toBeUndefined()
+    } finally {
+      await db.drop()
+    }
+  })
 })
