@@ -1,5 +1,6 @@
 import type { Pool } from '@mkt/db'
 import { betterAuth, type BetterAuthOptions } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { twoFactor } from 'better-auth/plugins'
 import type { AuditSink, Mailer } from '../ports.ts'
 import {
@@ -46,6 +47,32 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
         backupCodeOptions: { amount: BACKUP_CODE_COUNT, length: BACKUP_CODE_LENGTH },
       }),
     ],
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        // SEC-1: there is no way to turn the second factor off. A lost one is reset by the platform owner.
+        if (ctx.path === '/two-factor/disable') {
+          throw new APIError('FORBIDDEN', { message: 'The second factor cannot be turned off.' })
+        }
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/two-factor/verify-backup-code') return
+        const returned = ctx.context.returned
+        const failed = returned instanceof APIError
+        const user = ctx.context.newSession?.user
+        await deps.audit.record({
+          action: 'auth.backup_code_used',
+          actor: user?.id ?? null,
+          outcome: failed ? 'failure' : 'success',
+        })
+        if (!failed && user) {
+          await deps.mailer.send({
+            to: user.email,
+            subject: 'A backup code was used to sign in',
+            text: 'A backup code was just used to sign in to your account. If this was not you, contact the platform owner.',
+          })
+        }
+      }),
+    },
   }
 }
 

@@ -1,4 +1,5 @@
 import type { Express } from 'express'
+import { createHmac } from 'node:crypto'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createPool, type Pool } from '@mkt/db'
@@ -193,4 +194,56 @@ export function tokenFromMail(message: MailMessage): string {
   const match = /[?&]token=([A-Za-z0-9_-]+)/.exec(message.text)
   if (!match) throw new Error('no token in the message')
   return match[1] as string
+}
+
+const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+function base32Decode(input: string): Buffer {
+  let bits = 0
+  let value = 0
+  const out: number[] = []
+  for (const ch of input.replace(/=+$/, '').toUpperCase()) {
+    const index = BASE32.indexOf(ch)
+    if (index < 0) throw new Error('not base32')
+    value = (value << 5) | index
+    bits += 5
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff)
+      bits -= 8
+      value &= (1 << bits) - 1
+    }
+  }
+  return Buffer.from(out)
+}
+
+// RFC 6238, six digits, thirty-second steps: the code an authenticator app would show.
+export function totp(secretBase32: string, atMs: number = Date.now()): string {
+  const counter = Math.floor(atMs / 1000 / 30)
+  const message = Buffer.alloc(8)
+  message.writeBigUInt64BE(BigInt(counter))
+  const hash = createHmac('sha1', base32Decode(secretBase32)).update(message).digest()
+  const offset = (hash[hash.length - 1] as number) & 0x0f
+  const number =
+    (((hash[offset] as number) & 0x7f) << 24) |
+    (((hash[offset + 1] as number) & 0xff) << 16) |
+    (((hash[offset + 2] as number) & 0xff) << 8) |
+    ((hash[offset + 3] as number) & 0xff)
+  return String(number % 1_000_000).padStart(6, '0')
+}
+
+// Walks the first-sign-in path for a client that has signed in: set up the authenticator and confirm it.
+export async function enrol(
+  client: TestClient,
+  password: string,
+): Promise<{ secret: string; backupCodes: string[] }> {
+  const enable = await client.request('POST', '/api/auth/two-factor/enable', { body: { password } })
+  if (enable.status !== 200) throw new Error(`enable failed: ${enable.status} ${enable.text}`)
+  const secret = new URL(enable.json.totpURI).searchParams.get('secret')
+  if (!secret) throw new Error('no secret in the authenticator URI')
+  const verify = await client.request('POST', '/api/auth/two-factor/verify-totp', {
+    body: { code: totp(secret) },
+  })
+  if (verify.status !== 200) throw new Error(`verify failed: ${verify.status} ${verify.text}`)
+  await client.refreshCsrf()
+  return { secret, backupCodes: enable.json.backupCodes as string[] }
 }
