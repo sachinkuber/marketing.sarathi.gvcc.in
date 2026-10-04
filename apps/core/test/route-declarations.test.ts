@@ -35,6 +35,35 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
     expect(undeclaredRoutes(router, table)).toEqual(['POST /sneaked-in'])
   })
 
+  it('reports nothing for a router built from a table, fail-safe included', () => {
+    const table = new RouteTable()
+    table.add({
+      method: 'get',
+      path: '/declared',
+      access: { kind: 'public' },
+      summary: 'x',
+      handlers: [(_req, res) => void res.json({})],
+    })
+    const router = table.build({ auth: stack.core.auth, pool: stack.appPool })
+    expect(undeclaredRoutes(router, table)).toEqual([])
+  })
+
+  it('notices a sub-router or middleware mounted on a built router', () => {
+    const table = new RouteTable()
+    table.add({
+      method: 'get',
+      path: '/declared',
+      access: { kind: 'public' },
+      summary: 'x',
+      handlers: [(_req, res) => void res.json({})],
+    })
+    const router = table.build({ auth: stack.core.auth, pool: stack.appPool })
+    router.use('/x', Router())
+    router.use((_req, _res, next) => next())
+    const found = undeclaredRoutes(router, table)
+    expect(found).toEqual(['USE <anonymous>', 'USE router'])
+  })
+
   it('has no public route except the ones that must be open to someone with no session', () => {
     const open = stack.core.routes
       .list()

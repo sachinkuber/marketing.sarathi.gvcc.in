@@ -32,6 +32,11 @@ const requirePlatformOwner: RequestHandler = (_req, res, next) => {
   next()
 }
 
+// The handlers `build` adds as its final fail-safe, so the inspection can tell them from anything mounted by mistake.
+const failSafeHandlers = new WeakSet<RequestHandler>()
+export const isFailSafeHandler = (handler: unknown): boolean =>
+  typeof handler === 'function' && failSafeHandlers.has(handler as RequestHandler)
+
 // The only way a route reaches the service. Nothing else holds the router, so a route without a declaration
 // cannot exist (SEC-2), and a brand-scoped route cannot be written without the brand check.
 export class RouteTable {
@@ -111,7 +116,12 @@ export class RouteTable {
     }
     // Fail safe: anything registered on this router after it was built (a test's probe, a mistake) is
     // still behind a session and a finished enrolment.
-    router.use(principal, enrolmentGate)
+    const failSafe: RequestHandler[] = [
+      (req, res, next) => principal(req, res, next),
+      (req, res, next) => enrolmentGate(req, res, next),
+    ]
+    for (const handler of failSafe) failSafeHandlers.add(handler)
+    router.use(...failSafe)
     return router
   }
 }
