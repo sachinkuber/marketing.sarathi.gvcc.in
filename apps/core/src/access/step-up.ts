@@ -22,7 +22,10 @@ export async function verifySecondFactorCode(auth: Auth, req: Request, code: str
       if (error.statusCode === 429) {
         throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
       }
-      throw new AppError(403, 'second_factor_invalid', 'The code is not right.')
+      // Only the library's refusals mean the code is wrong. Its own failures (5xx) pass on as errors.
+      if (error.statusCode < 500) {
+        throw new AppError(403, 'second_factor_invalid', 'The code is not right.')
+      }
     }
     throw error
   }

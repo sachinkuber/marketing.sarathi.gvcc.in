@@ -1,6 +1,10 @@
+import { APIError } from 'better-auth/api'
+import type { Request } from 'express'
 import { z } from 'zod'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { verifySecondFactorCode } from '../src/access/step-up.ts'
+import type { Auth } from '../src/auth/options.ts'
+import { AppError } from '../src/errors.ts'
 import { inputOf, validate } from '../src/validate.ts'
 import {
   addBrand,
@@ -20,6 +24,7 @@ describe('asking for the second-factor code before a sensitive action', () => {
   let brand: string
   let admin: TestClient
   let secret: string
+  let adminId: string
   const act = (code: unknown) =>
     admin.request('POST', `/api/v1/brands/${brand}/_probe/step-up`, { body: { code } })
 
@@ -46,7 +51,7 @@ describe('asking for the second-factor code before a sensitive action', () => {
       },
     })
     brand = await addBrand(stack, 'brand-a')
-    await addUser(stack, {
+    adminId = await addUser(stack, {
       email: 'admin@example.test',
       password: PASSWORD,
       role: 'brand_admin',
@@ -93,6 +98,43 @@ describe('asking for the second-factor code before a sensitive action', () => {
       (e) => e.action === 'auth.second_factor' && e.outcome === 'failure',
     )
     expect(failures.length).toBeGreaterThanOrEqual(5)
+    // Attributed to the signed-in person whose code was wrong (the session is on the request).
+    expect(failures.map((e) => e.actor)).toEqual(failures.map(() => adminId))
     expect(JSON.stringify(stack.audit.entries)).not.toContain(secret)
+  })
+})
+
+// The library's own failures (a 5xx, a broken endpoint) are not "the code is not right": they must not be
+// reported to the person as a wrong code, nor read by anyone as a wrong guess.
+describe('the code check passes the library’s server errors on', () => {
+  const req = { headers: {} } as Request
+  const authThrowing = (error: unknown) =>
+    ({
+      api: {
+        verifyTOTP: async () => {
+          throw error
+        },
+      },
+    }) as unknown as Auth
+
+  it('rethrows a 5xx from the library instead of answering 403', async () => {
+    const failure = new APIError('INTERNAL_SERVER_ERROR', { message: 'library broke' })
+    await expect(verifySecondFactorCode(authThrowing(failure), req, '123456')).rejects.toBe(failure)
+  })
+
+  it('still answers 403 second_factor_invalid for a 4xx and 429 too_many_attempts for a lock', async () => {
+    const wrong = await verifySecondFactorCode(
+      authThrowing(new APIError('UNAUTHORIZED', { message: 'invalid code' })),
+      req,
+      '123456',
+    ).catch((e: unknown) => e)
+    expect(wrong).toBeInstanceOf(AppError)
+    expect([(wrong as AppError).status, (wrong as AppError).code]).toEqual([403, 'second_factor_invalid'])
+    const locked = await verifySecondFactorCode(
+      authThrowing(new APIError('TOO_MANY_REQUESTS')),
+      req,
+      '123456',
+    ).catch((e: unknown) => e)
+    expect((locked as AppError).status).toBe(429)
   })
 })
