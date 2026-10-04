@@ -23,15 +23,19 @@ const NOT_FOUND = () => new AppError(404, 'not_found', 'There is nothing at this
 // The role is the person's role in THIS brand, taken from the brand in the path, never from anything else.
 export function brandAccess(pool: Pool, permission: PermissionKey | null): RequestHandler {
   return async (req, res, next) => {
-    const brandId = req.params.brandId
-    if (typeof brandId !== 'string' || !UUID.test(brandId)) throw NOT_FOUND()
+    const raw = req.params.brandId
+    if (typeof raw !== 'string' || !UUID.test(raw)) throw NOT_FOUND()
+    // One spelling from here on: the database writes UUIDs in lowercase, and so does everything after this.
+    const brandId = raw.toLowerCase()
     const principal = principalOf(res)
     const membership = principal.memberships.find((m) => m.brandId === brandId)
     const actor: Actor | null = principal.isPlatformOwner ? 'platform_owner' : (membership?.role ?? null)
     if (!actor) throw NOT_FOUND()
     if (principal.isPlatformOwner && !membership) {
       // The owner may open any brand that exists; one that does not looks like any other missing address.
-      const found = await withBrand(pool, brandId, (client) => client.query('select 1 from app.brand'))
+      const found = await withBrand(pool, brandId, (client) =>
+        client.query('select 1 from app.brand where id = $1', [brandId]),
+      )
       if (found.rowCount === 0) throw NOT_FOUND()
     }
     const grant: Grant = permission ? grantFor(actor, permission) : 'all'
