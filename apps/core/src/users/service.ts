@@ -162,3 +162,42 @@ export async function removeMember(pool: Pool, audit: AuditSink, input: Actor): 
     })
   })
 }
+
+// The platform owner resets a person's second factor (spec section 7). One transaction: the person's
+// secret and backup codes, the enabled flag and every session go together, and so does the audit entry.
+export async function resetSecondFactor(
+  pool: Pool,
+  audit: AuditSink,
+  input: { actorId: string; targetId: string },
+): Promise<{ email: string }> {
+  if (input.actorId === input.targetId) {
+    throw new AppError(
+      409,
+      'cannot_reset_own_second_factor',
+      'The owner’s own second factor is reset by the documented server-side procedure.',
+    )
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('begin')
+    const user = await client.query('select email from auth."user" where id = $1', [input.targetId])
+    if (user.rowCount === 0) throw new AppError(404, 'not_found', 'There is nothing at this address.')
+    await client.query('delete from auth."twoFactor" where "userId" = $1', [input.targetId])
+    await client.query('update auth."user" set "twoFactorEnabled" = false where id = $1', [input.targetId])
+    await client.query('delete from auth.session where "userId" = $1', [input.targetId])
+    await audit.record({
+      action: 'users.second_factor_reset',
+      actor: input.actorId,
+      subject: input.targetId,
+      brandId: null,
+      outcome: 'success',
+    })
+    await client.query('commit')
+    return { email: user.rows[0].email as string }
+  } catch (error) {
+    await client.query('rollback').catch(() => undefined)
+    throw error
+  } finally {
+    client.release()
+  }
+}

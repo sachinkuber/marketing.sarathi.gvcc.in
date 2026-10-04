@@ -7,7 +7,7 @@ import { createInvite } from '../auth/invites.ts'
 import { emailHash, type Auth } from '../auth/options.ts'
 import { principalOf } from '../auth/session.ts'
 import type { AuditSink, Mailer } from '../ports.ts'
-import { changeMemberRole, listMembers, removeMember } from '../users/service.ts'
+import { changeMemberRole, listMembers, removeMember, resetSecondFactor } from '../users/service.ts'
 import { inputOf, validate } from '../validate.ts'
 
 export const ROLES = ['brand_admin', 'approver', 'sales_contact', 'viewer'] as const
@@ -19,6 +19,7 @@ const memberParams = z.strictObject({ brandId: z.uuid(), userId: z.uuid() })
 const code = z.string().regex(/^\d{6}$/)
 const roleBody = z.strictObject({ role: z.enum(ROLES), code })
 const removeBody = z.strictObject({ code })
+const userParams = z.strictObject({ userId: z.uuid() })
 
 export interface UserRouteDeps {
   auth: Auth
@@ -122,6 +123,39 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
           actorIsPlatformOwner: actor.isPlatformOwner,
           targetId: params.userId,
         })
+        res.status(204).end()
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/users/:userId/second-factor/reset',
+    access: { kind: 'platform_owner' },
+    summary: 'Reset a person’s second factor (platform owner only; asks for the owner’s own code)',
+    handlers: [
+      validate({ params: userParams, body: removeBody }),
+      async (req, res) => {
+        const { body, params } = inputOf<{
+          body: z.infer<typeof removeBody>
+          params: z.infer<typeof userParams>
+        }>(res)
+        const actor = principalOf(res)
+        await verifySecondFactorCode(deps.auth, req, body.code)
+        const target = await resetSecondFactor(deps.pool, deps.audit, {
+          actorId: actor.userId,
+          targetId: params.userId,
+        })
+        // After the reset is committed. A notification that cannot be sent is reported, never an error.
+        try {
+          await deps.mailer.send({
+            to: target.email,
+            subject: 'Your second factor was reset',
+            text: 'The platform owner reset your second factor. You will be asked to set up a new one the next time you sign in. If you did not ask for this, contact the platform owner.',
+          })
+        } catch (error) {
+          deps.onMailFailure?.(error)
+        }
         res.status(204).end()
       },
     ],
