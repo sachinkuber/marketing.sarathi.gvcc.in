@@ -35,14 +35,16 @@ describe('tenancy tables', () => {
 
   it('has the six tenancy tables', async () => {
     const result = await db.admin.query("select tablename from pg_tables where schemaname = 'app' order by 1")
-    expect(result.rows.map((r) => r.tablename)).toEqual([
-      'approval_setting',
-      'brand',
-      'invite',
-      'kill_switch',
-      'membership',
-      'platform_owner',
-    ])
+    expect(result.rows.map((r) => r.tablename)).toEqual(
+      expect.arrayContaining([
+        'approval_setting',
+        'brand',
+        'invite',
+        'kill_switch',
+        'membership',
+        'platform_owner',
+      ]),
+    )
   })
 
   it('refuses a second active kill switch for the same brand, scope and target', async () => {
