@@ -1,0 +1,4 @@
+title = "marketing platform"
+
+[extend]
+useDefault = true

@@ -16,7 +16,8 @@
     "check:pins": "node tools/check-pins/check-pins.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml ."
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
