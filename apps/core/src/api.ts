@@ -6,6 +6,7 @@ import type { AttemptLimiter } from './auth/limiter.ts'
 import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
 import type { AuditSink } from './ports.ts'
+import { registerBrandRoutes } from './routes/brands.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
 
 export interface ApiDeps {
@@ -55,6 +56,7 @@ export function createApi(
     limiter: deps.limiter,
     audit: deps.audit,
   })
+  registerBrandRoutes(table, { pool: deps.pool })
 
   extra?.(table, { auth: deps.auth, pool: deps.pool })
   return { router: table.build({ auth: deps.auth, pool: deps.pool }), table }
