@@ -17,7 +17,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml ."
+    "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml .",
+    "db:up": "docker compose -f infra/dev/compose.yaml up -d --wait",
+    "db:down": "docker compose -f infra/dev/compose.yaml down"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
