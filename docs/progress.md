@@ -106,3 +106,61 @@ Decisions the owner accepted on 2026-10-04: the five open decisions in the plan 
 - Not proven: test 13 (package 5), tests 1 and 6 (later milestones), and the screen side of test 8 (the dashboard).
 - State, plainly: no real email can be sent. Every send fails with "Email delivery is not configured" and is logged as "mail not sent" until notification delivery (package 11), and the audit sink is the log until the audit log (package 6).
 - Pull request: not opened yet. Nothing has been pushed.
+
+## Phase 1, milestone 2c: Permissions
+
+Finished: 2026-10-04. Commits: 376d0a0 to the final commit of this milestone on branch `m2c-permissions` (`git log --oneline main..HEAD`): the plan, the owner's decisions and its Word copy, then the role and permission matrix, the route table and the brand check, the route inspection, the code check before a sensitive action, the brand routes, the users routes (list and invite; change a role and remove a person; reset a second factor), and the fix wave after the final review. The branch has not been pushed and the pull request has not been opened yet when this is written, so there is no workflow run yet.
+
+| Package | State | Evidence |
+|---|---|---|
+| 5 Permissions | Done | Every route is declared in one route table with what it needs; brand routes get the brand check; three sensitive actions ask for the actor's own authenticator code; `npx vitest run apps/core packages/db` passes (43 files, 267 tests) and `npm run verify` passed twice in a row on the development server |
+
+| Acceptance test | State | Evidence |
+|---|---|---|
+| 13, declaration half | Proven | Over `/api/v1`: every route is in the route table, with a summary; a route added outside the table is detected; the only public routes are the two invite routes, and an allowlist test is the gate for any new public route (`route-declarations.test.ts`, `route-table.test.ts`). Boundary: Better Auth's own routes under `/api/auth` and `/health` are not in the table; the 2b hooks govern the library routes. |
+| 13, role half | Proven | A test reads the PRD 16.1 table and compares all 50 cells with the code (`permissions.test.ts`); a second test proves each role is allowed and denied over HTTP for each of the ten permissions, with a probe route each, plus 404 for strangers (`role-matrix.test.ts`) |
+| 1, for the routes that exist | Proven | Generically for every route under `/brands/:brandId` that exists now (five routes), by a test that reads the route table, so later brand routes are covered automatically (`cross-brand.test.ts`). The content, approval and agent routes of later milestones are still to come. |
+| SEC-2 | Proven for the routes that exist | A route cannot reach the service without a declaration |
+| 6 | Not yet proven | Attempt tokens need the worker |
+| 8, the screen side | Not yet proven | Waits for the dashboard |
+
+## Findings
+
+The seven owner decisions, accepted on 2026-10-04:
+
+1. Resetting a second factor is the platform owner's alone (spec section 7; app-flow 5.3 also lists it for brand admins: the spec wins).
+2. Nobody changes or removes their own membership, and the last brand admin cannot be demoted or removed.
+3. Only the platform owner touches a platform owner's membership.
+4. Each sensitive action carries the actor's current code; there is no recently-verified window; a code can be reused inside its 30-second window.
+5. A stranger to a brand gets 404, a member without the permission 403, and the platform owner any brand that exists.
+6. Until real mail (package 11) no invite can really be sent: inviting answers 502 and leaves no invite behind.
+7. Removing a person removes the membership in that brand only, ends their sessions if no membership remains, and keeps the account.
+
+- Rulings (made while building, in plain language):
+  1. (Task 2, implementer) `RouteDeclaration.handlers` is typed `readonly RequestHandler[]`.
+  2. (Task 2, controller) The plan's `includes(':brandId')` check was too weak. Brand scope is decided by path segments: a `brands` segment must be followed by exactly `:brandId` and the route must be member or permission; a member or permission route must start with `/brands/:brandId`. A case-variant `brands` segment and any glued or modified brand parameter (`:brandid`, `:brandId?`) are refused, because Express matches paths case-insensitively.
+  3. (Task 3, controller) Route paths may contain only `[A-Za-z0-9_-/:]` (literal segments and plain `:name` parameters), because path-to-regexp v8 syntax (`{}`, `*`, `()`, `?`) could make a path match brand URLs unseen by the segment rule.
+  4. (Task 3, controller) The route inspection also reports a sub-router or middleware mounted on the router. The fail-safe tail `router.use(principal, enrolmentGate)` keeps anything registered after build behind a session and a finished enrolment.
+  5. (controller) The cross-brand test's floor against an empty route list started at 1 and rose as the users routes arrived (1, 3, 5).
+  6. (Task 4, implementer) `Auth` has no plugin endpoint types, so `step-up.ts` uses a local `VerifyTotp` type and a cast (types only; a renamed endpoint fails at runtime with a 500, and the first step-up test catches it). Library behaviour read by the implementer: for a signed-in caller `verifyTOTP` returns the existing token and creates no session; the library's own lockout is skipped for a signed-in caller, so the 429 and the audit entry come from this project's hooks (the in-memory per-account lock, shared with sign-in).
+  7. (Tasks 6 and 8, implementer) The tests use one top import block and module-level helper classes instead of inline dynamic imports. Task 8 added one test: 401 without a session and 403 `enrolment_required` for an unenrolled brand admin.
+  8. (controller, final review) Inviting needs no second-factor code (spec section 7 and app-flow 5.3 list role change, removal and reset only). Decision for the owner before package 11: once mail works, a stolen brand-admin session could invite an attacker's address as `brand_admin`. Either require the code when the invited role is `brand_admin`, or notify the brand's admins on every invite.
+  9. (fix wave) What the fix wave changed, after the final review:
+     - An invite taken back after a mail failure is now audited as `users.invite_withdrawn` (same `inviteId`, `reason: mail_not_sent`); the route passes an `onWithdrawn` callback, so `invites.ts` stays free of the audit dependency. If that entry cannot be written, it is reported and the answer is still 502. The compensating delete is guarded: if it fails, the mail error is still reported, and the request answers 500 with an error naming the invite id (logged), the mail error as its cause.
+     - The member lock is taken in a fixed order (`order by user_id`), and the actor's authority is checked again inside the lock: an admin demoted or removed by a colleague while their own request is in flight now gets 403, before any other check. A service-level barrier test holds the first change open inside its transaction and shows, through `pg_stat_activity`, that the second waits on the lock and is then refused on the committed state.
+     - The code check passes the library's server errors (5xx) on instead of answering "the code is not right"; only 4xx answers become 403 `second_factor_invalid`.
+     - The brand ID in the path is read once, in lowercase (an uppercase UUID used to give a member 404 and the owner an uppercase ID in the brand context); the owner's existence check and the brand read name the brand id in the query as well as relying on row-level security.
+     - A route path that does not start with `/` is refused.
+     - The cross-brand test also refuses a 5xx in the person's own brand, and expects exactly 401 without a session.
+- Step-up attribution (checked in the fix wave): the failed code checks before a sensitive action are audited as `auth.second_factor`, outcome failure, with `actor` set to the signed-in person's id (the after hook takes the actor from the session on the request). Failed second-factor steps during sign-in, where there is only a pending challenge and no session, and every `auth.locked_out` entry (the 429), are recorded with `actor: null`.
+- Follow-ups, one line each:
+  - Production today: every invite answers 502 until package 11 (stand-in mailer), and now leaves `users.invited` followed by `users.invite_withdrawn` in the audit trail.
+  - Package 6: `AuditSink.record` takes no transaction client, so the invite, role, removal and reset changes and their audit entries are atomic only in the fail-closed direction (an audit that cannot be written rolls the change back; a failed COMMIT after a written entry could over-report). The real sink must take the transaction client. Failed second-factor steps during sign-in and lockout entries carry `actor: null` (see step-up attribution above).
+  - Package 11: redact mailer errors (log the error's name and code only; the current `onMailFailure` logs the error object); the mail-timing side channel; decide the invite code rule (ruling 8).
+  - Deployment (package 16): the proxy must pass DELETE request bodies (the code is sent in the body); the 2b preconditions stand (trust proxy, the library's client address); the in-memory lockout resets on restart.
+  - Dashboard milestone: `GET /brands` reports the membership role while `GET /brands/:brandId` reports `platform_owner` for an owner who is also a member; the owner's list of all brands needs the owner-view database role and an audit entry per call; the kill switch and data export will reuse `verifySecondFactorCode` exactly as the three routes do (authorise, then code, then change).
+  - Not done on purpose: cancelling a pending invite; adding an existing account to a second brand (accept answers 409); TOTP replay inside 30 seconds.
+  - Test caveats: the two-admin HTTP concurrency test is probabilistic (the fix wave added the deterministic service-level barrier test); several users tests share state and run in order; the log-lacks-address assertions are vacuous for the stand-in mailer.
+  - Product note: after a second-factor reset, anyone who holds the person's password can sign in and enrol their own second factor; the email notification and the session kill are the mitigation (spec design).
+  - Deferred minors (cosmetic or later): TypeScript typing of `authOptions` (would remove the `VerifyTotp` cast); an unflagged client release after a failed rollback in `withBrand` and in `removeMember` and `resetSecondFactor` (fix both in `packages/db` later); a user ID in the path is still compared as written (an uppercase user UUID answers 404); test assertion polish.
+- Pull request: not opened yet. Nothing has been pushed.

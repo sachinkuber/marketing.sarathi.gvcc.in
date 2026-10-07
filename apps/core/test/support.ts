@@ -6,7 +6,7 @@ import { createPool, type Pool } from '@mkt/db'
 import { createTestDatabase, type TestDatabase } from '@mkt/db/testing'
 import { requireDatabase } from '@mkt/test-support'
 import type { Config } from '../src/config.ts'
-import { buildCore } from '../src/core.ts'
+import { buildCore, type CoreDeps } from '../src/core.ts'
 import { createLogger } from '../src/logger.ts'
 import { AttemptLimiter } from '../src/auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../src/auth/policy.ts'
@@ -59,6 +59,8 @@ export async function createStack(
     audit?: MemoryAudit
     // Keep the library's own log lines, routed as in production, instead of switching them off.
     libraryLog?: boolean
+    // A test seam: probe routes declared in the table. Production never passes it.
+    extraRoutes?: CoreDeps['extraRoutes']
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
@@ -91,6 +93,7 @@ export async function createStack(
     audit,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
+    extraRoutes: options.extraRoutes,
   })
   const server = await startTestServer(core.app)
   return {
@@ -282,4 +285,23 @@ export async function enrol(
   if (verify.status !== 200) throw new Error(`verify failed: ${verify.status} ${verify.text}`)
   await client.refreshCsrf()
   return { secret, backupCodes: enable.json.backupCodes as string[] }
+}
+
+// A client signed in with email and password, with no second factor set up.
+export async function signedInClient(stack: Stack, email: string, password: string): Promise<TestClient> {
+  const client = stack.newClient()
+  const reply = await client.signIn(email, password)
+  if (reply.status !== 200) throw new Error(`sign-in failed: ${reply.status} ${reply.text}`)
+  return client
+}
+
+// A client signed in and enrolled: it can pass the enrolment gate and knows its authenticator secret.
+export async function enrolledClient(
+  stack: Stack,
+  email: string,
+  password: string,
+): Promise<{ client: TestClient; secret: string }> {
+  const client = await signedInClient(stack, email, password)
+  const { secret } = await enrol(client, password)
+  return { client, secret }
 }

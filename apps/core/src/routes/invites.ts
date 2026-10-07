@@ -1,6 +1,6 @@
 import type { Pool } from '@mkt/db'
-import { Router } from 'express'
 import { z } from 'zod'
+import type { RouteTable } from '../access/routes.ts'
 import { acceptInvite, lookupInvite } from '../auth/invites.ts'
 import { attemptKey, type AttemptLimiter } from '../auth/limiter.ts'
 import type { Auth } from '../auth/options.ts'
@@ -18,64 +18,83 @@ const acceptBody = z.strictObject({
 })
 
 // Public: the person has no session yet. The origin check in the request guard still applies.
-export function inviteRoutes(deps: {
-  auth: Auth
-  pool: Pool
-  limiter: AttemptLimiter
-  audit: AuditSink
-}): Router {
-  const router = Router()
-  router.post('/lookup', validate({ body: lookupBody }), async (req, res) => {
-    const { body } = inputOf<{ body: z.infer<typeof lookupBody> }>(res)
-    const key = attemptKey('/invites/accept', req.ip ?? 'unknown')
-    if (deps.limiter.check(key) > 0) {
-      await deps.audit.record({
-        action: 'auth.locked_out',
-        actor: null,
-        outcome: 'failure',
-        detail: { path: '/invites/lookup' },
-      })
-      throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
-    }
-    let found: Awaited<ReturnType<typeof lookupInvite>>
-    try {
-      found = await lookupInvite(deps.pool, body.token)
-    } catch (error) {
-      deps.limiter.fail(key)
-      await deps.audit.record({ action: 'auth.invite_lookup', actor: null, outcome: 'failure' })
-      throw error
-    }
-    res.json(found)
+export function registerInviteRoutes(
+  table: RouteTable,
+  deps: {
+    auth: Auth
+    pool: Pool
+    limiter: AttemptLimiter
+    audit: AuditSink
+  },
+): void {
+  table.add({
+    method: 'post',
+    path: '/invites/lookup',
+    access: { kind: 'public' },
+    summary: 'Show an invited person their email, role and brand',
+    handlers: [
+      validate({ body: lookupBody }),
+      async (req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof lookupBody> }>(res)
+        const key = attemptKey('/invites/accept', req.ip ?? 'unknown')
+        if (deps.limiter.check(key) > 0) {
+          await deps.audit.record({
+            action: 'auth.locked_out',
+            actor: null,
+            outcome: 'failure',
+            detail: { path: '/invites/lookup' },
+          })
+          throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
+        }
+        let found: Awaited<ReturnType<typeof lookupInvite>>
+        try {
+          found = await lookupInvite(deps.pool, body.token)
+        } catch (error) {
+          deps.limiter.fail(key)
+          await deps.audit.record({ action: 'auth.invite_lookup', actor: null, outcome: 'failure' })
+          throw error
+        }
+        res.json(found)
+      },
+    ],
   })
-  router.post('/accept', validate({ body: acceptBody }), async (req, res) => {
-    const { body } = inputOf<{ body: z.infer<typeof acceptBody> }>(res)
-    const key = attemptKey('/invites/accept', req.ip ?? 'unknown')
-    if (deps.limiter.check(key) > 0) {
-      await deps.audit.record({
-        action: 'auth.locked_out',
-        actor: null,
-        outcome: 'failure',
-        detail: { path: '/invites/accept' },
-      })
-      throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
-    }
-    let accepted: Awaited<ReturnType<typeof acceptInvite>>
-    try {
-      accepted = await acceptInvite(deps.auth, deps.pool, body)
-    } catch (error) {
-      deps.limiter.fail(key)
-      await deps.audit.record({ action: 'auth.invite_accepted', actor: null, outcome: 'failure' })
-      throw error
-    }
-    // The account exists now: a failure to write the audit entry is not a failed attempt.
-    deps.limiter.succeed(key)
-    await deps.audit.record({
-      action: 'auth.invite_accepted',
-      actor: accepted.userId,
-      brandId: accepted.brandId,
-      outcome: 'success',
-    })
-    res.status(201).json({ userId: accepted.userId })
+  table.add({
+    method: 'post',
+    path: '/invites/accept',
+    access: { kind: 'public' },
+    summary: 'Accept an invite: make the account and the membership',
+    handlers: [
+      validate({ body: acceptBody }),
+      async (req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof acceptBody> }>(res)
+        const key = attemptKey('/invites/accept', req.ip ?? 'unknown')
+        if (deps.limiter.check(key) > 0) {
+          await deps.audit.record({
+            action: 'auth.locked_out',
+            actor: null,
+            outcome: 'failure',
+            detail: { path: '/invites/accept' },
+          })
+          throw new AppError(429, 'too_many_attempts', 'Too many attempts. Try again later.')
+        }
+        let accepted: Awaited<ReturnType<typeof acceptInvite>>
+        try {
+          accepted = await acceptInvite(deps.auth, deps.pool, body)
+        } catch (error) {
+          deps.limiter.fail(key)
+          await deps.audit.record({ action: 'auth.invite_accepted', actor: null, outcome: 'failure' })
+          throw error
+        }
+        // The account exists now: a failure to write the audit entry is not a failed attempt.
+        deps.limiter.succeed(key)
+        await deps.audit.record({
+          action: 'auth.invite_accepted',
+          actor: accepted.userId,
+          brandId: accepted.brandId,
+          outcome: 'success',
+        })
+        res.status(201).json({ userId: accepted.userId })
+      },
+    ],
   })
-  return router
 }

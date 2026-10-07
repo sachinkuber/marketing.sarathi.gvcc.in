@@ -3,7 +3,8 @@ import type { BetterAuthOptions } from 'better-auth'
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node'
 import type { Express, Router } from 'express'
 import type { Logger } from 'pino'
-import { createApiRouter } from './api.ts'
+import { createApi } from './api.ts'
+import type { RouteTable } from './access/routes.ts'
 import { createApp } from './app.ts'
 import { AttemptLimiter } from './auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from './auth/policy.ts'
@@ -23,9 +24,16 @@ export interface CoreDeps {
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']
+  // A test seam: tests declare probe routes. Production leaves it unset.
+  extraRoutes?: (table: RouteTable, context: { auth: Auth; pool: Pool }) => void
 }
 
-export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Router } {
+export function buildCore(deps: CoreDeps): {
+  app: Express
+  auth: Auth
+  api: Router
+  routes: RouteTable
+} {
   const { config } = deps
   const limiter =
     deps.limiter ??
@@ -54,13 +62,19 @@ export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Rout
       return session?.session.id ?? null
     },
   })
-  const api = createApiRouter({
-    auth,
-    pool: deps.appPool,
-    secret: config.authSecret,
-    limiter,
-    audit: deps.audit,
-  })
+  const { router: api, table: routes } = createApi(
+    {
+      auth,
+      pool: deps.appPool,
+      secret: config.authSecret,
+      limiter,
+      audit: deps.audit,
+      mailer: deps.mailer,
+      origin: config.publicOrigin,
+      onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+    },
+    deps.extraRoutes,
+  )
   const app = createApp({
     logger: deps.logger,
     ready: async () => {
@@ -70,5 +84,5 @@ export function buildCore(deps: CoreDeps): { app: Express; auth: Auth; api: Rout
     authHandler: toNodeHandler(auth),
     api,
   })
-  return { app, auth, api }
+  return { app, auth, api, routes }
 }

@@ -1,11 +1,14 @@
 import type { Pool } from '@mkt/db'
-import { Router } from 'express'
-import { enrolmentGate, loadPrincipal, principalOf } from './auth/session.ts'
+import type { Router } from 'express'
+import { RouteTable } from './access/routes.ts'
+import { principalOf } from './auth/session.ts'
 import type { AttemptLimiter } from './auth/limiter.ts'
 import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
-import type { AuditSink } from './ports.ts'
-import { inviteRoutes } from './routes/invites.ts'
+import type { AuditSink, Mailer } from './ports.ts'
+import { registerBrandRoutes } from './routes/brands.ts'
+import { registerInviteRoutes } from './routes/invites.ts'
+import { registerUserRoutes } from './routes/users.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -13,31 +16,61 @@ export interface ApiDeps {
   secret: string
   limiter: AttemptLimiter
   audit: AuditSink
+  mailer: Mailer
+  // The configured public origin: invite links never use anything from the request.
+  origin: string
+  onMailFailure?: (error: unknown) => void
 }
 
-export function createApiRouter(deps: ApiDeps): Router {
-  const api = Router()
+export interface ApiContext {
+  auth: Auth
+  pool: Pool
+}
 
-  api.get('/session', loadPrincipal(deps.auth, deps.pool), (_req, res) => {
-    const principal = principalOf(res)
-    res.json({
-      user: { id: principal.userId, email: principal.email, name: principal.name },
-      twoFactorEnabled: principal.twoFactorEnabled,
-      needsSecondFactor: principal.needsSecondFactor,
-      enrolmentRequired: principal.needsSecondFactor && !principal.twoFactorEnabled,
-      platformOwner: principal.isPlatformOwner,
-      memberships: principal.memberships,
-      csrfToken: csrfTokenFor(deps.secret, principal.sessionId),
-    })
+// Every route of the service is declared here, through the table, and nowhere else.
+export function createApi(
+  deps: ApiDeps,
+  extra?: (table: RouteTable, context: ApiContext) => void,
+): { router: Router; table: RouteTable } {
+  const table = new RouteTable()
+
+  table.add({
+    method: 'get',
+    path: '/session',
+    access: { kind: 'signed_in' },
+    summary: 'The signed-in person, their memberships and the request token',
+    handlers: [
+      (_req, res) => {
+        const principal = principalOf(res)
+        res.json({
+          user: { id: principal.userId, email: principal.email, name: principal.name },
+          twoFactorEnabled: principal.twoFactorEnabled,
+          needsSecondFactor: principal.needsSecondFactor,
+          enrolmentRequired: principal.needsSecondFactor && !principal.twoFactorEnabled,
+          platformOwner: principal.isPlatformOwner,
+          memberships: principal.memberships,
+          csrfToken: csrfTokenFor(deps.secret, principal.sessionId),
+        })
+      },
+    ],
   })
 
-  api.use(
-    '/invites',
-    inviteRoutes({ auth: deps.auth, pool: deps.pool, limiter: deps.limiter, audit: deps.audit }),
-  )
-  // Public routes (no session) are added above this line.
+  registerInviteRoutes(table, {
+    auth: deps.auth,
+    pool: deps.pool,
+    limiter: deps.limiter,
+    audit: deps.audit,
+  })
+  registerBrandRoutes(table, { pool: deps.pool })
+  registerUserRoutes(table, {
+    auth: deps.auth,
+    pool: deps.pool,
+    mailer: deps.mailer,
+    audit: deps.audit,
+    origin: deps.origin,
+    onMailFailure: deps.onMailFailure,
+  })
 
-  // Everything below needs a session, and for most roles a completed enrolment.
-  api.use(loadPrincipal(deps.auth, deps.pool), enrolmentGate)
-  return api
+  extra?.(table, { auth: deps.auth, pool: deps.pool })
+  return { router: table.build({ auth: deps.auth, pool: deps.pool }), table }
 }
