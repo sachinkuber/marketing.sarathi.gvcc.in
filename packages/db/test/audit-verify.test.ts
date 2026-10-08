@@ -101,6 +101,15 @@ describe('reading and verifying the audit log (test 35, verification half)', () 
     expect(exports.rows.map((r) => Number(r.through_seq))).toEqual([3])
   })
 
+  it('refuses an export record with no hash, for an entry that exists and for one that does not', async () => {
+    for (const through of [3, 99]) {
+      await expect(
+        run(db, 'audit_writer', 'select audit.record_export($1, $2, null, $3)', [A, through, 'store://null']),
+        String(through),
+      ).rejects.toMatchObject({ code: '23514' })
+    }
+  })
+
   it('finds an entry that was altered, at that entry', async () => {
     await tamper(db, "update audit.log set action = 'test.altered' where chain_key = $1 and seq = 2", [A])
     const result = await run(db, 'owner_view', 'select * from audit.verify_chain($1)', [A])

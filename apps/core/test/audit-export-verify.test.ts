@@ -57,9 +57,12 @@ describe('exporting and verifying the audit log', () => {
     await fill(null, 2)
   })
   afterEach(async () => {
-    await reader.end()
-    await writer.end()
-    await db.drop()
+    try {
+      await reader?.end()
+      await writer?.end()
+    } finally {
+      await db?.drop()
+    }
   })
 
   it('exports each chain once, in batches, and exports only what is new the next time', async () => {
@@ -67,6 +70,10 @@ describe('exporting and verifying the audit log', () => {
     expect(first).toEqual({ chains: 3, batches: 4, entries: 10 })
     const marks = await store.marks(A)
     expect(marks.map((m) => m.throughSeq)).toEqual([3, 5])
+    // `at` keeps the microseconds the entry hash covers, so an auditor holding only the export can recompute it.
+    const held = await store.entriesOf(A)
+    expect(held.length).toBe(5)
+    for (const row of held) expect(row.at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
     expect(await exportAudit({ reader, writer, store })).toEqual({ chains: 3, batches: 0, entries: 0 })
     await fill(A, 2)
     expect(await exportAudit({ reader, writer, store })).toEqual({ chains: 3, batches: 1, entries: 2 })

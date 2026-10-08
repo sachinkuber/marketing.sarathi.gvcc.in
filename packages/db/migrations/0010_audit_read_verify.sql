@@ -64,7 +64,7 @@ as $$
 declare v_id uuid;
 begin
   -- An export record states that storage outside the server holds the chain up to this entry. It must be true.
-  if p_hash is distinct from (select l.hash from audit.log l where l.chain_key = p_chain and l.seq = p_through) then
+  if p_hash is null or p_hash is distinct from (select l.hash from audit.log l where l.chain_key = p_chain and l.seq = p_through) then
     raise exception 'the export does not match the log' using errcode = '23514';
   end if;
   insert into audit.export (chain_key, through_seq, chain_hash, location)

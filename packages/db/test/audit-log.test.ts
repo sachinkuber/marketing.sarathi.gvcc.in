@@ -56,6 +56,14 @@ describe('the audit log', () => {
         run(db, role, "insert into audit.log (chain_key) values ('x')"),
         role,
       ).rejects.toMatchObject({ code: '42501' })
+      // Update, delete and truncate are refused for missing table rights.
+      for (const sql of [
+        "update audit.log set action = 'x.y'",
+        'delete from audit.log',
+        'truncate audit.log',
+      ]) {
+        await expect(run(db, role, sql), `${role}: ${sql}`).rejects.toMatchObject({ code: '42501' })
+      }
     }
     await run(db, 'audit_writer', APPEND, [A, 'user', null, 'test.one', 'success', null, null])
     // The owner of the table and the superuser are stopped by the triggers.
@@ -165,11 +173,11 @@ describe('the audit log', () => {
     expect(await brokenCount(db, A)).toBe(0)
   })
 
-  it('keeps every chain unbroken under fifty concurrent writers on several chains (test 36)', async () => {
+  it('keeps every chain unbroken under fifty concurrent writers to one brand chain, with writers on other chains too (test 36)', async () => {
     const pool = new pg.Pool({ connectionString: db.urlFor('audit_writer'), max: 12 })
     try {
       const targets = [
-        ...Array.from({ length: 30 }, () => A),
+        ...Array.from({ length: 50 }, () => A),
         ...Array.from({ length: 12 }, () => B),
         ...Array.from({ length: 8 }, () => null),
       ]
@@ -180,9 +188,9 @@ describe('the audit log', () => {
           pool.query(APPEND, [brand, 'system', null, 'test.concurrent', 'success', `n${i}`, null]),
         ),
       )
-      expect(results).toHaveLength(50)
+      expect(results).toHaveLength(70)
       for (const [chain, added] of [
-        [A, 30],
+        [A, 50],
         [B, 12],
         ['platform', 8],
       ] as const) {
@@ -194,6 +202,12 @@ describe('the audit log', () => {
         expect(now.rows[0].d).toBe(now.rows[0].n)
         expect(now.rows[0].top).toBe(now.rows[0].n)
         expect(await brokenCount(db, chain)).toBe(0)
+        // The clock is read under the lock, so time never runs backwards along a chain.
+        const backwards = await db.admin.query(
+          'select count(*)::int as n from (select at, lag(at) over (order by seq) as p from audit.log where chain_key = $1) t where p > at',
+          [chain],
+        )
+        expect(backwards.rows[0].n, chain).toBe(0)
       }
     } finally {
       await pool.end()

@@ -75,14 +75,18 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
               client,
             ),
           // The mail failed and the invite was taken back: the trail must not end at "invited".
-          onWithdrawn: (withdrawn) =>
-            deps.audit.record({
-              action: 'users.invite_withdrawn',
-              actor,
-              brandId: brand.brandId,
-              outcome: 'success',
-              detail: { inviteId: withdrawn.id, reason: 'mail_not_sent' },
-            }),
+          // In the same transaction as the delete: if it cannot be recorded, the invite stays and is named.
+          onWithdrawn: (client, withdrawn) =>
+            deps.audit.record(
+              {
+                action: 'users.invite_withdrawn',
+                actor,
+                brandId: brand.brandId,
+                outcome: 'success',
+                detail: { inviteId: withdrawn.id, reason: 'mail_not_sent' },
+              },
+              client,
+            ),
         })
         res.status(201).json({ id: invite.id, expiresAt: invite.expiresAt })
       },

@@ -36,11 +36,10 @@ export async function exportAudit(deps: {
     }
     let from = recordedSeq
     while (from < headSeq) {
-      const page = await deps.reader.query('select * from audit.entries_after($1, $2, $3)', [
-        head.chain_key,
-        from,
-        batchSize,
-      ])
+      const page = await deps.reader.query(
+        'select l.*, audit.at_text(l.at) as at_text from audit.entries_after($1, $2, $3) l',
+        [head.chain_key, from, batchSize],
+      )
       const rows = page.rows as Record<string, unknown>[]
       if (rows.length === 0) break
       const last = rows[rows.length - 1]!
@@ -67,11 +66,12 @@ export async function exportAudit(deps: {
   return { chains: heads.rows.length, batches, entries }
 }
 
-// `at` is for reading only, to the millisecond: node-pg drops the microseconds the entry hash covers.
+// `at` is the database's own text (UTC, to the microsecond) because the entry hash covers it. Never recompute
+// a hash from a JavaScript Date: it keeps only milliseconds.
 function toRow(row: Record<string, unknown>): ExportedRow {
   return {
     seq: Number(row.seq),
-    at: (row.at as Date).toISOString(),
+    at: row.at_text as string,
     actor_kind: row.actor_kind as string,
     actor_id: (row.actor_id as string | null) ?? null,
     action: row.action as string,

@@ -61,8 +61,21 @@ create trigger export_no_change before update or delete on audit.export
 create trigger export_no_truncate before truncate on audit.export
   for each statement execute function audit.refuse_change();
 
+-- The time of an entry as the hash sees it: UTC, to the microsecond. The export reads it through this function,
+-- because a JavaScript Date keeps only milliseconds and an auditor holding the export must be able to
+-- recompute each hash from it.
+create function audit.at_text(p timestamptz)
+returns text
+language sql immutable set search_path = pg_catalog
+as $$ select to_char(p at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') $$;
+alter function audit.at_text(timestamptz) owner to mkt_definer;
+revoke all on function audit.at_text(timestamptz) from public;
+grant execute on function audit.at_text(timestamptz) to mkt_owner_view;
+
 -- One definition of an entry's hash, used to append and to verify, so the two cannot drift. The input is the
--- text of a JSON array of the fields, which writes each field and each null unambiguously.
+-- jsonb text form of the array of the ten fields (chain key, sequence number, `at` as UTC to the microsecond,
+-- actor kind, actor, action, outcome, subject, detail, previous hash), which writes each field and each null
+-- unambiguously.
 create function audit.entry_hash(
   p_chain_key text, p_seq bigint, p_at timestamptz, p_actor_kind app.actor_kind, p_actor_id uuid,
   p_action text, p_outcome text, p_subject text, p_detail jsonb, p_prev_hash text)
@@ -70,7 +83,7 @@ returns text
 language sql stable set search_path = pg_catalog
 as $$
   select 'sha256:' || encode(sha256(convert_to(jsonb_build_array(
-    p_chain_key, p_seq, to_char(p_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    p_chain_key, p_seq, audit.at_text(p_at),
     p_actor_kind::text, p_actor_id, p_action, p_outcome, p_subject, p_detail, p_prev_hash)::text, 'UTF8')), 'hex')
 $$;
 alter function audit.entry_hash(text, bigint, timestamptz, app.actor_kind, uuid, text, text, text, jsonb, text)
@@ -81,6 +94,13 @@ revoke all on function audit.entry_hash(text, bigint, timestamptz, app.actor_kin
 -- held until the caller's transaction ends, so two writers cannot extend the same previous entry, and a
 -- rolled-back transaction leaves no gap. Called by the application role inside the transaction of the change
 -- it records, and by the audit-writer role for entries that belong to no transaction.
+-- Notes for callers:
+--  * A caller at REPEATABLE READ or SERIALIZABLE may get 23505 on the unique (chain_key, seq) when its snapshot
+--    predates another writer's entry. That fails closed (the entry is not written) and is harmless.
+--  * A transaction that appends to two chains must do so in a fixed order (for example the brand chain, then
+--    the platform chain), or two such transactions can deadlock on the advisory locks.
+--  * The cross-brand guard below is defence in depth, not a boundary: the application role sets
+--    app.brand_id itself, so it is only as strong as the code that sets it.
 create function audit.append(
   p_brand uuid, p_actor_kind app.actor_kind, p_actor uuid,
   p_action text, p_outcome text, p_subject text, p_detail jsonb)
@@ -92,7 +112,7 @@ declare
   v_set uuid := nullif(current_setting('app.brand_id', true), '')::uuid;
   v_seq bigint;
   v_prev text;
-  v_at timestamptz := clock_timestamp();
+  v_at timestamptz;
 begin
   -- A session working inside one brand cannot write another brand's chain.
   if v_set is not null and p_brand is not null and v_set <> p_brand then
@@ -102,6 +122,8 @@ begin
     raise exception 'unknown brand' using errcode = '23503';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('audit.log:' || v_chain, 0));
+  -- Read the clock only once the lock is held, so `at` never runs backwards along a chain.
+  v_at := clock_timestamp();
   select l.seq, l.hash into v_seq, v_prev from audit.log l where l.chain_key = v_chain order by l.seq desc limit 1;
   v_seq := coalesce(v_seq, 0) + 1;
   insert into audit.log (chain_key, brand_id, seq, at, actor_kind, actor_id, action, outcome, subject, detail, prev_hash, hash)
@@ -118,6 +140,7 @@ revoke create on schema audit from mkt_definer;
 -- Down Migration
 drop function audit.append(uuid, app.actor_kind, uuid, text, text, text, jsonb);
 drop function audit.entry_hash(text, bigint, timestamptz, app.actor_kind, uuid, text, text, text, jsonb, text);
+drop function audit.at_text(timestamptz);
 drop table audit.export;
 drop table audit.log;
 drop function audit.refuse_change();

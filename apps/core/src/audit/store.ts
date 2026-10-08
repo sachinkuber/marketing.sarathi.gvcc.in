@@ -32,6 +32,8 @@ export interface ExportStore {
   // Write-once. Putting the same chain and throughSeq again with the same headHash returns the same
   // location (so a run that crashed after storing can be repeated). With a different headHash it throws.
   put(batch: ExportBatch): Promise<string>
+  // The chain's COMPLETE list of marks, ascending by throughSeq: exportAudit and verifyAudit read the last
+  // element as the newest.
   marks(chainKey: string): Promise<ExportMark[]>
   chainKeys(): Promise<string[]>
 }
@@ -69,6 +71,14 @@ export class MemoryExportStore implements ExportStore {
         location,
       }))
       .sort((a, b) => a.throughSeq - b.throughSeq)
+  }
+
+  // The entries held for a chain, in order (for tests that read the export as an auditor would).
+  async entriesOf(chainKey: string): Promise<ExportedRow[]> {
+    return [...this.held.values()]
+      .filter((entry) => entry.chainKey === chainKey)
+      .sort((a, b) => a.throughSeq - b.throughSeq)
+      .flatMap((entry) => entry.batch.entries)
   }
 
   async chainKeys(): Promise<string[]> {

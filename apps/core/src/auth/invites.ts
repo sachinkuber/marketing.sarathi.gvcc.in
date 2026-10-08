@@ -24,9 +24,9 @@ export async function createInvite(
     // be written) the invite is rolled back and no mail is sent.
     inside?: (client: PoolClient, invite: { id: string }) => Promise<void>
     onMailFailure?: (error: unknown) => void
-    // Runs after an invite whose mail failed has been taken back (for example to audit the withdrawal). If it
-    // throws, that is reported through onMailFailure and the attempt is still refused with the 502.
-    onWithdrawn?: (invite: { id: string }) => Promise<void>
+    // Runs in the same transaction as the delete of an invite whose mail failed (for example to audit the
+    // withdrawal). If it throws, the delete is rolled back and the invite is reported as left behind.
+    onWithdrawn?: (client: PoolClient, invite: { id: string }) => Promise<void>
   },
 ): Promise<{ id: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url')
@@ -52,19 +52,13 @@ export async function createInvite(
     // An invite nobody was told about is worse than none: take it back, and tell the person who asked.
     input.onMailFailure?.(error)
     try {
-      await withBrand(pool, input.brandId, (client) =>
-        client.query('delete from app.invite where id = $1', [row.id]),
-      )
+      await withBrand(pool, input.brandId, async (client) => {
+        await client.query('delete from app.invite where id = $1', [row.id])
+        await input.onWithdrawn?.(client, { id: row.id })
+      })
     } catch {
       // The invite is still there and nobody was told about it: name it so the log shows what to remove.
       throw new Error(`invite ${row.id} left behind after the invite email failed`, { cause: error })
-    }
-    try {
-      await input.onWithdrawn?.({ id: row.id })
-    } catch (reportError) {
-      input.onMailFailure?.(
-        new Error(`invite ${row.id} was taken back, but that could not be recorded`, { cause: reportError }),
-      )
     }
     throw new AppError(502, 'mail_not_sent', 'The invite email could not be sent, so no invite was made.')
   }

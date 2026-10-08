@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createInvite } from '../src/auth/invites.ts'
-import { MemoryAudit } from '../src/testing.ts'
+import { MemoryAudit, ThrowingMailer } from '../src/testing.ts'
 import {
   ORIGIN,
   addBrand,
@@ -94,6 +94,45 @@ describe('each change-bound audit call carries its transaction (in memory)', () 
         expect(at, action).toBeGreaterThanOrEqual(0)
         expect(audit.transactional[at], action).toBe(true)
       }
+    } finally {
+      await stack.close()
+    }
+  })
+})
+
+describe('a withdrawn invite carries its transaction', () => {
+  it('passes the transaction when the mail fails and the invite is taken back (in memory)', async () => {
+    const audit = new MemoryAudit()
+    const stack = await createStack({ audit, mailer: new ThrowingMailer() })
+    try {
+      const brand = await addBrand(stack, 'brand-a')
+      const admin = await enrolled(stack, 'admin', 'brand_admin', brand)
+      expect((await invite(admin, brand, 'nomail@example.test')).status).toBe(502)
+      const at = audit.entries.findIndex((entry) => entry.action === 'users.invite_withdrawn')
+      expect(at).toBeGreaterThanOrEqual(0)
+      expect(audit.transactional[at]).toBe(true)
+    } finally {
+      await stack.close()
+    }
+  })
+
+  it('takes the invite back and puts the withdrawal on the brand chain (real database)', async () => {
+    const stack = await createStack({ realAudit: true, mailer: new ThrowingMailer() })
+    try {
+      const brand = await addBrand(stack, 'brand-a')
+      const admin = await enrolled(stack, 'admin', 'brand_admin', brand)
+      expect((await invite(admin, brand, 'nomail@example.test')).status).toBe(502)
+      const left = await stack.db.admin.query(
+        "select count(*)::int as n from app.invite where email = 'nomail@example.test'",
+      )
+      expect(left.rows[0].n).toBe(0)
+      const entries = await stack.db.admin.query(
+        "select action from audit.log where chain_key = $1 and action like 'users.invite%' order by seq",
+        [brand],
+      )
+      expect(entries.rows.map((r) => r.action)).toEqual(['users.invited', 'users.invite_withdrawn'])
+      const verdict = await stack.db.admin.query('select ok from audit.verify_chain($1)', [brand])
+      expect(verdict.rows[0].ok).toBe(true)
     } finally {
       await stack.close()
     }
