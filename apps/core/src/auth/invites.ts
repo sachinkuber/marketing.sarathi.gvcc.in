@@ -97,7 +97,14 @@ export async function lookupInvite(pool: Pool, token: string) {
 export async function acceptInvite(
   auth: Auth,
   pool: Pool,
-  input: { token: string; name: string; password: string },
+  input: {
+    token: string
+    name: string
+    password: string
+    // Runs in the redeeming transaction, after the redeem. If it throws (for example the audit entry cannot
+    // be written) the redeem is rolled back, the new user is removed and the invite stays usable.
+    inside?: (client: PoolClient, accepted: { userId: string; brandId: string }) => Promise<void>
+  },
 ): Promise<{ userId: string; brandId: string }> {
   const invite = await peekInvite(pool, input.token)
   if (!invite) throw INVALID()
@@ -107,11 +114,23 @@ export async function acceptInvite(
     password: input.password,
   })
   try {
-    const redeemed = await pool.query('select brand_id from app.redeem_invite($1, $2)', [
-      hashInviteToken(input.token),
-      userId,
-    ])
-    return { userId, brandId: redeemed.rows[0].brand_id as string }
+    const client = await pool.connect()
+    try {
+      await client.query('begin')
+      const redeemed = await client.query('select brand_id from app.redeem_invite($1, $2)', [
+        hashInviteToken(input.token),
+        userId,
+      ])
+      const accepted = { userId, brandId: redeemed.rows[0].brand_id as string }
+      await input.inside?.(client, accepted)
+      await client.query('commit')
+      return accepted
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
   } catch (error) {
     await removeAfterFailure(
       auth,

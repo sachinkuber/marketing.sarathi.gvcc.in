@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createInvite } from '../src/auth/invites.ts'
 import { MemoryAudit } from '../src/testing.ts'
 import {
+  ORIGIN,
   addBrand,
   addUser,
   createStack,
   enrolledClient,
+  tokenFromMail,
   totp,
   type Stack,
   type TestClient,
@@ -66,7 +69,26 @@ describe('each change-bound audit call carries its transaction (in memory)', () 
       expect((await patchRole(admin, brand, mover.id, 'viewer')).status).toBe(200)
       expect((await removeUser(admin, brand, leaver.id)).status).toBe(204)
       expect((await resetSecondFactor(platform, victim.id)).status).toBe(204)
-      const wanted = ['users.invited', 'users.role_changed', 'users.removed', 'users.second_factor_reset']
+      const issued = await createInvite(stack.appPool, stack.mailer, {
+        brandId: brand,
+        email: 'joiner@example.test',
+        role: 'viewer',
+        invitedBy: admin.id,
+        origin: ORIGIN,
+      })
+      expect(issued.id).toBeTruthy()
+      const token = tokenFromMail(stack.mailer.sent[stack.mailer.sent.length - 1]!)
+      const accepted = await stack
+        .newClient()
+        .request('POST', '/api/v1/invites/accept', { body: { token, name: 'Joiner', password: PASSWORD } })
+      expect(accepted.status).toBe(201)
+      const wanted = [
+        'auth.invite_accepted',
+        'users.invited',
+        'users.role_changed',
+        'users.removed',
+        'users.second_factor_reset',
+      ]
       for (const action of wanted) {
         const at = audit.entries.findIndex((entry) => entry.action === action)
         expect(at, action).toBeGreaterThanOrEqual(0)
@@ -160,5 +182,51 @@ describe('with the database audit sink', () => {
     )
     expect(rows.rows[0].n).toBe(0)
     expect(stack.mailer.sent.length).toBe(mailBefore)
+  })
+
+  const issue = async (email: string) => {
+    await createInvite(stack.appPool, stack.mailer, {
+      brandId: brand,
+      email,
+      role: 'viewer',
+      invitedBy: admin.id,
+      origin: ORIGIN,
+    })
+    return tokenFromMail(stack.mailer.sent[stack.mailer.sent.length - 1]!)
+  }
+  const accept = (token: string) =>
+    stack
+      .newClient()
+      .request('POST', '/api/v1/invites/accept', { body: { token, name: 'Joiner', password: PASSWORD } })
+
+  it('puts a successful invite acceptance on the brand chain, once, with the new user as actor', async () => {
+    const token = await issue('accepted@example.test')
+    const reply = await accept(token)
+    expect(reply.status).toBe(201)
+    const entries = (await chain(brand, 'auth.invite_accepted')).filter(
+      (r) => r.actor_id === reply.json.userId,
+    )
+    expect(entries).toHaveLength(1)
+    const verdict = await stack.db.admin.query('select ok from audit.verify_chain($1)', [brand])
+    expect(verdict.rows[0].ok).toBe(true)
+  })
+
+  it('grants nothing when the acceptance cannot be audited, and the token still works afterwards', async () => {
+    const token = await issue('refused@example.test')
+    await stack.db.admin.query(`revoke execute on function ${APPEND} from mkt_app`)
+    try {
+      expect((await accept(token)).status).toBe(500)
+    } finally {
+      await stack.db.admin.query(`grant execute on function ${APPEND} to mkt_app`)
+    }
+    const users = await stack.db.admin.query(
+      'select count(*)::int as n from auth."user" where email = \'refused@example.test\'',
+    )
+    expect(users.rows[0].n).toBe(0)
+    const used = await stack.db.admin.query(
+      "select used_at from app.invite where email = 'refused@example.test'",
+    )
+    expect(used.rows[0].used_at).toBeNull()
+    expect((await accept(token)).status).toBe(201)
   })
 })

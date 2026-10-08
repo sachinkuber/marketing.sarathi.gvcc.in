@@ -151,11 +151,20 @@ describe('invites (acceptance test 11)', () => {
     const accountsFor = async (email: string) =>
       (await stack.db.admin.query('select id from auth."user" where email = $1', [email])).rows.length
 
-    // A pool that answers the invite check for real and runs `onRedeem` in place of the redeem.
+    // A pool that answers the invite check for real and runs `onRedeem` in place of the redeem, whether
+    // the redeem is sent on the pool or on a client taken from it (as the transaction does).
     function poolWithRedeem(onRedeem: (text: string, values: unknown[]) => Promise<unknown>): Pool {
+      const run = (text: string, values: unknown[], real: Pick<Pool, 'query'>) =>
+        text.includes('redeem_invite') ? onRedeem(text, values) : real.query(text, values)
       return {
-        query: (text: string, values: unknown[]) =>
-          text.includes('redeem_invite') ? onRedeem(text, values) : stack.appPool.query(text, values),
+        query: (text: string, values: unknown[]) => run(text, values, stack.appPool),
+        connect: async () => {
+          const real = await stack.appPool.connect()
+          return {
+            query: (text: string, values: unknown[]) => run(text, values, real),
+            release: () => real.release(),
+          }
+        },
       } as unknown as Pool
     }
 
