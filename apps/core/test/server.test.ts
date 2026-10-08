@@ -1,9 +1,10 @@
 import { createTestDatabase } from '@mkt/db/testing'
 import { requireDatabase } from '@mkt/test-support'
 import { describe, expect, it, vi } from 'vitest'
-import { LogAudit, UnconfiguredMailer } from '../src/adapters.ts'
+import { UnconfiguredMailer } from '../src/adapters.ts'
 import { createLogger } from '../src/logger.ts'
 import { startServer } from '../src/server.ts'
+import { MemoryAudit } from '../src/testing.ts'
 
 // Records the pools startServer builds so the test can emit an error on each one.
 const created = vi.hoisted(() => [] as import('node:events').EventEmitter[])
@@ -25,13 +26,6 @@ describe('adapters', () => {
       new UnconfiguredMailer().send({ to: 'a@example.test', subject: 's', text: 't' }),
     ).rejects.toThrow(/not configured/)
   })
-
-  it('writes audit entries to the log', async () => {
-    const lines: string[] = []
-    const logger = createLogger('info', { write: (line: string) => void lines.push(line) })
-    await new LogAudit(logger).record({ action: 'auth.sign_in', actor: null, outcome: 'success' })
-    expect(lines.join('')).toContain('auth.sign_in')
-  })
 })
 
 describe('startServer', () => {
@@ -44,11 +38,12 @@ describe('startServer', () => {
         nodeEnv: 'test',
         port: 0,
         databaseUrl: db.urlFor('app'),
+        auditDatabaseUrl: db.urlFor('audit_writer'),
         authSecret: 'z'.repeat(48),
         publicOrigin: 'https://app.example.test',
         logLevel: 'silent',
       },
-      { logger, mailer: new UnconfiguredMailer(), audit: new LogAudit(logger) },
+      { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
     )
     try {
       expect((await fetch(`${server.url}/health/live`)).status).toBe(200)
@@ -72,11 +67,12 @@ describe('startServer', () => {
         nodeEnv: 'test',
         port: 0,
         databaseUrl: db.urlFor('app'),
+        auditDatabaseUrl: db.urlFor('audit_writer'),
         authSecret: 'z'.repeat(48),
         publicOrigin: 'https://app.example.test',
         logLevel: 'info',
       },
-      { logger, mailer: new UnconfiguredMailer(), audit: new LogAudit(logger) },
+      { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
     )
     try {
       expect(created).toHaveLength(2)
@@ -96,6 +92,7 @@ describe('startServer', () => {
     nodeEnv: 'test' as const,
     port,
     databaseUrl,
+    auditDatabaseUrl: databaseUrl,
     authSecret: 'z'.repeat(48),
     publicOrigin: 'https://app.example.test',
     logLevel: 'silent' as const,
@@ -105,7 +102,7 @@ describe('startServer', () => {
     await requireDatabase()
     const db = await createTestDatabase()
     const logger = createLogger('silent')
-    const deps = { logger, mailer: new UnconfiguredMailer(), audit: new LogAudit(logger) }
+    const deps = { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() }
     const first = await startServer(configFor(db.urlFor('app'), 0), deps)
     try {
       created.length = 0
@@ -128,7 +125,7 @@ describe('startServer', () => {
     const server = await startServer(configFor(db.urlFor('app'), 0), {
       logger,
       mailer: new UnconfiguredMailer(),
-      audit: new LogAudit(logger),
+      audit: new MemoryAudit(),
     })
     try {
       await Promise.all([server.stop(), server.stop()])

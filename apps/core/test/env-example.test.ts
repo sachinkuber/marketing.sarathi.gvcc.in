@@ -11,4 +11,10 @@ describe('.env.example', () => {
     expect(live).toHaveLength(1)
     expect(live[0]).toMatch(/^DATABASE_URL=postgres:\/\/mkt_app:/)
   })
+
+  it('has exactly one live AUDIT_DATABASE_URL line, for the audit-writer role', () => {
+    const live = lines.filter((line) => /^\s*AUDIT_DATABASE_URL=/.test(line))
+    expect(live).toHaveLength(1)
+    expect(live[0]).toMatch(/^AUDIT_DATABASE_URL=postgres:\/\/mkt_audit_writer:/)
+  })
 })
