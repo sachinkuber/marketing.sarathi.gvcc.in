@@ -48,8 +48,8 @@ export const VECTORS: Vector[] = [
   {
     name: 'accented text in the decomposed form is written in the composed form',
     // The input is "Cafe" followed by U+0301 (decomposed); the expected text has U+00E9 (composed).
-    input: base({ title: 'Café' }),
-    canonical: `${HEAD}"kind":"summary","language":"en","schema":"content-version/1","title":"Café"}`,
+    input: base({ title: 'Cafe\u0301' }),
+    canonical: `${HEAD}"kind":"summary","language":"en","schema":"content-version/1","title":"Caf\u00e9"}`,
     hash: 'sha256:593cc8547c5c1bee396ab221fe07e4ec636dc3f62b221ae2e239d9d35865a285',
   },
   {
@@ -72,7 +72,7 @@ export const VECTORS: Vector[] = [
   },
   {
     name: 'an invisible zero-width space is refused, not removed',
-    input: base({ title: 'Hel​lo' }),
+    input: base({ title: 'Hel\u200blo' }),
     reject: 'invisible',
   },
   {
@@ -89,6 +89,11 @@ export const VECTORS: Vector[] = [
     name: 'a link with a user name or password is refused',
     input: base({ links: [{ url: 'https://user:pw@example.com/', role: 'source' }] }),
     reject: 'user name',
+  },
+  {
+    name: 'a backslash in a link is refused, not read as a slash',
+    input: base({ links: [{ url: 'https://a.com\\path', role: 'source' }] }),
+    reject: 'backslash',
   },
   {
     name: 'a line break in a single-line field is refused',

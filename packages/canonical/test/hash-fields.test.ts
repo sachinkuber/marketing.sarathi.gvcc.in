@@ -75,8 +75,8 @@ describe('every hashed field changes the hash (acceptance test 17)', () => {
 
 describe('the same text in two Unicode forms hashes the same (Review Focus 7)', () => {
   it('treats precomposed and decomposed accents as one', () => {
-    const composed = hashOf((p) => (p.title = 'Café'))
-    const decomposed = hashOf((p) => (p.title = 'Café'))
+    const composed = hashOf((p) => (p.title = 'Caf\u00e9'))
+    const decomposed = hashOf((p) => (p.title = 'Cafe\u0301'))
     expect(decomposed).toBe(composed)
   })
 })

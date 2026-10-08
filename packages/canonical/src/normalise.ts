@@ -37,6 +37,7 @@ const block = (path: string, value: string) => clean(path, value, 'block')
 // are kept as written (spec 10.4). Only https, and no user name or password.
 function normaliseUrl(path: string, value: string): string {
   const text = line(path, value)
+  if (text.includes('\\')) throw new PayloadRejected(path, 'must not contain a backslash')
   const match = /^https:\/\/([^/?#]*)(.*)$/i.exec(text)
   if (!match) throw new PayloadRejected(path, 'must be an https address')
   if ((match[1] ?? '').includes('@'))
