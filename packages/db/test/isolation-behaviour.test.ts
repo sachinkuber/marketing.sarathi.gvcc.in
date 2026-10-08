@@ -5,6 +5,7 @@ import {
   createTestDatabase,
   RUNTIME_ROLES,
   seedBrand,
+  versionRow,
   type RoleName,
   type TestDatabase,
 } from '../src/testing.ts'
@@ -115,11 +116,12 @@ describe('tenant isolation in the database (acceptance tests 2, 3 and 5)', () =>
 
   it('refuses a row in brand A pointing at a parent row in brand B', async () => {
     const parent = await as(db, 'app', B, (c) => c.query('select id from app.content_item limit 1'))
+    const v = versionRow(A, parent.rows[0].id)
     await expect(
       as(db, 'app', A, (c) =>
         c.query(
-          "insert into app.content_version (brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1, $2, 99, '{}', 'sha256:x', 'cv1', 'system')",
-          [A, parent.rows[0].id],
+          "insert into app.content_version (brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1, $2, 99, $3, $4, 'cv1', 'system')",
+          [A, parent.rows[0].id, v.payload, v.hash],
         ),
       ),
     ).rejects.toMatchObject({ code: '23503' })

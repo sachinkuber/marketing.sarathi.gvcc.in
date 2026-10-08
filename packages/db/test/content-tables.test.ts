@@ -1,6 +1,6 @@
 import { requireDatabase } from '@mkt/test-support'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTestDatabase, type TestDatabase } from '../src/testing.ts'
+import { createTestDatabase, versionRow, type TestDatabase } from '../src/testing.ts'
 
 describe('content and approval tables', () => {
   let db: TestDatabase
@@ -90,9 +90,10 @@ async function withVersion(db: TestDatabase) {
     item,
     brand,
   ])
+  const v = versionRow(brand, item)
   await client.query(
-    "insert into app.content_version (id, brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1,$2,$3,1,'{}','sha256:x','cv1','system')",
-    [version, brand, item],
+    "insert into app.content_version (id, brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1,$2,$3,1,$4,$5,'cv1','system')",
+    [version, brand, item, v.payload, v.hash],
   )
   await client.query('savepoint a')
   return { client, brand, version }
