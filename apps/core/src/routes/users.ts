@@ -63,14 +63,17 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
           origin: deps.origin,
           onMailFailure: deps.onMailFailure,
           // In the invite's own transaction: if the audit entry cannot be written, there is no invite.
-          inside: (_client, created) =>
-            deps.audit.record({
-              action: 'users.invited',
-              actor,
-              brandId: brand.brandId,
-              outcome: 'success',
-              detail: { role: body.role, emailHash: emailHash(body.email), inviteId: created.id },
-            }),
+          inside: (client, created) =>
+            deps.audit.record(
+              {
+                action: 'users.invited',
+                actor,
+                brandId: brand.brandId,
+                outcome: 'success',
+                detail: { role: body.role, emailHash: emailHash(body.email), inviteId: created.id },
+              },
+              client,
+            ),
           // The mail failed and the invite was taken back: the trail must not end at "invited".
           onWithdrawn: (withdrawn) =>
             deps.audit.record({
