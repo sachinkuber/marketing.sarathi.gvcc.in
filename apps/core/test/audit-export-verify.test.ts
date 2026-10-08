@@ -150,4 +150,57 @@ describe('exporting and verifying the audit log', () => {
       }),
     ).rejects.toThrow()
   })
+
+  it('refuses to export when the database claims an export the store does not hold (forged record)', async () => {
+    await exportAudit({ reader, writer, store })
+    const before = JSON.stringify([await store.marks(A), await store.marks(B), await store.chainKeys()])
+    await db.admin.query(
+      "insert into audit.export (chain_key, through_seq, chain_hash, location) values ($1, 1000000, $2, 'forged')",
+      [A, 'sha256:' + '1'.repeat(64)],
+    )
+    await fill(A, 2)
+    await expect(exportAudit({ reader, writer, store })).rejects.toThrow(/exceeds/)
+    expect(JSON.stringify([await store.marks(A), await store.marks(B), await store.chainKeys()])).toBe(before)
+  })
+
+  it('refuses to export when the recorded point is ahead of the store but not past the head', async () => {
+    await exportAudit({ reader, writer, store })
+    const fresh = new MemoryExportStore()
+    await expect(exportAudit({ reader, writer, store: fresh })).rejects.toThrow(/exceeds/)
+    expect(await fresh.chainKeys()).toEqual([])
+  })
+
+  it('finds a middle entry rewritten with the whole tail re-hashed consistently', async () => {
+    await exportAudit({ reader, writer, store, batchSize: 3 })
+    await tamper(`do $$
+      declare r audit.log%rowtype; v_prev text;
+      begin
+        select hash into v_prev from audit.log where chain_key = '${A}' and seq = 1;
+        for r in select * from audit.log where chain_key = '${A}' and seq >= 2 order by seq loop
+          update audit.log set prev_hash = v_prev,
+            subject = case when seq = 2 then 'rewritten' else subject end,
+            hash = audit.entry_hash(chain_key, seq, at, actor_kind, actor_id, action, outcome,
+                     case when seq = 2 then 'rewritten' else subject end, detail, v_prev)
+          where chain_key = '${A}' and seq = r.seq returning hash into v_prev;
+        end loop;
+      end $$`)
+    const report = await verifyAudit({ reader, store })
+    expect(report.findings.some((f) => f.kind === 'broken_chain')).toBe(false)
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ chainKey: A, kind: 'export_mismatch', seq: 3 }),
+    )
+  })
+
+  it('the store hands back the same location for the same batch and refuses a different one', async () => {
+    const batch = {
+      chainKey: A,
+      fromSeq: 1,
+      throughSeq: 2,
+      headHash: 'sha256:' + 'a'.repeat(64),
+      entries: [],
+    }
+    const first = await store.put(batch)
+    expect(await store.put(batch)).toBe(first)
+    await expect(store.put({ ...batch, headHash: 'sha256:' + 'b'.repeat(64) })).rejects.toThrow()
+  })
 })

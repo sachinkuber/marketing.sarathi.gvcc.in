@@ -24,7 +24,17 @@ export async function exportAudit(deps: {
     )
     // Start from the last point the database has recorded. A batch the store already holds but the database
     // never recorded is put again below (a no-op in a write-once store) and then recorded.
-    let from = Number((recorded.rows[0] as { n: string }).n)
+    const recordedSeq = Number((recorded.rows[0] as { n: string }).n)
+    const held = await deps.store.marks(head.chain_key)
+    const storeSeq = held.length > 0 ? held[held.length - 1]!.throughSeq : 0
+    // The store is written before the database record, so the record can trail the store but never lead it,
+    // and can never pass the end of the chain. If it does, the record is forged: do not trust it.
+    if (recordedSeq > storeSeq || recordedSeq > headSeq) {
+      throw new Error(
+        `audit export record for chain ${head.chain_key} exceeds what is held: recorded ${recordedSeq}, store ${storeSeq}, head ${headSeq}`,
+      )
+    }
+    let from = recordedSeq
     while (from < headSeq) {
       const page = await deps.reader.query('select * from audit.entries_after($1, $2, $3)', [
         head.chain_key,
