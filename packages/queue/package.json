@@ -1,0 +1,19 @@
+{
+  "name": "@mkt/queue",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.0",
+    "pg-boss": "12.30.0"
+  },
+  "devDependencies": {
+    "@mkt/db": "*",
+    "@mkt/test-support": "*",
+    "@types/pg": "8.23.1"
+  }
+}
