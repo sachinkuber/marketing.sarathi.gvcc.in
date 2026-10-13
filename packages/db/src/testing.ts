@@ -132,3 +132,23 @@ export async function seedBrand(db: TestDatabase, id: string, slug: string): Pro
     await client.end()
   }
 }
+
+// A definition version for tests that need a run. Not brand-scoped, so it is written as the superuser.
+export async function seedDefinition(db: TestDatabase, agent = 'test-agent'): Promise<string> {
+  const { rows } = await db.admin.query<{ id: string }>(
+    `insert into app.agent_definition_version (agent, version, model, effort, files_hash)
+     values ($1, (select coalesce(max(version), 0) + 1 from app.agent_definition_version where agent = $1), 'claude-opus-5-5', 'low', 'test')
+     returning id`,
+    [agent],
+  )
+  return rows[0]!.id
+}
+
+export async function seedRun(db: TestDatabase, brandId: string, definitionId: string): Promise<string> {
+  const { rows } = await db.admin.query<{ id: string }>(
+    `insert into app.run (brand_id, agent, definition_version_id, state, started_by_kind)
+     values ($1, 'test-agent', $2, 'running', 'system') returning id`,
+    [brandId, definitionId],
+  )
+  return rows[0]!.id
+}
