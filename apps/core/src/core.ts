@@ -75,6 +75,7 @@ export function buildCore(deps: CoreDeps): {
       mailer: deps.mailer,
       origin: config.publicOrigin,
       onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+      jobs: deps.jobs,
     },
     deps.extraRoutes,
   )

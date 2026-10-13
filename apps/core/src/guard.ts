@@ -31,6 +31,13 @@ export function requestGuard(options: GuardOptions): RequestHandler {
     if (req.headers['sec-fetch-site'] === 'cross-site') {
       throw new AppError(403, 'cross_site_request', 'This request was sent from another site.')
     }
+    // A worker call carries no cookie and no Origin; it is refused by its own credential check unless that
+    // is right (plan decision 10). A browser cannot set this header on a cross-site request without a
+    // preflight, and no cross-origin access is configured.
+    if (req.originalUrl.startsWith('/api/v1/worker/') && typeof req.headers.authorization === 'string') {
+      next()
+      return
+    }
     const origin = req.headers.origin
     if (typeof origin !== 'string' || !allowed.has(origin)) {
       throw new AppError(403, 'bad_origin', 'This request did not come from this application.')

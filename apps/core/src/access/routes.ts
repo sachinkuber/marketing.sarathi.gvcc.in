@@ -3,7 +3,9 @@ import { Router, type RequestHandler } from 'express'
 import type { Auth } from '../auth/options.ts'
 import { enrolmentGate, loadPrincipal, principalOf } from '../auth/session.ts'
 import { AppError } from '../errors.ts'
+import type { JobsDeps } from '../jobs/service.ts'
 import { brandAccess } from './brand-access.ts'
+import { attemptAuth, workerAuth } from './worker-auth.ts'
 import type { PermissionKey } from './permissions.ts'
 
 // What a route needs. Every route says so; there is no default.
@@ -14,6 +16,8 @@ export type Access =
   | { kind: 'platform_owner' }
   | { kind: 'member' }
   | { kind: 'permission'; permission: PermissionKey }
+  | { kind: 'worker' } // the worker credential only
+  | { kind: 'attempt' } // the worker credential and an attempt token
 
 export type Method = 'get' | 'post' | 'patch' | 'delete'
 
@@ -79,6 +83,13 @@ export class RouteTable {
     if (!brandScoped && (underBrand || segments.includes(':brandId') || brandsHasChild)) {
       throw new Error(`${where}: a route with :brandId must be declared as member or a permission`)
     }
+    const machine = route.access.kind === 'worker' || route.access.kind === 'attempt'
+    if (machine && segments[0] !== 'worker') {
+      throw new Error(`${where}: a worker or attempt route must live under /worker`)
+    }
+    if (!machine && segments[0] === 'worker') {
+      throw new Error(`${where}: only a worker or attempt route may live under /worker`)
+    }
     if (route.handlers.length === 0) throw new Error(`${where}: no handler`)
     if (route.summary.trim() === '') throw new Error(`${where}: a summary is required`)
     if (this.routes.some((r) => r.method === route.method && r.path === route.path)) {
@@ -91,7 +102,7 @@ export class RouteTable {
     return this.routes
   }
 
-  build(deps: { auth: Auth; pool: Pool }): Router {
+  build(deps: { auth: Auth; pool: Pool; jobs?: JobsDeps }): Router {
     const router = Router()
     const principal = loadPrincipal(deps.auth, deps.pool)
     for (const route of this.routes) {
@@ -113,6 +124,16 @@ export class RouteTable {
           break
         case 'permission':
           chain.push(principal, enrolmentGate, brandAccess(deps.pool, route.access.permission))
+          break
+        case 'worker':
+          if (!deps.jobs)
+            throw new Error(`${route.method} ${route.path}: worker routes need the jobs dependencies`)
+          chain.push(workerAuth(deps.jobs.workerSecret))
+          break
+        case 'attempt':
+          if (!deps.jobs)
+            throw new Error(`${route.method} ${route.path}: worker routes need the jobs dependencies`)
+          chain.push(workerAuth(deps.jobs.workerSecret), attemptAuth(deps.jobs))
           break
       }
       router[route.method](route.path, ...chain, ...route.handlers)

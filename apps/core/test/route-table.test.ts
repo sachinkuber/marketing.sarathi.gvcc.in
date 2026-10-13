@@ -7,6 +7,15 @@ const ok: RequestHandler = (_req, res) => {
 }
 
 describe('RouteTable', () => {
+  it('keeps worker and attempt routes under /worker, and nothing else there', () => {
+    const add = (path: string, kind: 'worker' | 'attempt' | 'enrolled') =>
+      new RouteTable().add({ method: 'get', path, access: { kind }, summary: 's', handlers: [ok] })
+    expect(() => add('/jobs/:jobId', 'worker')).toThrow(/under \/worker/)
+    expect(() => add('/worker/x', 'enrolled')).toThrow(/only a worker or attempt route/)
+    expect(() => add('/worker/brands/:brandId/x', 'worker')).toThrow()
+    expect(() => add('/worker/x', 'attempt')).not.toThrow()
+  })
+
   it('refuses a brand-scoped route that is not under /brands/:brandId', () => {
     const table = new RouteTable()
     expect(() =>

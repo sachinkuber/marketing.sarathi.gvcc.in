@@ -16,6 +16,7 @@ describe('what each kind of access lets through', () => {
 
   beforeAll(async () => {
     stack = await createStack({
+      withQueue: true,
       extraRoutes: (table) => {
         const probe = (path: string, access: Parameters<typeof table.add>[0]['access']) =>
           table.add({
@@ -34,6 +35,8 @@ describe('what each kind of access lets through', () => {
         probe('/_probe/enrolled', { kind: 'enrolled' })
         probe('/_probe/platform_owner', { kind: 'platform_owner' })
         probe('/brands/:brandId/_probe/member', { kind: 'member' })
+        probe('/worker/_probe/worker', { kind: 'worker' })
+        probe('/worker/_probe/attempt', { kind: 'attempt' })
       },
     })
     brandA = await addBrand(stack, 'brand-a')
@@ -106,5 +109,20 @@ describe('what each kind of access lets through', () => {
     // The platform owner has no membership anywhere and can open any brand that exists.
     expect((await get(owner, path(brandB))).status).toBe(200)
     expect((await get(owner, path(RANDOM))).status).toBe(404)
+  })
+
+  it('worker: only the worker credential', async () => {
+    const secret = stack.jobs?.workerSecret ?? ''
+    const url = `${stack.server.url}/api/v1/worker/_probe/worker`
+    expect((await fetch(url)).status).toBe(401)
+    expect((await fetch(url, { headers: { authorization: 'Worker wrong' } })).status).toBe(401)
+    expect((await fetch(url, { headers: { authorization: `Worker ${secret}` } })).status).toBe(200)
+  })
+
+  it('attempt: the credential, and then a token', async () => {
+    const secret = stack.jobs?.workerSecret ?? ''
+    const url = `${stack.server.url}/api/v1/worker/_probe/attempt`
+    expect((await fetch(url)).status).toBe(401)
+    expect((await fetch(url, { headers: { authorization: `Worker ${secret}` } })).status).toBe(403)
   })
 })

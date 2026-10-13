@@ -7,7 +7,7 @@ import { createStack, type Stack } from './support.ts'
 describe('every route declares the access it needs (acceptance test 13, SEC-2)', () => {
   let stack: Stack
   beforeAll(async () => {
-    stack = await createStack()
+    stack = await createStack({ withQueue: true })
   })
   afterAll(async () => stack?.close())
 
@@ -71,5 +71,18 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
       .map((r) => `${r.method} ${r.path}`)
       .sort()
     expect(open).toEqual(['post /invites/accept', 'post /invites/lookup'])
+  })
+
+  it('declares the worker routes as worker and attempt, never public', () => {
+    const declared = Object.fromEntries(
+      stack.core.routes
+        .list()
+        .filter((r) => r.path.startsWith('/worker/'))
+        .map((r) => [`${r.method} ${r.path}`, r.access.kind]),
+    )
+    expect(declared).toEqual({
+      'post /worker/jobs/:jobId/attempts': 'worker',
+      'get /worker/jobs/:jobId/control': 'attempt',
+    })
   })
 })

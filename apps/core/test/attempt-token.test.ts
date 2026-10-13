@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { signAttemptToken, verifyAttemptToken, type AttemptClaims } from '../src/jobs/token.ts'
 
@@ -48,5 +48,39 @@ describe('the attempt token (acceptance test 32, token half)', () => {
     for (const text of ['', 'abc', 'v1.a', 'v2.a.b', 'v1..', 'v1.!!!.???']) {
       expect(verifyAttemptToken(SECRET, text, 1_500)).toMatchObject({ ok: false })
     }
+  })
+
+  // A payload signed with the right secret is still only data: verification must be total.
+  const signedPayload = (payload: unknown): string => {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+    const signature = createHmac('sha256', SECRET).update(`v1.${body}`).digest('base64url')
+    return `v1.${body}.${signature}`
+  }
+
+  it('returns malformed, and does not throw, for a signed payload that is not a claim set', () => {
+    const good = claims()
+    const cases: unknown[] = [
+      null,
+      7,
+      'text',
+      [],
+      { ...good, jobId: 5 },
+      { ...good, brandId: '' },
+      { ...good, tokenId: undefined },
+      { ...good, issuedAt: '1000' },
+      { ...good, expiresAt: null },
+    ]
+    for (const payload of cases) {
+      expect(verifyAttemptToken(SECRET, signedPayload(payload), 1_500)).toEqual({
+        ok: false,
+        reason: 'malformed',
+      })
+    }
+  })
+
+  it('returns only the seven claim fields', () => {
+    const good = claims()
+    const result = verifyAttemptToken(SECRET, signedPayload({ ...good, extra: 'x' }), 1_500)
+    expect(result).toEqual({ ok: true, claims: good })
   })
 })
