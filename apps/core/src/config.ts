@@ -6,6 +6,7 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.url(),
+  AUDIT_DATABASE_URL: z.url(),
   AUTH_SECRET: z.string().min(32),
   PUBLIC_ORIGIN: z.url(),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
@@ -15,6 +16,7 @@ export interface Config {
   nodeEnv: 'development' | 'test' | 'production'
   port: number
   databaseUrl: string
+  auditDatabaseUrl: string
   authSecret: string
   publicOrigin: string
   logLevel: (typeof LEVELS)[number]
@@ -37,6 +39,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     nodeEnv: value.NODE_ENV,
     port: value.PORT,
     databaseUrl: value.DATABASE_URL,
+    auditDatabaseUrl: value.AUDIT_DATABASE_URL,
     authSecret: value.AUTH_SECRET,
     publicOrigin: new URL(value.PUBLIC_ORIGIN).origin,
     logLevel: value.LOG_LEVEL,

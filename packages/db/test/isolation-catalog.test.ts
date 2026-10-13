@@ -17,6 +17,15 @@ describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)'
   })
   afterAll(async () => db.drop())
 
+  it('leaves no function in the app or audit schema executable by PUBLIC, except triggers', async () => {
+    const r = await db.admin.query(
+      `select n.nspname || '.' || p.proname as f from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname in ('app', 'audit') and p.prorettype <> 'trigger'::regtype
+          and (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'))`,
+    )
+    expect(r.rows.map((x) => x.f)).toEqual([])
+  })
+
   it('finds the brand-scoped tables, so the tests below cannot pass on an empty list', () => {
     expect(scoped.length).toBeGreaterThanOrEqual(15)
     expect(scoped).toContain('content_version')

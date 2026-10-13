@@ -126,14 +126,17 @@ export async function changeMemberRole(
       input.targetId,
     ])
     // In the same transaction: if the entry cannot be written, the change is rolled back.
-    await audit.record({
-      action: 'users.role_changed',
-      actor: input.actorId,
-      subject: input.targetId,
-      brandId: input.brandId,
-      outcome: 'success',
-      detail: { from: target.role, to: input.role },
-    })
+    await audit.record(
+      {
+        action: 'users.role_changed',
+        actor: input.actorId,
+        subject: input.targetId,
+        brandId: input.brandId,
+        outcome: 'success',
+        detail: { from: target.role, to: input.role },
+      },
+      client,
+    )
     return { userId: input.targetId, role: input.role, changed: true }
   })
 }
@@ -162,14 +165,17 @@ export async function removeMember(pool: Pool, audit: AuditSink, input: Actor): 
     if (left.rows[0].n === 0 && !owner.rows[0].owner) {
       await client.query('delete from auth.session where "userId" = $1', [input.targetId])
     }
-    await audit.record({
-      action: 'users.removed',
-      actor: input.actorId,
-      subject: input.targetId,
-      brandId: input.brandId,
-      outcome: 'success',
-      detail: { role: target.role },
-    })
+    await audit.record(
+      {
+        action: 'users.removed',
+        actor: input.actorId,
+        subject: input.targetId,
+        brandId: input.brandId,
+        outcome: 'success',
+        detail: { role: target.role },
+      },
+      client,
+    )
   })
 }
 
@@ -195,13 +201,16 @@ export async function resetSecondFactor(
     await client.query('delete from auth."twoFactor" where "userId" = $1', [input.targetId])
     await client.query('update auth."user" set "twoFactorEnabled" = false where id = $1', [input.targetId])
     await client.query('delete from auth.session where "userId" = $1', [input.targetId])
-    await audit.record({
-      action: 'users.second_factor_reset',
-      actor: input.actorId,
-      subject: input.targetId,
-      brandId: null,
-      outcome: 'success',
-    })
+    await audit.record(
+      {
+        action: 'users.second_factor_reset',
+        actor: input.actorId,
+        subject: input.targetId,
+        brandId: null,
+        outcome: 'success',
+      },
+      client,
+    )
     await client.query('commit')
     return { email: user.rows[0].email as string }
   } catch (error) {

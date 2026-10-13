@@ -1,3 +1,4 @@
+import type { PoolClient } from '@mkt/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 import {
@@ -23,9 +24,9 @@ class FailingAudit extends MemoryAudit {
 
 // An audit that is down for the withdrawal entry only.
 class WithdrawalFailingAudit extends MemoryAudit {
-  override async record(entry: Parameters<MemoryAudit['record']>[0]): Promise<void> {
+  override async record(entry: Parameters<MemoryAudit['record']>[0], tx?: PoolClient): Promise<void> {
     if (entry.action === 'users.invite_withdrawn') throw new Error('audit is down')
-    await super.record(entry)
+    await super.record(entry, tx)
   }
 }
 
@@ -195,7 +196,7 @@ describe('inviting when mail cannot be sent, or the audit cannot be written', ()
     }
   })
 
-  it('still answers 502 with no invite behind, and reports it, when the withdrawal cannot be audited', async () => {
+  it('keeps the invite, and names it, when the withdrawal cannot be audited (the delete shares the audit transaction)', async () => {
     const mailer = new ThrowingMailer()
     const stack = await createStack({ mailer, audit: new WithdrawalFailingAudit() })
     try {
@@ -210,14 +211,15 @@ describe('inviting when mail cannot be sent, or the audit cannot be written', ()
       const reply = await client.request('POST', `/api/v1/brands/${brand}/users/invites`, {
         body: { email: 'x@example.test', role: 'viewer' },
       })
-      expect(reply.status).toBe(502)
-      expect((await stack.db.admin.query('select count(*)::int as n from app.invite')).rows[0].n).toBe(0)
+      // The delete is rolled back with the failed audit write: the invite is still there, and the log names it.
+      expect(reply.status).toBe(500)
+      const left = await stack.db.admin.query('select id from app.invite')
+      expect(left.rowCount).toBe(1)
       const inviteId = (
         stack.audit.entries.find((e) => e.action === 'users.invited')!.detail as { inviteId: string }
       ).inviteId
-      expect(stack.logs.join('')).toContain(
-        `invite ${inviteId} was taken back, but that could not be recorded`,
-      )
+      expect(left.rows[0].id).toBe(inviteId)
+      expect(stack.logs.join('')).toContain(inviteId)
     } finally {
       await stack.close()
     }

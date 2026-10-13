@@ -1,0 +1,12 @@
+{
+  "name": "@mkt/canonical",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@mkt/shared": "*"
+  }
+}

@@ -79,20 +79,26 @@ export function registerInviteRoutes(
         }
         let accepted: Awaited<ReturnType<typeof acceptInvite>>
         try {
-          accepted = await acceptInvite(deps.auth, deps.pool, body)
+          accepted = await acceptInvite(deps.auth, deps.pool, {
+            ...body,
+            // In the redeeming transaction: if the entry cannot be written, nothing is granted.
+            inside: (client, made) =>
+              deps.audit.record(
+                {
+                  action: 'auth.invite_accepted',
+                  actor: made.userId,
+                  brandId: made.brandId,
+                  outcome: 'success',
+                },
+                client,
+              ),
+          })
         } catch (error) {
           deps.limiter.fail(key)
           await deps.audit.record({ action: 'auth.invite_accepted', actor: null, outcome: 'failure' })
           throw error
         }
-        // The account exists now: a failure to write the audit entry is not a failed attempt.
         deps.limiter.succeed(key)
-        await deps.audit.record({
-          action: 'auth.invite_accepted',
-          actor: accepted.userId,
-          brandId: accepted.brandId,
-          outcome: 'success',
-        })
         res.status(201).json({ userId: accepted.userId })
       },
     ],

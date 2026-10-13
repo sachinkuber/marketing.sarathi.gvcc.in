@@ -1,3 +1,5 @@
+import type { PoolClient } from '@mkt/db'
+
 export interface MailMessage {
   to: string
   subject: string
@@ -18,7 +20,8 @@ export interface AuditEntry {
   detail?: Record<string, unknown>
 }
 
-// The audit log. The real implementation (hash chain) arrives with package 6.
+// The audit log (packages/db, audit.append). With `tx` the entry is written inside that transaction, so a
+// change and its entry stand or fall together; without it the entry is written on its own.
 export interface AuditSink {
-  record(entry: AuditEntry): Promise<void>
+  record(entry: AuditEntry, tx?: PoolClient): Promise<void>
 }

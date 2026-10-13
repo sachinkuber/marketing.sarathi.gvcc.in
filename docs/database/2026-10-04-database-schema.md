@@ -261,7 +261,7 @@ The immutable record. **No update and no delete, for any role.**
 | created_by_run | uuid | Set when an agent run made it |
 | created_at | timestamptz | Not null |
 
-Triggers: one refuses any update or delete. One, on insert, recomputes the hash from `payload_canonical` and refuses the row if it differs:
+Triggers: one refuses any update or delete, and a statement-level trigger refuses `truncate` (a row-level trigger never fires for it). One, on insert, recomputes the hash from `payload_canonical` and refuses the row if it differs, and also refuses a row whose payload names a `brand_id` or `content_item_id` other than the row's own, because the hash covers who the item is for:
 
 ```
 'sha256:' || encode(sha256(convert_to(NEW.payload_canonical, 'UTF8')), 'hex')
@@ -598,7 +598,7 @@ Not brand-scoped. Replay protection for n8n calls.
 
 ### 9.1 `audit.log`
 
-Insert only, for every role.
+Insert only, and no role holds a right on the table: entries are written only by the function `audit.append`.
 
 | Column | Type | Rules |
 |---|---|---|
@@ -606,15 +606,16 @@ Insert only, for every role.
 | chain_key | text | Not null. The brand's ID, or `platform`. |
 | brand_id | uuid | Null for platform-level entries |
 | seq | bigint | Not null. Unique with `chain_key`; no gaps. |
-| at | timestamptz | Not null |
+| at | timestamptz | Not null. Exported and hashed to the microsecond. |
 | actor_kind, actor_id | actor_kind, uuid | Not null kind |
 | action | text | Not null |
-| subject_kind, subject_id | text, uuid | |
-| before, after | jsonb | |
+| outcome | text | Not null. `success` or `failure`. |
+| subject | text | The one thing the entry is about |
+| detail | jsonb | Everything else, including any before and after values |
 | prev_hash | text | The previous entry's hash in the same chain |
-| hash | text | Not null. Covers this entry's content, `seq` and `prev_hash`. |
+| hash | text | Not null. Covers this entry's content, `seq` and `prev_hash`; computed and re-checked inside the database by one function used both to append and to verify. |
 
-Appending takes a transaction-length lock on the chain, so two writers cannot extend the same entry. Triggers refuse update and delete. Only the audit-writer role can insert. Reads go through functions that apply the brand.
+`audit.append` is a `security definer` function. It takes a transaction-length lock on the chain, so two writers cannot extend the same entry, and it reads the clock under that lock so `at` never goes backwards within a chain. An entry about no brand, or whose brand is unknown, goes on the `platform` chain; an entry may be appended for a brand only if the brand exists, and a session working inside brand A cannot append to brand B's chain. Because the function runs in the caller's transaction, a change and its audit entry commit or roll back together. Triggers refuse update, delete and `truncate`. Reads and the chain check go through functions that apply the brand.
 
 ### 9.2 `audit.export`
 
@@ -703,10 +704,10 @@ The hashed content payload gains references to offers, products and the complian
 | Role | `app` business tables | `auth` | `pgboss` | `audit` | `secrets` |
 |---|---|---|---|---|---|
 | Migration | Create and alter; used only at deployment | Create and alter | Create and alter | Create and alter | Create and alter |
-| Application | Read and write, through row-level security. Cannot alter tables. | Read and write | Create jobs only | None | None |
+| Application | Read and write, through row-level security. Cannot alter tables. | Read and write | Create jobs only | Execute `audit.append` only | None |
 | Queue (workers) | None | None | Claim and update jobs | None | None |
-| Audit-writer | None | None | None | Insert only | None |
-| Owner-view | Read across brands through named functions only | None | Read | Read through functions | None |
+| Audit-writer | None | None | None | Execute `audit.append` and `audit.record_export`; no right on any audit table | None |
+| Owner-view | Read across brands through named functions only | None | Read | Execute the read and verify functions | None |
 | Read-only | Read, through row-level security | None | None | None | None |
 | Connection (phase 3) | Outbox and connection tables only | None | Claim publishing jobs | None | Read and write |
 

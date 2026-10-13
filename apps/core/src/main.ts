@@ -1,14 +1,18 @@
-import { LogAudit, UnconfiguredMailer } from './adapters.ts'
+import { createPool } from '@mkt/db'
+import { DbAudit } from './audit/db-audit.ts'
+import { UnconfiguredMailer } from './adapters.ts'
 import { loadConfig } from './config.ts'
 import { createLogger } from './logger.ts'
 import { startServer } from './server.ts'
 
 const config = loadConfig(process.env)
 const logger = createLogger(config.logLevel)
+const auditPool = createPool(config.auditDatabaseUrl)
+auditPool.on('error', (error) => logger.error({ err: error, pool: 'audit' }, 'idle database client error'))
 const server = await startServer(config, {
   logger,
   mailer: new UnconfiguredMailer(),
-  audit: new LogAudit(logger),
+  audit: new DbAudit(auditPool),
 })
 logger.info({ url: server.url }, 'core service started')
 
@@ -20,7 +24,11 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     stopping = true
     logger.info({ signal }, 'stopping')
     server.stop().then(
-      () => process.exit(0),
+      () =>
+        auditPool.end().then(
+          () => process.exit(0),
+          () => process.exit(1),
+        ),
       () => process.exit(1),
     )
   })

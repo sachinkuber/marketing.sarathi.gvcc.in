@@ -3,6 +3,7 @@ import { loadConfig } from '../src/config.ts'
 
 const base = {
   DATABASE_URL: 'postgres://app:pw@127.0.0.1:5432/mkt',
+  AUDIT_DATABASE_URL: 'postgres://audit:pw@127.0.0.1:5432/mkt',
   AUTH_SECRET: 'a'.repeat(32),
   PUBLIC_ORIGIN: 'https://app.example.test',
 }
@@ -32,6 +33,7 @@ describe('loadConfig', () => {
       message = (error as Error).message
     }
     expect(message).toContain('DATABASE_URL')
+    expect(message).toContain('AUDIT_DATABASE_URL')
     expect(message).toContain('AUTH_SECRET')
     expect(message).toContain('PUBLIC_ORIGIN')
     expect(message).not.toContain(secret)

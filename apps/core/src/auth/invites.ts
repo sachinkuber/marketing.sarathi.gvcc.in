@@ -24,9 +24,9 @@ export async function createInvite(
     // be written) the invite is rolled back and no mail is sent.
     inside?: (client: PoolClient, invite: { id: string }) => Promise<void>
     onMailFailure?: (error: unknown) => void
-    // Runs after an invite whose mail failed has been taken back (for example to audit the withdrawal). If it
-    // throws, that is reported through onMailFailure and the attempt is still refused with the 502.
-    onWithdrawn?: (invite: { id: string }) => Promise<void>
+    // Runs in the same transaction as the delete of an invite whose mail failed (for example to audit the
+    // withdrawal). If it throws, the delete is rolled back and the invite is reported as left behind.
+    onWithdrawn?: (client: PoolClient, invite: { id: string }) => Promise<void>
   },
 ): Promise<{ id: string; expiresAt: Date }> {
   const token = randomBytes(32).toString('base64url')
@@ -52,19 +52,13 @@ export async function createInvite(
     // An invite nobody was told about is worse than none: take it back, and tell the person who asked.
     input.onMailFailure?.(error)
     try {
-      await withBrand(pool, input.brandId, (client) =>
-        client.query('delete from app.invite where id = $1', [row.id]),
-      )
+      await withBrand(pool, input.brandId, async (client) => {
+        await client.query('delete from app.invite where id = $1', [row.id])
+        await input.onWithdrawn?.(client, { id: row.id })
+      })
     } catch {
       // The invite is still there and nobody was told about it: name it so the log shows what to remove.
       throw new Error(`invite ${row.id} left behind after the invite email failed`, { cause: error })
-    }
-    try {
-      await input.onWithdrawn?.({ id: row.id })
-    } catch (reportError) {
-      input.onMailFailure?.(
-        new Error(`invite ${row.id} was taken back, but that could not be recorded`, { cause: reportError }),
-      )
     }
     throw new AppError(502, 'mail_not_sent', 'The invite email could not be sent, so no invite was made.')
   }
@@ -97,7 +91,14 @@ export async function lookupInvite(pool: Pool, token: string) {
 export async function acceptInvite(
   auth: Auth,
   pool: Pool,
-  input: { token: string; name: string; password: string },
+  input: {
+    token: string
+    name: string
+    password: string
+    // Runs in the redeeming transaction, after the redeem. If it throws (for example the audit entry cannot
+    // be written) the redeem is rolled back, the new user is removed and the invite stays usable.
+    inside?: (client: PoolClient, accepted: { userId: string; brandId: string }) => Promise<void>
+  },
 ): Promise<{ userId: string; brandId: string }> {
   const invite = await peekInvite(pool, input.token)
   if (!invite) throw INVALID()
@@ -107,11 +108,23 @@ export async function acceptInvite(
     password: input.password,
   })
   try {
-    const redeemed = await pool.query('select brand_id from app.redeem_invite($1, $2)', [
-      hashInviteToken(input.token),
-      userId,
-    ])
-    return { userId, brandId: redeemed.rows[0].brand_id as string }
+    const client = await pool.connect()
+    try {
+      await client.query('begin')
+      const redeemed = await client.query('select brand_id from app.redeem_invite($1, $2)', [
+        hashInviteToken(input.token),
+        userId,
+      ])
+      const accepted = { userId, brandId: redeemed.rows[0].brand_id as string }
+      await input.inside?.(client, accepted)
+      await client.query('commit')
+      return accepted
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
   } catch (error) {
     await removeAfterFailure(
       auth,

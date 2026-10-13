@@ -7,12 +7,13 @@ import { createTestDatabase, type TestDatabase } from '@mkt/db/testing'
 import { requireDatabase } from '@mkt/test-support'
 import type { Config } from '../src/config.ts'
 import { buildCore, type CoreDeps } from '../src/core.ts'
+import { DbAudit } from '../src/audit/db-audit.ts'
 import { createLogger } from '../src/logger.ts'
 import { AttemptLimiter } from '../src/auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../src/auth/policy.ts'
 import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
-import type { MailMessage } from '../src/ports.ts'
+import type { AuditSink, MailMessage } from '../src/ports.ts'
 import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 
 export interface TestServer {
@@ -43,6 +44,8 @@ export interface Stack {
   authPool: Pool
   mailer: MemoryMailer | ThrowingMailer
   audit: MemoryAudit
+  // The pool behind the database audit sink; null unless the stack was built with realAudit.
+  auditPool: Pool | null
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   server: TestServer
@@ -57,6 +60,9 @@ export async function createStack(
     now?: () => number
     mailer?: MemoryMailer | ThrowingMailer
     audit?: MemoryAudit
+    // Give the core the database audit sink over an audit-writer pool instead of the in-memory one;
+    // `stack.audit` is then unused.
+    realAudit?: boolean
     // Keep the library's own log lines, routed as in production, instead of switching them off.
     libraryLog?: boolean
     // A test seam: probe routes declared in the table. Production never passes it.
@@ -69,6 +75,8 @@ export async function createStack(
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = options.mailer ?? new MemoryMailer()
   const audit = options.audit ?? new MemoryAudit()
+  const auditPool = options.realAudit ? createPool(db.urlFor('audit_writer')) : null
+  const sink: AuditSink = auditPool ? new DbAudit(auditPool) : audit
   const logs: string[] = []
   const limiter = new AttemptLimiter({
     maxFailures: LOCK_MAX_FAILURES,
@@ -80,6 +88,7 @@ export async function createStack(
     nodeEnv: 'test',
     port: 0,
     databaseUrl: db.urlFor('app'),
+    auditDatabaseUrl: db.urlFor('audit_writer'),
     authSecret: 'test-secret-'.padEnd(48, 'x'),
     publicOrigin: ORIGIN,
     logLevel: 'silent',
@@ -90,7 +99,7 @@ export async function createStack(
     appPool,
     authPool,
     mailer,
-    audit,
+    audit: sink,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
     extraRoutes: options.extraRoutes,
@@ -102,6 +111,7 @@ export async function createStack(
     authPool,
     mailer,
     audit,
+    auditPool,
     limiter,
     core,
     server,
@@ -111,6 +121,7 @@ export async function createStack(
       await server.close()
       await appPool.end()
       await authPool.end()
+      await auditPool?.end()
       await db.drop()
     },
   }

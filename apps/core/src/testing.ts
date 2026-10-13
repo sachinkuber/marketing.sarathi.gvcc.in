@@ -1,3 +1,4 @@
+import type { PoolClient } from '@mkt/db'
 import type { AuditEntry, AuditSink, MailMessage, Mailer } from './ports.ts'
 
 export class MemoryMailer implements Mailer {
@@ -20,7 +21,11 @@ export class ThrowingMailer implements Mailer {
 
 export class MemoryAudit implements AuditSink {
   readonly entries: AuditEntry[] = []
-  async record(entry: AuditEntry): Promise<void> {
+  // Parallel to entries: true where the call carried a transaction, so a test can see which entries were
+  // written inside the change they record.
+  readonly transactional: boolean[] = []
+  async record(entry: AuditEntry, tx?: PoolClient): Promise<void> {
     this.entries.push(entry)
+    this.transactional.push(tx !== undefined)
   }
 }
