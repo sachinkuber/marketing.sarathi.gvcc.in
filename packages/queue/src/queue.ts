@@ -32,6 +32,9 @@ export interface Queue {
 export interface OpenOptions {
   // A worker process supervises (expiry, retry, archiving); the core's reading connection does not.
   supervise?: boolean
+  // How often a supervising process looks for expired or heartbeat-less jobs. The library's default is
+  // far longer than the crash tests can wait; tests (and the queue trial) use 1.
+  superviseIntervalSeconds?: number
 }
 
 // Slots per process: always several, never one, so a brand at its limit cannot hold up another (spec 9.2).
@@ -44,6 +47,12 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
     migrate: false,
     createSchema: false,
     supervise: options.supervise ?? false,
+    ...(options.superviseIntervalSeconds
+      ? {
+          superviseIntervalSeconds: options.superviseIntervalSeconds,
+          monitorIntervalSeconds: options.superviseIntervalSeconds,
+        }
+      : {}),
     schedule: false,
     useListenNotify: true,
   })

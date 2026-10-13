@@ -1,0 +1,18 @@
+{
+  "name": "@mkt/worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.124.0",
+    "@mkt/queue": "*",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@mkt/db": "*",
+    "@mkt/test-support": "*"
+  }
+}
