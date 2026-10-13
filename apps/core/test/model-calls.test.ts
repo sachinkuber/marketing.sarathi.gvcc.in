@@ -416,12 +416,21 @@ describe('the model-call routes', () => {
       })
     const auth = { authorization: `Worker ${jobs.workerSecret}`, 'x-attempt-token': token }
 
-    // No credential: refused by the request guard or worker authentication (never 413, so the big parser
-    // never ran on it).
-    expect([401, 403]).toContain((await send(`/api/v1${path}`, 'POST', {}, 200_000)).status)
-    // A worker credential but no attempt token: refused by the attempt check.
+    // Over the 1 MB limit, so a parser that ran before authentication would answer 413. A wrong worker
+    // credential reaches workerAuth (without any Authorization header the /api guard answers 403 first).
     expect(
-      (await send(`/api/v1${path}`, 'POST', { authorization: auth.authorization }, 200_000)).status,
+      (
+        await send(
+          `/api/v1${path}`,
+          'POST',
+          { authorization: 'Worker wrong', 'x-attempt-token': token },
+          1_200_000,
+        )
+      ).status,
+    ).toBe(401)
+    // A valid worker credential but no attempt token: attemptAuth refuses it before the body is read.
+    expect(
+      (await send(`/api/v1${path}`, 'POST', { authorization: auth.authorization }, 1_200_000)).status,
     ).toBe(403)
     // Over 1 MB with valid credentials: too large.
     expect((await send(`/api/v1${path}`, 'POST', auth, 1_200_000)).status).toBe(413)
@@ -616,7 +625,7 @@ describe('checkpoint rules and cost edge cases', () => {
   })
 
   // Runs last: the sweep is class-wide, so it would also move other tests' unanswered calls.
-  it('flags a retry of a call the sweep moved to unknown, and still lets that call be saved', async () => {
+  it('flags a retry of a call the sweep moved to unknown, and refuses its late answer from the superseded attempt', async () => {
     const { jobId, claims } = await startedJob()
     const first = await registerModelCall(jobs, claims, {
       step: 'sw',
@@ -631,8 +640,7 @@ describe('checkpoint rules and cost edge cases', () => {
     expect(
       await registerModelCall(jobs, later, { step: 'sw', requestHash: 'sw', model: 'test-model' }),
     ).toMatchObject({ outcome: 'send', possibleDuplicate: true })
-    // The late answer to the unknown call is still saved by the attempt that sent it... which is now
-    // superseded, so it is refused; the new attempt's own call is the one that is saved.
+    // The attempt that sent the call has been replaced, so its late answer is refused.
     await expect(
       saveCheckpoint(jobs, claims, {
         callId: first.callId,
@@ -644,5 +652,37 @@ describe('checkpoint rules and cost edge cases', () => {
         usage: USAGE,
       }),
     ).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('saves the answer to an unknown call from the attempt that is still current', async () => {
+    const { jobId, claims } = await startedJob()
+    const sent = await registerModelCall(jobs, claims, {
+      step: 'late',
+      requestHash: 'late',
+      model: 'test-model',
+    })
+    if (sent.outcome !== 'send') throw new Error('unexpected')
+    await stack.db.admin.query(`select app.sweep_model_calls('interactive', now() + interval '1 hour')`)
+    const before = await stack.db.admin.query('select status from app.model_call where id = $1', [
+      sent.callId,
+    ])
+    expect(before.rows[0].status).toBe('unknown')
+    await expect(
+      saveCheckpoint(jobs, claims, {
+        callId: sent.callId,
+        step: 'late',
+        output: { late: true },
+        model: 'test-model',
+        providerMessageId: 'msg_late',
+        providerRequestId: null,
+        usage: USAGE,
+      }),
+    ).resolves.toEqual({ costed: true })
+    const after = await stack.db.admin.query('select status from app.model_call where id = $1', [sent.callId])
+    expect(after.rows[0].status).toBe('succeeded')
+    const later = await reattempt(jobId)
+    expect(
+      await registerModelCall(jobs, later, { step: 'late', requestHash: 'late', model: 'test-model' }),
+    ).toEqual({ outcome: 'use_checkpoint', output: { late: true } })
   })
 })
