@@ -164,3 +164,51 @@ The seven owner decisions, accepted on 2026-10-04:
   - Product note: after a second-factor reset, anyone who holds the person's password can sign in and enrol their own second factor; the email notification and the session kill are the mitigation (spec design).
   - Deferred minors (cosmetic or later): TypeScript typing of `authOptions` (would remove the `VerifyTotp` cast); an unflagged client release after a failed rollback in `withBrand` and in `removeMember` and `resetSecondFactor` (fix both in `packages/db` later); a user ID in the path is still compared as written (an uppercase user UUID answers 404); test assertion polish.
 - Pull request: not opened yet. Nothing has been pushed.
+
+## Phase 1, milestone 3: Trust
+
+Finished: 2026-10-13 (built 2026-10-08). Branch `m3-trust`, commits 1ef0c56 to 5479c1d (`git log --oneline main..HEAD`, 13 commits): the plan, the content payload schema, canonical text and the `cv1` hash (with a fix refusing a backslash in a link), the content-version integrity triggers, the audit log and its hash chain, the read, verify and export-record functions, the real audit sink, every change and its audit entry in one transaction (the accepted invite included), export and verify over a write-once store, the refusal to export from a record that is ahead of the store, and the final-review wave.
+
+| Package | State | Evidence |
+|---|---|---|
+| 6 Audit log | Done | Entries are written only by `audit.append` (migration 0009), in the caller's transaction; read, verify and export-record functions (0010); the core's sink writes to the database; export and verify run over a store port |
+| 9 Content integrity | Done for the version row | Strict payload schema, canonical text and `cv1` hash (`packages/canonical`, `packages/shared`); the database refuses update, delete and truncate of a version and any insert whose hash or named brand and item disagree (0008) |
+
+| Acceptance test | State | Evidence |
+|---|---|---|
+| 14 | Proven | Test vectors in both directions: `packages/canonical/test/vectors.test.ts`, `packages/db/test/content-vectors.test.ts`, `packages/canonical/test/hash-fields.test.ts` |
+| 15, 16 | Proven | A version cannot be updated, deleted or truncated, and a wrong hash or a payload naming another brand or item is refused: `packages/db/test/content-integrity.test.ts` |
+| 17 | Proven | Strict schema and normalisation: `packages/shared/test/content-payload.test.ts`, `packages/canonical/test/vectors.test.ts` |
+| 35 | Proven | Concurrent appends leave no gap or duplicate, a rolled-back transaction leaves no gap, forging another brand's chain is refused, an altered and re-hashed entry, a cut chain and a removed chain are caught against the export: `packages/db/test/audit-log.test.ts`, `packages/db/test/audit-verify.test.ts`, `apps/core/test/audit-export-verify.test.ts` |
+| 36 | Proven | An audit failure undoes the change it records, with the real function: `apps/core/test/audit-chain.test.ts`, `apps/core/test/db-audit.test.ts` |
+| SEC-8, first half | Proven | No role holds a right on an audit table (catalog tests, including no `PUBLIC` execute on the audit functions) |
+
+Not proven yet, and why:
+
+- The daily export and verify jobs: they need the queue and worker (milestone 4). The functions they will call are written and tested.
+- The real write-once store outside the server: owner items A4 and A5. A port and an in-memory store stand in.
+- The severity 1 alert on a mismatch: alert delivery is package 11. `verify` takes an `onMismatch` callback; nothing is wired to it.
+- The audit screen, and the logging of people's reads of the log (SEC-8, second half): the dashboard milestone.
+- The approval-hash trigger and the content-version creation service: package 10.
+- Retention of the log: owner item F2; the log has no delete at all.
+
+## Findings
+
+Decisions: the seven decisions in the plan ("Decisions proposed to the owner") were built as written: audit entries through `audit.append`; hash computed and re-checked in the database; the entry's fields (`outcome`, `subject`, `detail` replace `subject_kind`, `subject_id`, `before`, `after`); no-brand entries on the platform chain; the five body blocks; two zero-width characters allowed; single-line fields reject line breaks. The owner's acceptance is not recorded in the repository; it is to be confirmed in the pull request.
+
+- Rulings (made while building, in plain language):
+  1. (Task 7, controller) A failed audit write is not a failed attempt by the user: the change is undone and the request answers 500; a mail failure stays 502.
+  2. (Task 7, controller, ruling R4) `auth.invite_accepted` was a plan gap (the accept ran outside a transaction, so its entry was written after the fact). It was fixed in the milestone, not deferred: redeeming the invite and its audit entry now share one transaction (5ef58ef).
+  3. (Task 8, final review) The export refuses to run from a database record that is ahead of the store or the chain, because resuming from a forged record would stall silently (173c798).
+  4. (final review) The hash's own text for `at` is exposed by `audit.at_text`, and the export uses it, so the exported time matches the hashed time to the microsecond.
+  5. (final review) `audit.append` reads the clock after taking the chain lock, so `at` never goes backwards inside a chain.
+  6. (final review) A withdrawn invite's `users.invite_withdrawn` entry is written in the same transaction as the delete; if it cannot be written the delete is rolled back.
+  7. (final review) `audit.record_export` refuses a NULL hash; the verify function rejects a NULL hash in the export record.
+- Deployment precondition new in this milestone: the service needs `AUDIT_DATABASE_URL`, the audit-writer role's login, in its environment (checked by the config and `.env.example` tests). The roles' production passwords come from the secrets store at deployment.
+- Follow-ups, one line each:
+  - Cancelling a pending invite: still not built.
+  - The owner's all-brands list needs the owner-view role and an audit entry per call (dashboard milestone).
+  - Real mail (package 11); the invite code rule for `brand_admin` (2c ruling 8) is still a decision for the owner.
+  - A person's reading of the log is itself to be logged (dashboard milestone).
+  - Closed by this milestone: the 2c follow-up "audit entries atomic only in the fail-closed direction"; the sink now takes the transaction client.
+- Verification: two consecutive `npm ci && npm run verify` runs on the development server both passed: 63 test files and 427 tests passed, 1 skipped (the model check, which needs an API key), and the secret scan found no leaks. No test database was left behind (`mkt_t_%` count 0).
