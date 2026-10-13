@@ -4,6 +4,8 @@ import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createPool, type Pool } from '@mkt/db'
 import { createTestDatabase, type TestDatabase } from '@mkt/db/testing'
+import { openQueue } from '@mkt/queue'
+import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
 import type { Config } from '../src/config.ts'
 import { buildCore, type CoreDeps } from '../src/core.ts'
@@ -14,6 +16,7 @@ import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../src/auth
 import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
 import type { AuditSink, MailMessage } from '../src/ports.ts'
+import type { JobsDeps } from '../src/jobs/service.ts'
 import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 
 export interface TestServer {
@@ -48,6 +51,8 @@ export interface Stack {
   auditPool: Pool | null
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
+  // The work engine's dependencies; null unless the stack was built with withQueue.
+  jobs: JobsDeps | null
   server: TestServer
   // What the service logged at level warn and above, one JSON line each.
   logs: string[]
@@ -67,10 +72,14 @@ export async function createStack(
     libraryLog?: boolean
     // A test seam: probe routes declared in the table. Production never passes it.
     extraRoutes?: CoreDeps['extraRoutes']
+    // Install the queue schema and give the core a queue connection.
+    withQueue?: boolean
+    // The class backlog at which production and bulk jobs are refused (default 2000).
+    backlogLimit?: number
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
-  const db = await createTestDatabase()
+  const db = options.withQueue ? await createQueueTestDatabase() : await createTestDatabase()
   const appPool = createPool(db.urlFor('app'))
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = options.mailer ?? new MemoryMailer()
@@ -89,10 +98,27 @@ export async function createStack(
     port: 0,
     databaseUrl: db.urlFor('app'),
     auditDatabaseUrl: db.urlFor('audit_writer'),
+    queueDatabaseUrl: db.urlFor('queue'),
     authSecret: 'test-secret-'.padEnd(48, 'x'),
+    workerSecret: 'worker-secret-'.padEnd(48, 'w'),
+    attemptTokenSecret: 'attempt-secret-'.padEnd(48, 'a'),
+    queueBacklogLimit: options.backlogLimit ?? 2000,
     publicOrigin: ORIGIN,
     logLevel: 'silent',
   }
+  const queue = options.withQueue ? await openQueue(db.urlFor('queue')) : null
+  const jobs: JobsDeps | null = queue
+    ? {
+        pool: appPool,
+        queue,
+        audit: sink,
+        workerSecret: config.workerSecret,
+        attemptTokenSecret: config.attemptTokenSecret,
+        backlogLimit: config.queueBacklogLimit,
+        now: () => new Date(options.now ? options.now() : Date.now()),
+        results: new Map(),
+      }
+    : null
   const core = buildCore({
     config,
     logger: createLogger('warn', { write: (line: string) => void logs.push(line) }),
@@ -100,6 +126,7 @@ export async function createStack(
     authPool,
     mailer,
     audit: sink,
+    jobs: jobs ?? undefined,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
     extraRoutes: options.extraRoutes,
@@ -114,11 +141,13 @@ export async function createStack(
     auditPool,
     limiter,
     core,
+    jobs,
     server,
     logs,
     newClient: () => new TestClient(server.url, ORIGIN),
     async close() {
       await server.close()
+      await queue?.stop()
       await appPool.end()
       await authPool.end()
       await auditPool?.end()
