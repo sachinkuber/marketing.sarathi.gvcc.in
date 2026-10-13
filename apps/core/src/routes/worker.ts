@@ -5,6 +5,7 @@ import { claimsOf } from '../access/worker-auth.ts'
 import type { RouteTable } from '../access/routes.ts'
 import {
   failModelCall,
+  postResult,
   readControl,
   registerModelCall,
   requireCurrentAttempt,
@@ -47,6 +48,10 @@ const checkpointBody = z.strictObject({
     cacheReadTokens: count,
     cacheWriteTokens: count,
   }),
+})
+const resultBody = z.strictObject({
+  type: text(100),
+  result: z.json().refine(noNul, 'must not contain U+0000'),
 })
 const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
@@ -136,6 +141,22 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
         }>(res)
         await failModelCall(deps, claimsOf(res), params.callId, body.error)
         res.status(204).end()
+      },
+    ],
+  })
+
+  // The global 100 kB parser applies here. A held answer is 202 (kept, not applied); applied and repeated are 200.
+  table.add({
+    method: 'post',
+    path: '/worker/jobs/:jobId/result',
+    access: { kind: 'attempt' },
+    summary: 'A worker posts the job result, which is applied once, repeated safely, or held',
+    handlers: [
+      validate({ params: jobParams, body: resultBody }),
+      async (_req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof resultBody> }>(res)
+        const answer = await postResult(deps, claimsOf(res), body)
+        res.status(answer.status === 'held' ? 202 : 200).json(answer)
       },
     ],
   })

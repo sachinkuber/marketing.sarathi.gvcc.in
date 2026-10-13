@@ -1,6 +1,6 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { CLASS_SETTINGS, type JobClass, type Queue } from '@mkt/queue'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { AuditSink } from '../ports.ts'
 import { AppError } from '../errors.ts'
 import type { ResultHandlers } from './results.ts'
@@ -430,5 +430,96 @@ export async function failModelCall(
         where id = $1 and job_id = $2 and status = 'started'`,
       [callId, claims.jobId, error.slice(0, 2000)],
     )
+  })
+}
+
+export interface PostedResult {
+  type: string
+  result: unknown
+}
+export type ResultAnswer =
+  { status: 'applied'; outcome: unknown } | { status: 'repeated'; outcome: unknown } | { status: 'held' }
+
+// JSON with object keys sorted at every depth, so two results that differ only in key order hash the same.
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+export const resultHash = (posted: PostedResult): string =>
+  `sha256:${createHash('sha256')
+    .update(canonicalJson({ type: posted.type, result: posted.result }))
+    .digest('hex')}`
+
+// Spec 9.4. One transaction: the result, its business effect, the job's end and the run's state commit
+// together, or none do. The job row is locked so two posts cannot both apply.
+export async function postResult(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  posted: PostedResult,
+): Promise<ResultAnswer> {
+  return withBrand(deps.pool, claims.brandId, async (client) => {
+    await requireCurrentAttempt(client, deps, claims)
+    const found = await client.query<{
+      run_id: string
+      expected_result_type: string
+      result_hash: string | null
+      outcome: unknown
+      finished_at: Date | null
+    }>(
+      `select run_id, expected_result_type, result_hash, outcome, finished_at
+         from app.job_input where job_id = $1 for update`,
+      [claims.jobId],
+    )
+    const job = found.rows[0]!
+    const hash = resultHash(posted)
+
+    if (job.finished_at) {
+      if (job.result_hash === hash) return { status: 'repeated' as const, outcome: job.outcome }
+      throw new AppError(409, 'result_differs', 'This job already has a different result.')
+    }
+    if (posted.type !== job.expected_result_type || posted.type !== claims.resultType) {
+      throw new AppError(422, 'wrong_result_type', 'This job may not post a result of that type.')
+    }
+    const control = await readControl(client, claims.jobId)
+    if (control.cancelRequested) throw new AppError(409, 'job_cancelled', 'This job was cancelled.')
+    if (control.held) {
+      // Kept, not applied: no content version, no further job, no notification until release (spec 9.4).
+      await client.query('update app.job_input set held_result = $2::jsonb where job_id = $1', [
+        claims.jobId,
+        JSON.stringify(posted),
+      ])
+      return { status: 'held' as const }
+    }
+    const handler = deps.results.get(posted.type)
+    if (!handler) throw new AppError(422, 'no_result_handler', 'Nothing accepts a result of that type.')
+
+    const outcome = await handler(client, {
+      brandId: claims.brandId,
+      jobId: claims.jobId,
+      runId: job.run_id,
+      result: posted.result,
+    })
+    await client.query(
+      `update app.job_input set result_type = $2, result_hash = $3, outcome = $4::jsonb, finished_at = now()
+        where job_id = $1`,
+      [claims.jobId, posted.type, hash, JSON.stringify(outcome ?? null)],
+    )
+    await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
+      claims.attemptId,
+    ])
+    // The run succeeds when none of its jobs is left unfinished.
+    await client.query(
+      `update app.run set state = 'succeeded', finished_at = now()
+        where id = $1 and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
+      [job.run_id],
+    )
+    return { status: 'applied' as const, outcome: outcome ?? null }
   })
 }

@@ -86,6 +86,7 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
       'post /worker/jobs/:jobId/model-calls': 'attempt',
       'post /worker/jobs/:jobId/model-calls/:callId/checkpoint': 'attempt',
       'post /worker/jobs/:jobId/model-calls/:callId/failure': 'attempt',
+      'post /worker/jobs/:jobId/result': 'attempt',
     })
   })
 })
