@@ -165,11 +165,16 @@ export async function startAttempt(
 
 // The attempt in the token must be the job's current one: the latest, and still active (or already
 // succeeded, so a repeated result post gets its first outcome back). Anything else is refused and recorded.
+//
+// Callers must call this first inside the transaction that then writes. It takes the job's row lock (the
+// same lock startAttempt holds while it supersedes), so a supersede cannot commit between this check and
+// the caller's write: it waits until the caller's transaction ends, and the old attempt is refused after.
 export async function requireCurrentAttempt(
   client: PoolClient,
   deps: JobsDeps,
   claims: AttemptClaims,
 ): Promise<void> {
+  await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
   const { rows } = await client.query<{ id: string; state: string }>(
     `select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1`,
     [claims.jobId],

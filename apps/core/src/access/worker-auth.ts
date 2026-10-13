@@ -20,6 +20,7 @@ export function workerAuth(secret: string): RequestHandler {
   }
 }
 
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const CLAIMS = 'attemptClaims'
 export const claimsOf = (res: Response): AttemptClaims => res.locals[CLAIMS] as AttemptClaims
 
@@ -27,7 +28,9 @@ export const claimsOf = (res: Response): AttemptClaims => res.locals[CLAIMS] as 
 // still the current one is the service's check, made inside the transaction that acts on it.
 export function attemptAuth(deps: JobsDeps): RequestHandler {
   return async (req, res, next) => {
-    const jobId = String(req.params.jobId ?? '')
+    const rawJobId = String(req.params.jobId ?? '')
+    // The path is untrusted: record it only when it has the shape of an id, and never at any length.
+    const jobId = UUID_SHAPE.test(rawJobId) ? rawJobId : rawJobId.slice(0, 64)
     const token = req.headers['x-attempt-token']
     const refuse = async (reason: string, brandId: string | null): Promise<never> => {
       await deps.audit.record({
@@ -47,7 +50,7 @@ export function attemptAuth(deps: JobsDeps): RequestHandler {
       Math.floor(deps.now().getTime() / 1000),
     )
     if (!checked.ok) return refuse(checked.reason, null)
-    if (checked.claims.jobId !== jobId) return refuse('wrong_job', checked.claims.brandId)
+    if (checked.claims.jobId !== rawJobId) return refuse('wrong_job', checked.claims.brandId)
     res.locals[CLAIMS] = checked.claims
     next()
   }
