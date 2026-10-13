@@ -4,7 +4,7 @@ import { installQueue } from './install.ts'
 export async function createQueueTestDatabase(): Promise<TestDatabase> {
   const db = await createTestDatabase()
   try {
-    await installQueue(db.urlFor('migration'))
+    await installQueue(db.urlFor('migration'), { testScale: 0.1 })
   } catch (error) {
     await db.drop()
     throw error

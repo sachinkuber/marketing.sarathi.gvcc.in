@@ -33,7 +33,9 @@ grant select on ${QUEUE_SCHEMA}.queue to mkt_app;
 `
 
 // Run at deployment, and by the test harness, as the role that owns the database (never at run time).
-export async function installQueue(adminUrl: string): Promise<void> {
+// testScale shortens the timings of the queues for a test database only; production installs at 1.
+export async function installQueue(adminUrl: string, options: { testScale?: number } = {}): Promise<void> {
+  const scale = options.testScale ?? 1
   const boss = new PgBoss({ connectionString: adminUrl, schema: QUEUE_SCHEMA })
   boss.on('error', () => {})
   await boss.start()
@@ -45,10 +47,10 @@ export async function installQueue(adminUrl: string): Promise<void> {
       if (!(await boss.getQueue(s.queue))) {
         await boss.createQueue(s.queue, {
           deadLetter: s.deadLetter,
-          heartbeatSeconds: s.heartbeatSeconds,
-          expireInSeconds: s.expireInSeconds,
+          heartbeatSeconds: Math.max(10, Math.ceil(s.heartbeatSeconds * scale)),
+          expireInSeconds: Math.max(30, Math.ceil(s.expireInSeconds * scale)),
           retryLimit: s.retryLimit,
-          retryDelay: s.retryDelaySeconds,
+          retryDelay: Math.max(1, Math.ceil(s.retryDelaySeconds * scale)),
           retryBackoff: true,
           notify: s.notify,
         })
