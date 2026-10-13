@@ -87,15 +87,14 @@ describe('notification', () => {
     for (let i = 0; i < 5; i++) {
       const id = randomUUID()
       const client = await app.connect()
-      let committedAt = 0
       try {
         await client.query('begin')
         await queue.send(client, { jobId: id, jobClass: 'interactive', scheduleKey: randomUUID() })
         await client.query('commit')
-        committedAt = Date.now()
       } finally {
         client.release()
       }
+      const committedAt = Date.now()
       const end = Date.now() + 10_000
       while (!claimed.has(id) && Date.now() < end) await sleep(10)
       expect(claimed.has(id)).toBe(true)
