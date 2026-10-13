@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { AuditSink } from '../ports.ts'
 import { AppError } from '../errors.ts'
 import type { ResultHandlers } from './results.ts'
+import { inrMicros, usdMicros } from './money.ts'
 import { signAttemptToken, type AttemptClaims } from './token.ts'
 
 export interface JobsDeps {
@@ -205,4 +206,215 @@ export async function readControl(
   )
   const row = rows[0]
   return { cancelRequested: row?.cancel_requested ?? false, held: row?.held ?? false }
+}
+
+export interface RegisterInput {
+  step: string
+  requestHash: string
+  model: string
+}
+export type Registered =
+  | { outcome: 'send'; callId: string; possibleDuplicate: boolean }
+  | { outcome: 'use_checkpoint'; output: unknown }
+  | { outcome: 'cancelled' }
+  | { outcome: 'held' }
+
+interface SavedStep {
+  step: string
+  requestHash: string
+  output: unknown
+  callId: string
+}
+
+// Spec 9.5, steps 1 to 3. The row exists before the request is sent.
+export async function registerModelCall(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  input: RegisterInput,
+): Promise<Registered> {
+  return withBrand(deps.pool, claims.brandId, async (client) => {
+    await requireCurrentAttempt(client, deps, claims)
+    const job = await client.query<{ saved_steps: SavedStep[]; run_id: string }>(
+      'select saved_steps, run_id from app.job_input where job_id = $1 for update',
+      [claims.jobId],
+    )
+    const saved = job.rows[0]!.saved_steps.find(
+      (s) => s.step === input.step && s.requestHash === input.requestHash,
+    )
+    if (saved) return { outcome: 'use_checkpoint' as const, output: saved.output }
+
+    // The core hands the cancel and held flags back before every model call (spec 9.2).
+    const control = await readControl(client, claims.jobId)
+    if (control.cancelRequested) return { outcome: 'cancelled' as const }
+    if (control.held) return { outcome: 'held' as const }
+
+    const earlier = await client.query(
+      `select 1 from app.model_call
+        where job_id = $1 and step = $2 and request_hash = $3 and status = 'started' limit 1`,
+      [claims.jobId, input.step, input.requestHash],
+    )
+    const possibleDuplicate = (earlier.rowCount ?? 0) > 0
+    const created = await client.query<{ id: string }>(
+      `insert into app.model_call (brand_id, run_id, job_id, attempt_id, step, request_hash, model, possible_duplicate)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+      [
+        claims.brandId,
+        job.rows[0]!.run_id,
+        claims.jobId,
+        claims.attemptId,
+        input.step,
+        input.requestHash,
+        input.model,
+        possibleDuplicate,
+      ],
+    )
+    return { outcome: 'send' as const, callId: created.rows[0]!.id, possibleDuplicate }
+  })
+}
+
+export interface CheckpointInput {
+  callId: string
+  step: string
+  output: unknown
+  model: string
+  providerMessageId: string
+  providerRequestId: string | null
+  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+}
+
+// Spec 9.5, step 4: in one transaction the core saves the step, marks the call succeeded, stores the
+// provider's IDs and token counts, and writes the cost. A missing price or rate never blocks it (decisions 5, 6).
+export async function saveCheckpoint(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  input: CheckpointInput,
+): Promise<{ costed: boolean }> {
+  return withBrand(deps.pool, claims.brandId, async (client) => {
+    await requireCurrentAttempt(client, deps, claims)
+    const job = await client.query<{ saved_steps: SavedStep[]; run_id: string }>(
+      'select saved_steps, run_id from app.job_input where job_id = $1 for update',
+      [claims.jobId],
+    )
+    const call = await client.query<{
+      status: string
+      step: string
+      request_hash: string
+      attempt_id: string
+    }>('select status, step, request_hash, attempt_id from app.model_call where id = $1 and job_id = $2', [
+      input.callId,
+      claims.jobId,
+    ])
+    const row = call.rows[0]
+    if (!row) throw new AppError(404, 'call_not_found', 'No such model call.')
+    if (row.attempt_id !== claims.attemptId) {
+      throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
+    }
+    if (row.step !== input.step) {
+      throw new AppError(400, 'invalid_request', 'The step is not the one this call was registered for.')
+    }
+    if (row.status === 'succeeded') {
+      const costed = await client.query('select 1 from app.cost_ledger where model_call_id = $1', [
+        input.callId,
+      ])
+      return { costed: (costed.rowCount ?? 0) > 0 }
+    }
+
+    const today = deps.now().toISOString().slice(0, 10)
+    const price = await client.query<{
+      input_micros: string
+      output_micros: string
+      cache_read_micros: string
+      cache_write_micros: string
+    }>(
+      `select input_micros, output_micros, cache_read_micros, cache_write_micros from app.model_price
+        where model = $1 and effective_from <= $2::date order by effective_from desc limit 1`,
+      [input.model, today],
+    )
+    const rate = await client.query<{ id: string; rate_micros: string }>(
+      `select id, rate_micros from app.fx_rate
+        where base_currency = 'USD' and quote_currency = 'INR' and rate_date <= $1::date
+        order by rate_date desc limit 1`,
+      [today],
+    )
+    const p = price.rows[0]
+    const r = rate.rows[0]
+    const costed = Boolean(p && r)
+    const usd = p
+      ? usdMicros(
+          {
+            inputMicros: BigInt(p.input_micros),
+            outputMicros: BigInt(p.output_micros),
+            cacheReadMicros: BigInt(p.cache_read_micros),
+            cacheWriteMicros: BigInt(p.cache_write_micros),
+          },
+          input.usage,
+        )
+      : null
+    const inr = usd !== null && r ? inrMicros(usd, BigInt(r.rate_micros)) : null
+
+    await client.query(
+      `update app.model_call set status = 'succeeded', finished_at = now(),
+              provider_message_id = $2, provider_request_id = $3,
+              input_tokens = $4, output_tokens = $5, cache_read_tokens = $6, cache_write_tokens = $7,
+              charged_micros = $8, charged_currency = $9, usd_micros = $10, inr_micros = $11, fx_rate_id = $12
+        where id = $1`,
+      [
+        input.callId,
+        input.providerMessageId,
+        input.providerRequestId,
+        input.usage.inputTokens,
+        input.usage.outputTokens,
+        input.usage.cacheReadTokens,
+        input.usage.cacheWriteTokens,
+        costed ? usd!.toString() : null,
+        costed ? 'USD' : null,
+        costed ? usd!.toString() : null,
+        costed ? inr!.toString() : null,
+        costed ? r!.id : null,
+      ],
+    )
+    if (costed) {
+      const run = await client.query<{ agent: string }>('select agent from app.run where id = $1', [
+        job.rows[0]!.run_id,
+      ])
+      await client.query(
+        `insert into app.cost_ledger (brand_id, run_id, agent, model_call_id, charged_micros, charged_currency, usd_micros, inr_micros, fx_rate_id)
+         values ($1, $2, $3, $4, $5, 'USD', $5, $6, $7)`,
+        [
+          claims.brandId,
+          job.rows[0]!.run_id,
+          run.rows[0]!.agent,
+          input.callId,
+          usd!.toString(),
+          inr!.toString(),
+          r!.id,
+        ],
+      )
+    }
+    const steps: SavedStep[] = [
+      ...job.rows[0]!.saved_steps.filter((s) => !(s.step === row.step && s.requestHash === row.request_hash)),
+      { step: row.step, requestHash: row.request_hash, output: input.output, callId: input.callId },
+    ]
+    await client.query('update app.job_input set saved_steps = $2::jsonb where job_id = $1', [
+      claims.jobId,
+      JSON.stringify(steps),
+    ])
+    return { costed }
+  })
+}
+
+export async function failModelCall(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  callId: string,
+  error: string,
+): Promise<void> {
+  await withBrand(deps.pool, claims.brandId, async (client) => {
+    await requireCurrentAttempt(client, deps, claims)
+    await client.query(
+      `update app.model_call set status = 'failed', error = $3, finished_at = now()
+        where id = $1 and job_id = $2 and status = 'started'`,
+      [callId, claims.jobId, error.slice(0, 2000)],
+    )
+  })
 }

@@ -49,6 +49,12 @@ export function createApp(deps: AppDeps): Express {
   if (deps.guard) app.use('/api', deps.guard)
   // The auth library reads the raw request body, so it is mounted before the JSON parser.
   if (deps.authHandler) app.all('/api/auth/*splat', deps.authHandler)
+  // A saved step's output can be larger than the global limit; only the checkpoint path gets more. It is
+  // mounted first: a body the global parser has already read or refused cannot be parsed again.
+  app.use(
+    '/api/v1/worker/jobs/:jobId/model-calls/:callId/checkpoint',
+    express.json({ limit: '1mb', strict: true }),
+  )
   app.use(express.json({ limit: '100kb', strict: true }))
   if (deps.api) app.use('/api/v1', deps.api)
   app.use(notFoundHandler)
