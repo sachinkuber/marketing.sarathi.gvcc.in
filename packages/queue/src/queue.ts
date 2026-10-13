@@ -72,14 +72,16 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
         {
           localGroupConcurrency: cap,
           localConcurrency: SLOTS_PER_CLASS,
+          // One job per fetch, set here rather than left to the library default: a handler's throw fails only
+          // its own job.
+          batchSize: 1,
           pollingIntervalSeconds: s.pollingIntervalSeconds,
           // Notification wakes a worker for a new job, but nothing notifies when a retry's delay ends, so the
           // backstop poll stays at the class's own interval; a slower one would add up to 30s to every retry.
           notifyPollingIntervalSeconds: s.pollingIntervalSeconds,
         },
-        async (batch) => {
-          // One job at a time per slot: a handler's throw fails only its own job.
-          for (const job of batch) await handler({ id: job.id, jobClass })
+        async ([job]) => {
+          if (job) await handler({ id: job.id, jobClass })
         },
       )
     },
@@ -129,17 +131,22 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
         const runLimit = new Date(now.getTime() - s.expireInSeconds * 1000)
         const { rows } = await reader.query<{ id: string; state: string }>(
           `select id, state from ${QUEUE_SCHEMA}.job
-            where name = $1 and ((state = 'created' and created_on < $2) or (state = 'active' and started_on < $3))`,
+            where name = $1
+              and ((state in ('created', 'retry') and greatest(created_on, start_after) < $2)
+                or (state = 'active' and started_on < $3))`,
           [s.queue, waitLimit, runLimit],
         )
-        for (const r of rows) (r.state === 'created' ? waiting : running).push(r.id)
+        for (const r of rows) (r.state === 'active' ? running : waiting).push(r.id)
       }
       return { waiting, running }
     },
 
     async stop() {
-      await reader.end()
-      await boss.stop({ graceful: false })
+      try {
+        await reader.end()
+      } finally {
+        await boss.stop({ graceful: false })
+      }
     },
   }
 }
