@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
+import { AppError } from '../src/errors.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
 import { createJob, createRun, postResult, startAttempt } from '../src/jobs/service.ts'
 import type { ResultHandler } from '../src/jobs/results.ts'
@@ -20,20 +21,22 @@ const echo: ResultHandler = async (_client, ctx) => {
   return { echoed: ctx.result, jobId: ctx.jobId }
 }
 
-async function startedJob(): Promise<{
+async function startedJob(existingRunId?: string): Promise<{
   jobId: string
   runId: string
   claims: AttemptClaims
   token: string
 }> {
-  let runId = ''
+  let runId = existingRunId ?? ''
   const jobId = await withBrand(stack.appPool, brand, async (client) => {
-    runId = await createRun(client, brand, {
-      agent: 'test-agent',
-      definitionVersionId: definitionId,
-      startedByKind: 'system',
-      startedById: null,
-    })
+    if (!existingRunId) {
+      runId = await createRun(client, brand, {
+        agent: 'test-agent',
+        definitionVersionId: definitionId,
+        startedByKind: 'system',
+        startedById: null,
+      })
+    }
     return createJob(client, jobs, brand, {
       runId,
       jobClass: 'interactive',
@@ -221,6 +224,85 @@ describe('posting a result', () => {
   })
 })
 
+describe("a run's state", () => {
+  const runRow = async (runId: string) =>
+    (await stack.db.admin.query('select state, finished_at from app.run where id = $1', [runId])).rows[0]
+
+  it('stays unfinished after the first of two jobs and succeeds after the second', async () => {
+    jobs.results.set('test.echo', echo)
+    const a = await startedJob()
+    const b = await startedJob(a.runId)
+    await postResult(jobs, a.claims, { type: 'test.echo', result: { n: 1 } })
+    const mid = await runRow(a.runId)
+    expect(mid.state).not.toBe('succeeded')
+    expect(mid.finished_at).toBeNull()
+    await postResult(jobs, b.claims, { type: 'test.echo', result: { n: 2 } })
+    const end = await runRow(a.runId)
+    expect(end.state).toBe('succeeded')
+    expect(end.finished_at).not.toBeNull()
+  })
+
+  it('succeeds when the last two jobs of a run finish at the same moment', async () => {
+    jobs.results.set('test.echo', echo)
+    for (let round = 0; round < 5; round += 1) {
+      const a = await startedJob()
+      const b = await startedJob(a.runId)
+      const both = await Promise.all([
+        postResult(jobs, a.claims, { type: 'test.echo', result: { round, who: 'a' } }),
+        postResult(jobs, b.claims, { type: 'test.echo', result: { round, who: 'b' } }),
+      ])
+      expect(both.map((r) => r.status)).toEqual(['applied', 'applied'])
+      const end = await runRow(a.runId)
+      expect(end.state).toBe('succeeded')
+      expect(end.finished_at).not.toBeNull()
+    }
+  })
+
+  it('leaves a cancelled run cancelled when its last job result is accepted', async () => {
+    jobs.results.set('test.echo', echo)
+    const a = await startedJob()
+    await stack.db.admin.query(
+      `update app.run set state = 'cancelled', finished_at = '2020-01-01T00:00:00Z' where id = $1`,
+      [a.runId],
+    )
+    expect(await postResult(jobs, a.claims, { type: 'test.echo', result: {} })).toMatchObject({
+      status: 'applied',
+    })
+    const end = await runRow(a.runId)
+    expect(end.state).toBe('cancelled')
+    expect(new Date(end.finished_at).toISOString()).toBe('2020-01-01T00:00:00.000Z')
+  })
+
+  it('applies exactly one of two simultaneous different results for one job', async () => {
+    jobs.results.set('test.echo', echo)
+    const { jobId, claims } = await startedJob()
+    const before = applied
+    const settled = await Promise.allSettled([
+      postResult(jobs, claims, { type: 'test.echo', result: { v: 1 } }),
+      postResult(jobs, claims, { type: 'test.echo', result: { v: 2 } }),
+    ])
+    expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1)
+    const rejected = settled.find((s) => s.status === 'rejected') as PromiseRejectedResult
+    expect(rejected.reason).toMatchObject({ status: 409, code: 'result_differs' })
+    expect(applied).toBe(before + 1)
+    const row = await stack.db.admin.query('select outcome from app.job_input where job_id = $1', [jobId])
+    expect(row.rows[0].outcome).toMatchObject({ jobId })
+  })
+
+  it('applies one of two simultaneous equal results and repeats the other', async () => {
+    jobs.results.set('test.echo', echo)
+    const { claims } = await startedJob()
+    const before = applied
+    const both = await Promise.all([
+      postResult(jobs, claims, { type: 'test.echo', result: { same: true } }),
+      postResult(jobs, claims, { type: 'test.echo', result: { same: true } }),
+    ])
+    expect(both.map((r) => r.status).sort()).toEqual(['applied', 'repeated'])
+    expect(applied).toBe(before + 1)
+    expect(both[0]).toEqual({ ...both[1], status: both[0].status })
+  })
+})
+
 describe('the result route', () => {
   async function post(jobId: string, token: string, body: unknown): Promise<Response> {
     return fetch(`${stack.server.url}/api/v1/worker/jobs/${jobId}/result`, {
@@ -262,6 +344,18 @@ describe('the result route', () => {
     expect((await post(jobId, token, { type: 'test.echo', result: { t: 'x'.repeat(200_000) } })).status).toBe(
       413,
     )
+  })
+
+  it('passes an AppError thrown by a handler through with its status', async () => {
+    const { jobId, token } = await startedJob()
+    jobs.results.set('test.echo', async () => {
+      throw new AppError(422, 'bad_content', 'The content is not acceptable.')
+    })
+    const res = await post(jobId, token, { type: 'test.echo', result: {} })
+    expect(res.status).toBe(422)
+    expect(await res.json()).toMatchObject({ error: { code: 'bad_content' } })
+    const row = await stack.db.admin.query('select finished_at from app.job_input where job_id = $1', [jobId])
+    expect(row.rows[0].finished_at).toBeNull()
   })
 
   it('answers 500 without the handler message when the handler throws', async () => {

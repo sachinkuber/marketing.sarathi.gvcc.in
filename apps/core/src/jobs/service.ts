@@ -514,12 +514,18 @@ export async function postResult(
     await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
       claims.attemptId,
     ])
-    // The run succeeds when none of its jobs is left unfinished.
+    // The run succeeds when none of its jobs is left unfinished. Lock the run row first (lock order is always
+    // job_input, then run): a sibling job finishing at the same time then waits, and re-reads this job's
+    // finished_at once we commit, so one of the two always sees the run complete. Only a run that is still
+    // going is moved; a failed, cancelled, held or needs_manual run keeps its state.
+    await client.query('select 1 from app.run where id = $1 for update', [job.run_id])
     await client.query(
       `update app.run set state = 'succeeded', finished_at = now()
-        where id = $1 and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
+        where id = $1 and state in ('created', 'running')
+          and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
       [job.run_id],
     )
-    return { status: 'applied' as const, outcome: outcome ?? null }
+    // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
+    return { status: 'applied' as const, outcome: JSON.parse(JSON.stringify(outcome ?? null)) as unknown }
   })
 }
