@@ -26,7 +26,9 @@ export interface Queue {
     now: Date,
     limits: { maxWaitSeconds: Record<JobClass, number> },
   ): Promise<{ waiting: string[]; running: string[] }>
-  stop(): Promise<void>
+  // Default: stop at once, abandoning running handlers (their jobs are recovered by the heartbeat). A worker
+  // process asks for a graceful stop: no new job is taken and running handlers get `timeoutSeconds` to finish.
+  stop(options?: { graceful?: boolean; timeoutSeconds?: number }): Promise<void>
 }
 
 export interface OpenOptions {
@@ -150,11 +152,15 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
       return { waiting, running }
     },
 
-    async stop() {
+    async stop(options = {}) {
       try {
-        await reader.end()
+        await boss.stop(
+          options.graceful
+            ? { graceful: true, timeout: Math.max(1, options.timeoutSeconds ?? 30) * 1000 }
+            : { graceful: false },
+        )
       } finally {
-        await boss.stop({ graceful: false })
+        await reader.end()
       }
     },
   }

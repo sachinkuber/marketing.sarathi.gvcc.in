@@ -25,6 +25,21 @@ describe('business queries must go through withBrand (acceptance test 7)', () =>
     ).toContain('no-restricted-imports')
   })
 
+  it('rejects the worker importing the db package or the core, but not its tests', async () => {
+    const withDb = "import { withBrand } from '@mkt/db'\nexport const w = withBrand\n"
+    expect(await ruleIds('apps/worker/src/x.ts', withDb)).toContain('no-restricted-imports')
+    expect(
+      await ruleIds('apps/worker/src/y.ts', "import { x } from '@mkt/db/testing'\nexport const w = x\n"),
+    ).toContain('no-restricted-imports')
+    expect(
+      await ruleIds(
+        'apps/worker/src/z.ts',
+        "import { x } from '../../core/src/jobs/service.ts'\nexport const w = x\n",
+      ),
+    ).toContain('no-restricted-imports')
+    expect(await ruleIds('apps/worker/test/x.ts', withDb)).not.toContain('no-restricted-imports')
+  })
+
   it('allows the same imports inside the db package', async () => {
     expect(await ruleIds('packages/db/src/x.ts', "import pg from 'pg'\nexport const p = pg\n")).not.toContain(
       'no-restricted-imports',

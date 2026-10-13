@@ -36,5 +36,27 @@ export default defineConfig(
       ],
     },
   },
+  {
+    // The worker holds no business data and no database access: it reaches the platform only through the
+    // core's HTTP routes and the queue port. The later rule replaces the one above, so it repeats its paths.
+    files: ['apps/worker/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['pg', 'kysely', 'pg-boss', '@mkt/db', '@mkt/core'].map((name) => ({
+            name,
+            message: 'The worker reaches the platform only through the core client and @mkt/queue.',
+          })),
+          patterns: [
+            {
+              group: ['@mkt/db/*', '@mkt/core/*', '**/apps/core/**', '../../core/**'],
+              message: 'The worker reaches the platform only through the core client and @mkt/queue.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettier,
 )

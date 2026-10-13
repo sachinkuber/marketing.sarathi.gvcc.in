@@ -17,7 +17,17 @@ export interface WorkerOptions {
   superviseIntervalSeconds?: number
 }
 
-export async function startWorker(options: WorkerOptions): Promise<{ stop(): Promise<void> }> {
+// How long running jobs may take to finish after a stop signal.
+const STOP_TIMEOUT_SECONDS = 30
+
+export interface StopOptions {
+  graceful?: boolean
+  timeoutSeconds?: number
+}
+
+export async function startWorker(
+  options: WorkerOptions,
+): Promise<{ stop(options?: StopOptions): Promise<void> }> {
   const queue = await openQueue(options.queueUrl, {
     supervise: true,
     ...(options.superviseIntervalSeconds
@@ -33,12 +43,12 @@ export async function startWorker(options: WorkerOptions): Promise<{ stop(): Pro
   for (const jobClass of options.classes) {
     await queue.work(jobClass, { processes: options.processesPerClass }, (job) => runJob(deps, job))
   }
-  return { stop: () => queue.stop() }
+  return { stop: (stopOptions) => queue.stop(stopOptions) }
 }
 
 // The production entry, guarded so importing this module (from a test) starts nothing and reads no
 // environment.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   const config = loadWorkerConfig(process.env)
   // Phase 1 registers no production handler: the trivial agent (package 13) adds its own.
   const handlers: Record<string, JobHandler> = {}
@@ -57,7 +67,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     processesPerClass: config.processesPerClass,
     ...(config.superviseIntervalSeconds ? { superviseIntervalSeconds: config.superviseIntervalSeconds } : {}),
   })
+  // A stop signal takes no new job and gives running jobs time to finish (their attempts are then complete,
+  // not recovered by the heartbeat). A second signal while stopping is ignored.
+  let stopping = false
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.on(signal, () => void worker.stop().then(() => process.exit(0)))
+    process.on(signal, () => {
+      if (stopping) return
+      stopping = true
+      worker.stop({ graceful: true, timeoutSeconds: STOP_TIMEOUT_SECONDS }).then(
+        () => process.exit(0),
+        (error: unknown) => {
+          console.error('The worker did not stop cleanly.', error)
+          process.exit(1)
+        },
+      )
+    })
   }
 }
