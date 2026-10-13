@@ -81,6 +81,19 @@ describe('the queue schema and the roles', () => {
     await expect(app.query("update pgboss.job set state = 'completed'")).rejects.toThrow(/permission denied/)
   })
 
+  it('refuses the application role every change to the partition that holds the rows', async () => {
+    await expect(app.query("update pgboss.job_common set state = 'completed'")).rejects.toThrow(
+      /permission denied/,
+    )
+    await expect(app.query('delete from pgboss.job_common')).rejects.toThrow(/permission denied/)
+  })
+
+  it('lets the application role read only the id and start_after of a queued job, never its data', async () => {
+    await expect(app.query('select data from pgboss.job_common')).rejects.toThrow(/permission denied/)
+    await expect(app.query('select * from pgboss.job_common')).rejects.toThrow(/permission denied/)
+    await expect(app.query('select id from pgboss.job')).rejects.toThrow(/permission denied/)
+  })
+
   it('keeps every business table out of the queue role (acceptance test 5)', async () => {
     for (const table of ['app.brand', 'app.job_input', 'app.content_item', 'app.membership']) {
       await expect(queueRole.query(`select 1 from ${table} limit 1`)).rejects.toThrow(/permission denied/)
