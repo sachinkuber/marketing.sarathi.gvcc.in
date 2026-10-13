@@ -500,6 +500,11 @@ export async function postResult(
     const handler = deps.results.get(posted.type)
     if (!handler) throw new AppError(422, 'no_result_handler', 'Nothing accepts a result of that type.')
 
+    // Lock order is always job_input, then run, then whatever the handler writes. Taking the run lock before
+    // the handler matters: a handler row that references the run takes a shared lock on it, and two siblings
+    // holding that and then asking for the exclusive lock would deadlock.
+    await client.query('select 1 from app.run where id = $1 for update', [job.run_id])
+
     const outcome = await handler(client, {
       brandId: claims.brandId,
       jobId: claims.jobId,
@@ -514,11 +519,10 @@ export async function postResult(
     await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
       claims.attemptId,
     ])
-    // The run succeeds when none of its jobs is left unfinished. Lock the run row first (lock order is always
-    // job_input, then run): a sibling job finishing at the same time then waits, and re-reads this job's
-    // finished_at once we commit, so one of the two always sees the run complete. Only a run that is still
-    // going is moved; a failed, cancelled, held or needs_manual run keeps its state.
-    await client.query('select 1 from app.run where id = $1 for update', [job.run_id])
+    // The run succeeds when none of its jobs is left unfinished. The run row is already locked (above), so a
+    // sibling finishing at the same moment waited for us and re-reads this job's finished_at once we commit:
+    // one of the two always sees the run complete. Only a run that is still going is moved; a failed,
+    // cancelled, held or needs_manual run keeps its state.
     await client.query(
       `update app.run set state = 'succeeded', finished_at = now()
         where id = $1 and state in ('created', 'running')

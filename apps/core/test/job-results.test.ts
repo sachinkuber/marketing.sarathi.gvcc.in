@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
@@ -256,6 +256,74 @@ describe("a run's state", () => {
       expect(end.state).toBe('succeeded')
       expect(end.finished_at).not.toBeNull()
     }
+  })
+
+  // Deterministic: the run row is held by the test, so both posts park on it; once both are parked the
+  // test lets go. Without the run lock both would evaluate "no unfinished sibling" on their own snapshot
+  // and the run would never be marked succeeded.
+  it('succeeds when two sibling jobs are parked at the run and released together', async () => {
+    jobs.results.set('test.echo', echo)
+    const a = await startedJob()
+    const b = await startedJob(a.runId)
+    const holder = await stack.db.admin.connect()
+    let released = false
+    try {
+      await holder.query('begin')
+      await holder.query('select 1 from app.run where id = $1 for update', [a.runId])
+      const pid = (await holder.query<{ pid: number }>('select pg_backend_pid() as pid')).rows[0]!.pid
+      const posts = Promise.all([
+        postResult(jobs, a.claims, { type: 'test.echo', result: { who: 'a' } }),
+        postResult(jobs, b.claims, { type: 'test.echo', result: { who: 'b' } }),
+      ])
+      const deadline = Date.now() + 10_000
+      for (;;) {
+        const waiting = await stack.db.admin.query(
+          // Row-lock waiters queue behind one another, so the second may be blocked by the first waiter, not by
+          // the holder: count every backend of this database that waits on a lock, other than the holder.
+          `select count(*)::int as n from pg_stat_activity
+            where wait_event_type = 'Lock' and datname = current_database() and pid <> $1`,
+          [pid],
+        )
+        if (waiting.rows[0].n >= 2) break
+        if (Date.now() > deadline) throw new Error('both posts never parked at the run row')
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      await holder.query('commit')
+      released = true
+      const both = await posts
+      expect(both.map((r) => r.status)).toEqual(['applied', 'applied'])
+      const end = await runRow(a.runId)
+      expect(end.state).toBe('succeeded')
+      expect(end.finished_at).not.toBeNull()
+    } finally {
+      if (!released) await holder.query('rollback').catch(() => undefined)
+      holder.release()
+    }
+  })
+
+  it('does not deadlock when the handlers write rows that reference the run', async () => {
+    const a = await startedJob()
+    const b = await startedJob(a.runId)
+    // A handler row with a foreign key to the run takes a shared lock on the run row.
+    jobs.results.set('test.echo', async (client, ctx) => {
+      await client.query(
+        `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type, finished_at)
+         values ($1, $2, $3, 'interactive', '{}'::jsonb, 'test.echo', now())`,
+        [randomUUID(), ctx.brandId, ctx.runId],
+      )
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      return { ok: true }
+    })
+    for (let round = 0; round < 3; round += 1) {
+      const x = round === 0 ? a : await startedJob(a.runId)
+      const y = round === 0 ? b : await startedJob(a.runId)
+      const both = await Promise.all([
+        postResult(jobs, x.claims, { type: 'test.echo', result: { round, who: 'x' } }),
+        postResult(jobs, y.claims, { type: 'test.echo', result: { round, who: 'y' } }),
+      ])
+      expect(both.map((r) => r.status)).toEqual(['applied', 'applied'])
+    }
+    expect((await runRow(a.runId)).state).toBe('succeeded')
   })
 
   it('leaves a cancelled run cancelled when its last job result is accepted', async () => {
