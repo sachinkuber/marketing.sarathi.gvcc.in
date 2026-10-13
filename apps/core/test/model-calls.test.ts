@@ -394,4 +394,255 @@ describe('the model-call routes', () => {
     const row = await stack.db.admin.query('select status from app.model_call where id = $1', [reg.callId])
     expect(row.rows[0].status).toBe('failed')
   })
+
+  it('reads a large body only after authentication, and only on exactly the checkpoint request', async () => {
+    const { jobId, claims, token } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'lim', requestHash: 'l', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const path = `/worker/jobs/${jobId}/model-calls/${reg.callId}/checkpoint`
+    const body = (n: number) => ({
+      step: 'lim',
+      output: { text: 'x'.repeat(n) },
+      model: 'test-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: USAGE,
+    })
+    const send = (url: string, method: string, headers: Record<string, string>, n: number) =>
+      fetch(`${stack.server.url}${url}`, {
+        method,
+        headers: { 'content-type': 'application/json', ...headers },
+        body: method === 'GET' ? undefined : JSON.stringify(body(n)),
+      })
+    const auth = { authorization: `Worker ${jobs.workerSecret}`, 'x-attempt-token': token }
+
+    // No credential: refused by the request guard or worker authentication (never 413, so the big parser
+    // never ran on it).
+    expect([401, 403]).toContain((await send(`/api/v1${path}`, 'POST', {}, 200_000)).status)
+    // A worker credential but no attempt token: refused by the attempt check.
+    expect(
+      (await send(`/api/v1${path}`, 'POST', { authorization: auth.authorization }, 200_000)).status,
+    ).toBe(403)
+    // Over 1 MB with valid credentials: too large.
+    expect((await send(`/api/v1${path}`, 'POST', auth, 1_200_000)).status).toBe(413)
+    // Variants do not get the large limit: whatever the guard or the router does with them, a 200 kB body is
+    // not accepted (413 from the 100 kB parser, or refused earlier / not found).
+    const upper = path.replace('/worker/', '/Worker/')
+    for (const [url, method] of [
+      [`/api/v1${upper}`, 'POST'],
+      [`/api/v1${path}/extra`, 'POST'],
+      [`/api/v1${path}`, 'PUT'],
+    ] as const) {
+      expect([403, 404, 405, 413], `${method} ${url}`).toContain(
+        (await send(url, method, auth, 200_000)).status,
+      )
+    }
+    // The real request, 200 kB, is accepted.
+    expect((await send(`/api/v1${path}`, 'POST', auth, 200_000)).status).toBe(200)
+  })
+
+  it('refuses a checkpoint containing U+0000 with a 400, not a 500', async () => {
+    const { jobId, claims, token } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'nul', requestHash: 'n', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const res = await post(`/worker/jobs/${jobId}/model-calls/${reg.callId}/checkpoint`, token, {
+      step: 'nul',
+      output: { text: 'a\u0000b' },
+      model: 'test-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: USAGE,
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('refuses a token count above the integer column, with a 400', async () => {
+    const { jobId, claims, token } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'big', requestHash: 'g', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const res = await post(`/worker/jobs/${jobId}/model-calls/${reg.callId}/checkpoint`, token, {
+      step: 'big',
+      output: {},
+      model: 'test-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: { ...USAGE, inputTokens: 2147483648 },
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('checkpoint rules and cost edge cases', () => {
+  it('keeps the first output when the same call is checkpointed again with a different one', async () => {
+    const { jobId, claims } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, {
+      step: 'again',
+      requestHash: 'a',
+      model: 'test-model',
+    })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const base = {
+      callId: reg.callId,
+      step: 'again',
+      model: 'test-model',
+      providerMessageId: 'msg_a',
+      providerRequestId: null,
+      usage: USAGE,
+    }
+    await saveCheckpoint(jobs, claims, { ...base, output: { v: 1 } })
+    await expect(saveCheckpoint(jobs, claims, { ...base, output: { v: 2 } })).resolves.toEqual({
+      costed: true,
+    })
+    const later = await reattempt(jobId)
+    expect(
+      await registerModelCall(jobs, later, { step: 'again', requestHash: 'a', model: 'test-model' }),
+    ).toEqual({ outcome: 'use_checkpoint', output: { v: 1 } })
+  })
+
+  it('rejects a checkpoint whose step or model differs from the registered call, with a 400', async () => {
+    const { claims } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'orig', requestHash: 'o', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const base = {
+      callId: reg.callId,
+      step: 'orig',
+      output: {},
+      model: 'test-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: USAGE,
+    }
+    await expect(saveCheckpoint(jobs, claims, { ...base, step: 'other' })).rejects.toMatchObject({
+      status: 400,
+    })
+    await expect(saveCheckpoint(jobs, claims, { ...base, model: 'cheaper-model' })).rejects.toMatchObject({
+      status: 400,
+    })
+    const row = await stack.db.admin.query('select status from app.model_call where id = $1', [reg.callId])
+    expect(row.rows[0].status).toBe('started')
+  })
+
+  it('succeeds without a cost row when the model has a price but no exchange rate exists', async () => {
+    await stack.db.admin.query(
+      `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
+       values ('old-priced', '1999-01-01', 4000000, 20000000, 200000, 5000000, 'test')`,
+    )
+    // A service clock earlier than every stored rate: "no rate at all" for that day.
+    const early: JobsDeps = { ...jobs, now: () => new Date('2000-01-01T00:00:00Z') }
+    const { claims } = await startedJob()
+    const reg = await registerModelCall(early, claims, {
+      step: 'norate',
+      requestHash: 'r',
+      model: 'old-priced',
+    })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const saved = await saveCheckpoint(early, claims, {
+      callId: reg.callId,
+      step: 'norate',
+      output: { a: 1 },
+      model: 'old-priced',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: USAGE,
+    })
+    expect(saved).toEqual({ costed: false })
+    const row = await stack.db.admin.query('select status, usd_micros from app.model_call where id = $1', [
+      reg.callId,
+    ])
+    expect(row.rows[0]).toEqual({ status: 'succeeded', usd_micros: null })
+    const n = await stack.db.admin.query(
+      'select count(*)::int as n from app.cost_ledger where model_call_id = $1',
+      [reg.callId],
+    )
+    expect(n.rows[0].n).toBe(0)
+  })
+
+  it('rounds half up, in dollars and then in rupees', async () => {
+    // One input token at 0.5 micro-dollars: 0.5 rounds up to 1; 1 x 83.5 = 83.5 rounds up to 84.
+    await stack.db.admin.query(
+      `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
+       values ('half-model', current_date - 30, 500000, 1, 1, 1, 'test')`,
+    )
+    const { claims } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'half', requestHash: 'h', model: 'half-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    await saveCheckpoint(jobs, claims, {
+      callId: reg.callId,
+      step: 'half',
+      output: {},
+      model: 'half-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: { inputTokens: 1, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })
+    const row = await stack.db.admin.query(
+      'select usd_micros::text as usd, inr_micros::text as inr, charged_micros::text as charged from app.model_call where id = $1',
+      [reg.callId],
+    )
+    expect(row.rows[0]).toEqual({ usd: '1', inr: '84', charged: '1' })
+  })
+
+  it('refuses a checkpoint for a call recorded as failed, with a 409', async () => {
+    const { claims } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'ff', requestHash: 'ff', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    await failModelCall(jobs, claims, reg.callId, 'provider 500')
+    await expect(
+      saveCheckpoint(jobs, claims, {
+        callId: reg.callId,
+        step: 'ff',
+        output: {},
+        model: 'test-model',
+        providerMessageId: 'm',
+        providerRequestId: null,
+        usage: USAGE,
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'call_failed' })
+  })
+
+  it('does not flag a retry after a recorded failure as a possible duplicate', async () => {
+    const { jobId, claims } = await startedJob()
+    const first = await registerModelCall(jobs, claims, {
+      step: 'rf',
+      requestHash: 'rf',
+      model: 'test-model',
+    })
+    if (first.outcome !== 'send') throw new Error('unexpected')
+    await failModelCall(jobs, claims, first.callId, 'provider 529')
+    const later = await reattempt(jobId)
+    expect(
+      await registerModelCall(jobs, later, { step: 'rf', requestHash: 'rf', model: 'test-model' }),
+    ).toMatchObject({ outcome: 'send', possibleDuplicate: false })
+  })
+
+  // Runs last: the sweep is class-wide, so it would also move other tests' unanswered calls.
+  it('flags a retry of a call the sweep moved to unknown, and still lets that call be saved', async () => {
+    const { jobId, claims } = await startedJob()
+    const first = await registerModelCall(jobs, claims, {
+      step: 'sw',
+      requestHash: 'sw',
+      model: 'test-model',
+    })
+    if (first.outcome !== 'send') throw new Error('unexpected')
+    await stack.db.admin.query(`select app.sweep_model_calls('interactive', now() + interval '1 hour')`)
+    const row = await stack.db.admin.query('select status from app.model_call where id = $1', [first.callId])
+    expect(row.rows[0].status).toBe('unknown')
+    const later = await reattempt(jobId)
+    expect(
+      await registerModelCall(jobs, later, { step: 'sw', requestHash: 'sw', model: 'test-model' }),
+    ).toMatchObject({ outcome: 'send', possibleDuplicate: true })
+    // The late answer to the unknown call is still saved by the attempt that sent it... which is now
+    // superseded, so it is refused; the new attempt's own call is the one that is saved.
+    await expect(
+      saveCheckpoint(jobs, claims, {
+        callId: first.callId,
+        step: 'sw',
+        output: {},
+        model: 'test-model',
+        providerMessageId: 'm',
+        providerRequestId: null,
+        usage: USAGE,
+      }),
+    ).rejects.toMatchObject({ status: 403 })
+  })
 })

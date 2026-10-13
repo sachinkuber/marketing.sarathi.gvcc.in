@@ -248,9 +248,12 @@ export async function registerModelCall(
     if (control.cancelRequested) return { outcome: 'cancelled' as const }
     if (control.held) return { outcome: 'held' as const }
 
+    // A call with no recorded outcome may still have been answered: 'started', or 'unknown' once the sweep
+    // has moved it. A 'failed' one is a request the provider is known to have refused, so a retry of it is
+    // not a duplicate.
     const earlier = await client.query(
       `select 1 from app.model_call
-        where job_id = $1 and step = $2 and request_hash = $3 and status = 'started' limit 1`,
+        where job_id = $1 and step = $2 and request_hash = $3 and status in ('started', 'unknown') limit 1`,
       [claims.jobId, input.step, input.requestHash],
     )
     const possibleDuplicate = (earlier.rowCount ?? 0) > 0
@@ -298,12 +301,13 @@ export async function saveCheckpoint(
     const call = await client.query<{
       status: string
       step: string
+      model: string
       request_hash: string
       attempt_id: string
-    }>('select status, step, request_hash, attempt_id from app.model_call where id = $1 and job_id = $2', [
-      input.callId,
-      claims.jobId,
-    ])
+    }>(
+      'select status, step, model, request_hash, attempt_id from app.model_call where id = $1 and job_id = $2',
+      [input.callId, claims.jobId],
+    )
     const row = call.rows[0]
     if (!row) throw new AppError(404, 'call_not_found', 'No such model call.')
     if (row.attempt_id !== claims.attemptId) {
@@ -312,11 +316,21 @@ export async function saveCheckpoint(
     if (row.step !== input.step) {
       throw new AppError(400, 'invalid_request', 'The step is not the one this call was registered for.')
     }
+    if (row.model !== input.model) {
+      throw new AppError(400, 'invalid_request', 'The model is not the one this call was registered for.')
+    }
+    // Saving twice keeps the first output and cost: a repeat only reports whether the call was costed.
     if (row.status === 'succeeded') {
       const costed = await client.query('select 1 from app.cost_ledger where model_call_id = $1', [
         input.callId,
       ])
       return { costed: (costed.rowCount ?? 0) > 0 }
+    }
+
+    // 'started' and 'unknown' (moved by the sweep; the answer arrived late) may be saved; a request
+    // recorded as failed may not.
+    if (row.status === 'failed') {
+      throw new AppError(409, 'call_failed', 'This model call was recorded as failed.')
     }
 
     const today = deps.now().toISOString().slice(0, 10)

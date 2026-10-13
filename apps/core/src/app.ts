@@ -18,6 +18,9 @@ export interface AppDeps {
 }
 
 // The query string and any reset token in the path never reach the log.
+const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const CHECKPOINT_PATH = new RegExp(`^/api/v1/worker/jobs/${UUID}/model-calls/${UUID}/checkpoint$`)
+
 export function redactUrl(url: string | undefined): string {
   const path = (url ?? '').split('?')[0] ?? ''
   return path.replace(/\/reset-password\/[^/]+/, '/reset-password/[token]')
@@ -49,13 +52,14 @@ export function createApp(deps: AppDeps): Express {
   if (deps.guard) app.use('/api', deps.guard)
   // The auth library reads the raw request body, so it is mounted before the JSON parser.
   if (deps.authHandler) app.all('/api/auth/*splat', deps.authHandler)
-  // A saved step's output can be larger than the global limit; only the checkpoint path gets more. It is
-  // mounted first: a body the global parser has already read or refused cannot be parsed again.
-  app.use(
-    '/api/v1/worker/jobs/:jobId/model-calls/:callId/checkpoint',
-    express.json({ limit: '1mb', strict: true }),
-  )
-  app.use(express.json({ limit: '100kb', strict: true }))
+  // One request skips the 100 kB parser: a worker's checkpoint, whose route reads up to 1 MB itself after the
+  // worker credential and attempt token are checked. The match is exact: POST, case-sensitive, uuid segments,
+  // no trailing segment, so no other path or method gets the larger limit and nothing large is read before auth.
+  const smallJson = express.json({ limit: '100kb', strict: true })
+  app.use((req, res, next) => {
+    if (req.method === 'POST' && CHECKPOINT_PATH.test(req.originalUrl.split('?')[0] ?? '')) return next()
+    return smallJson(req, res, next)
+  })
   if (deps.api) app.use('/api/v1', deps.api)
   app.use(notFoundHandler)
   app.use(errorHandler(deps.logger))

@@ -1,3 +1,4 @@
+import express from 'express'
 import { z } from 'zod'
 import { withBrand } from '@mkt/db'
 import { claimsOf } from '../access/worker-auth.ts'
@@ -16,25 +17,38 @@ import { inputOf, validate } from '../validate.ts'
 const jobParams = z.strictObject({ jobId: z.uuid() })
 const startBody = z.strictObject({ workerId: z.string().min(1).max(200) })
 
+// jsonb and text columns reject U+0000; refusing it here is a 400 instead of a 500 after the provider call.
+const hasNul = (value: unknown): boolean => {
+  if (typeof value === 'string') return value.includes('\u0000')
+  if (Array.isArray(value)) return value.some(hasNul)
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).some(([k, v]) => hasNul(k) || hasNul(v))
+  }
+  return false
+}
+const noNul = (v: unknown) => !hasNul(v)
+const text = (max: number) => z.string().min(1).max(max).refine(noNul, 'must not contain U+0000')
+const count = z.number().int().min(0).max(2147483647)
+
 const registerBody = z.strictObject({
-  step: z.string().min(1).max(200),
-  requestHash: z.string().min(1).max(200),
-  model: z.string().min(1).max(200),
+  step: text(200),
+  requestHash: text(200),
+  model: text(200),
 })
 const checkpointBody = z.strictObject({
-  step: z.string().min(1).max(200),
-  output: z.json(),
-  model: z.string().min(1).max(200),
-  providerMessageId: z.string().min(1).max(200),
-  providerRequestId: z.string().max(200).nullable(),
+  step: text(200),
+  output: z.json().refine(noNul, 'must not contain U+0000'),
+  model: text(200),
+  providerMessageId: text(200),
+  providerRequestId: z.string().max(200).refine(noNul, 'must not contain U+0000').nullable(),
   usage: z.strictObject({
-    inputTokens: z.number().int().min(0),
-    outputTokens: z.number().int().min(0),
-    cacheReadTokens: z.number().int().min(0),
-    cacheWriteTokens: z.number().int().min(0),
+    inputTokens: count,
+    outputTokens: count,
+    cacheReadTokens: count,
+    cacheWriteTokens: count,
   }),
 })
-const failureBody = z.strictObject({ error: z.string().min(1).max(2000) })
+const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
 export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
@@ -88,13 +102,15 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
     ],
   })
 
-  // The global JSON parser allows 100 kB; app.ts mounts a 1 MB parser for exactly this path before it.
+  // The global JSON parser (100 kB) skips exactly this request (see app.ts); the 1 MB parser runs here, after
+  // the worker credential and the attempt token have been checked, so nothing large is read for a stranger.
   table.add({
     method: 'post',
     path: '/worker/jobs/:jobId/model-calls/:callId/checkpoint',
     access: { kind: 'attempt' },
     summary: 'A worker saves a step and its cost in one transaction',
     handlers: [
+      express.json({ limit: '1mb', strict: true }),
       validate({ params: callParams, body: checkpointBody }),
       async (_req, res) => {
         const { params, body } = inputOf<{
