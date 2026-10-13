@@ -194,6 +194,36 @@ describe('running a job', () => {
     expect(core.posted).toHaveLength(0)
   })
 
+  it('still posts the result when the job is held at post time, so the core keeps it as held', async () => {
+    model.sent.length = 0
+    let reads = 0
+    const core = fakeCore({
+      async control() {
+        reads += 1
+        // Free between the steps; held by the time the handler is done.
+        return { cancelRequested: false, held: reads >= 2 }
+      },
+      async postResult(_j, _t, p) {
+        core.posted.push(p)
+        return { status: 'held' }
+      },
+    })
+    await expect(runJob(deps(core), { id: 'j16', jobClass: 'interactive' })).resolves.toBeUndefined()
+    expect(core.posted).toEqual([{ type: 'test.echo', result: ['reply to one', 'reply to two'] }])
+  })
+
+  it('stops between steps when the job is held', async () => {
+    model.sent.length = 0
+    const core = fakeCore({
+      async control() {
+        return { cancelRequested: false, held: true }
+      },
+    })
+    await runJob(deps(core), { id: 'j17', jobClass: 'interactive' })
+    expect(model.sent.map((r) => r.messages[0]!.content)).toEqual(['one'])
+    expect(core.posted).toHaveLength(0)
+  })
+
   it('ends quietly, without a retry, when the core refuses the result because the job was cancelled', async () => {
     const core = fakeCore({
       async postResult() {

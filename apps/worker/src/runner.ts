@@ -18,7 +18,9 @@ export interface JobContext {
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
   modelStep(step: string, request: ModelRequest): Promise<{ text: string }>
   // Called between steps: throws JobStopped when the job was cancelled or held.
-  checkStop(): Promise<void>
+  // `allowHeld`: stop only for a cancel (used before the result is posted, when a held job still posts so
+  // the core keeps the paid-for result).
+  checkStop(options?: { allowHeld?: boolean }): Promise<void>
 }
 export type JobHandler = (ctx: JobContext) => Promise<{ type: string; result: unknown }>
 
@@ -65,10 +67,10 @@ export async function runJob(deps: RunnerDeps, job: { id: string; jobClass: JobC
     jobId: job.id,
     jobClass: job.jobClass,
     input: started.input,
-    async checkStop() {
+    async checkStop(options) {
       const control = await deps.core.control(job.id, started.token)
       if (control.cancelRequested) throw new JobStopped('cancelled')
-      if (control.held) throw new JobStopped('held')
+      if (control.held && !options?.allowHeld) throw new JobStopped('held')
     },
     async modelStep(step, request) {
       const registered = await deps.core.registerModelCall(job.id, started.token, {
@@ -131,8 +133,9 @@ export async function runJob(deps: RunnerDeps, job: { id: string; jobClass: JobC
 
   try {
     const outcome = await handler(ctx)
-    // A cancel that arrived while the last step ran is seen here, before the result is posted.
-    await ctx.checkStop()
+    // A cancel that arrived while the last step ran is seen here, before the result is posted. A hold is not:
+    // the result is posted anyway and the core stores it as held (spec 9.4), so the work is not lost.
+    await ctx.checkStop({ allowHeld: true })
     await deps.core.postResult(job.id, started.token, outcome)
   } catch (error) {
     // A cancelled or held job ends here without a retry: the core already knows.

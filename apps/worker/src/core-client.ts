@@ -1,4 +1,4 @@
-import type { JobClass } from '@mkt/queue'
+import { JOB_CLASSES, type JobClass } from '@mkt/queue'
 import { z } from 'zod'
 
 export interface StartedAttempt {
@@ -52,12 +52,39 @@ export interface CoreClient {
   reconcile(): Promise<{ marked: number }>
 }
 
-const registeredSchema = z.discriminatedUnion('outcome', [
-  z.object({ outcome: z.literal('send'), callId: z.string().min(1), possibleDuplicate: z.boolean() }),
-  z.object({ outcome: z.literal('use_checkpoint'), output: z.unknown() }),
-  z.object({ outcome: z.literal('cancelled') }),
-  z.object({ outcome: z.literal('held') }),
-])
+// What the core may answer. Extra fields are accepted (the core can grow); a missing or unknown required
+// field is an error, so a malformed reply never reads as a default (a missing cancelRequested is not "not
+// cancelled").
+export const replySchemas = {
+  registered: z.discriminatedUnion('outcome', [
+    z.object({ outcome: z.literal('send'), callId: z.string().min(1), possibleDuplicate: z.boolean() }),
+    z.object({ outcome: z.literal('use_checkpoint'), output: z.unknown() }),
+    z.object({ outcome: z.literal('cancelled') }),
+    z.object({ outcome: z.literal('held') }),
+  ]),
+  control: z.object({ cancelRequested: z.boolean(), held: z.boolean() }),
+  startAttempt: z.union([
+    z.object({ finished: z.literal(true), outcome: z.unknown() }),
+    z.object({
+      finished: z.literal(false),
+      attemptId: z.string().min(1),
+      attemptNumber: z.number().int(),
+      token: z.string().min(1),
+      input: z.unknown(),
+      savedSteps: z.array(z.unknown()),
+      expectedResultType: z.string().min(1),
+      jobClass: z.enum(JOB_CLASSES),
+    }),
+  ]),
+  checkpoint: z.object({ costed: z.boolean() }),
+  postResult: z.object({ status: z.enum(['applied', 'repeated', 'held']) }),
+}
+
+function parseReply<T>(schema: z.ZodType, reply: unknown, what: string): T {
+  const parsed = schema.safeParse(reply)
+  if (!parsed.success) throw new Error(`The core answered ${what} with an unexpected reply.`)
+  return parsed.data as T
+}
 
 // Every call to the core is bounded: a hung connection must not hold a job slot until the queue expires it.
 const REQUEST_TIMEOUT_MS = 60_000
@@ -98,21 +125,28 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     return json as T
   }
   return {
-    startAttempt: (jobId, workerId) => call('POST', `/worker/jobs/${jobId}/attempts`, null, { workerId }),
-    control: (jobId, token) => call('GET', `/worker/jobs/${jobId}/control`, token),
+    async startAttempt(jobId, workerId) {
+      const reply = await call('POST', `/worker/jobs/${jobId}/attempts`, null, { workerId })
+      return parseReply(replySchemas.startAttempt, reply, 'a start of attempt')
+    },
+    async control(jobId, token) {
+      const reply = await call('GET', `/worker/jobs/${jobId}/control`, token)
+      return parseReply(replySchemas.control, reply, 'a control read')
+    },
     async registerModelCall(jobId, token, input) {
       const reply = await call('POST', `/worker/jobs/${jobId}/model-calls`, token, input)
-      const parsed = registeredSchema.safeParse(reply)
-      if (!parsed.success) {
-        throw new Error('The core answered a model call registration with an unknown reply.')
-      }
-      return parsed.data as Registered
+      return parseReply(replySchemas.registered, reply, 'a model call registration')
     },
-    checkpoint: (jobId, token, callId, input) =>
-      call('POST', `/worker/jobs/${jobId}/model-calls/${callId}/checkpoint`, token, input),
+    async checkpoint(jobId, token, callId, input) {
+      const reply = await call('POST', `/worker/jobs/${jobId}/model-calls/${callId}/checkpoint`, token, input)
+      return parseReply(replySchemas.checkpoint, reply, 'a checkpoint')
+    },
     failCall: (jobId, token, callId, error) =>
       call('POST', `/worker/jobs/${jobId}/model-calls/${callId}/failure`, token, { error }),
-    postResult: (jobId, token, posted) => call('POST', `/worker/jobs/${jobId}/result`, token, posted),
+    async postResult(jobId, token, posted) {
+      const reply = await call('POST', `/worker/jobs/${jobId}/result`, token, posted)
+      return parseReply(replySchemas.postResult, reply, 'a result')
+    },
     jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
     reconcile: () => call('POST', '/worker/reconcile', null, {}),
   }
