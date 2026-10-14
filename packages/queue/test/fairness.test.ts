@@ -253,11 +253,11 @@ for (const processes of [1, 2]) {
           ...lines.filter((l) => l.includes(` start production ${keyB} `)).map(lineTime),
         )
         console.info(
-          `fairness ${processes} process(es): first B production start after ${firstBProduction - sentAt} ms`,
+          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, first B production start after ${firstBProduction - sentAt} ms, A ended ${aEnded}, phases ${JSON.stringify(phases)}`,
         )
-        console.info(
-          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, A ended ${aEnded}, phases ${JSON.stringify(phases)}`,
-        )
+        // Brand B's production jobs, which wait behind A's backlog in the same class, were served within 10
+        // seconds too, not only its interactive jobs, which have a class of their own.
+        expect(firstBProduction - sentAt).toBeLessThan(10_000)
         if (processes === 1) expect(peaks.aProduction).toBe(PRODUCTION_CAP)
         else expect(peaks.aProduction).toBeGreaterThanOrEqual(2)
         expect(peaks.aProduction).toBeLessThanOrEqual(PRODUCTION_CAP)

@@ -79,6 +79,20 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
   const reader = new pg.Pool({ connectionString: queueUrl, max: 2 })
   reader.on('error', onError)
 
+  // A slot that finishes a job must look for the next one at once, and so must the slots that are idle.
+  // Left alone, the library sleeps a slot for the polling interval after every job, and the slots of a
+  // class, started together, then fetch together on the same tick. Each fetch skips only the brands
+  // already at their limit when the tick began, so every slot claims the oldest backlog: one brand's
+  // jobs fill the slots up to its limit, the rest are handed back, and another brand's jobs are never
+  // claimed while that backlog lasts (spec 9.2). Waking the slots as each job ends (while its brand still
+  // counts as running) lets the idle ones take the other brands' jobs, and the finishing one take the
+  // next job of its own brand, so a brand stays at its limit and the others share the remaining slots.
+  const wakeSlots = (queueName: string): void => {
+    for (const slot of boss.getWipData()) {
+      if (slot.name === queueName) boss.notifyWorker(slot.id)
+    }
+  }
+
   return {
     async send(client, { jobId, jobClass, scheduleKey }) {
       // A job is a job ID (in the data, so a dead-letter copy can be traced back), a class (the queue) and a
@@ -110,7 +124,11 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
           notifyPollingIntervalSeconds: s.pollingIntervalSeconds,
         },
         async ([job]) => {
-          if (job) await handler({ id: job.id, jobClass })
+          try {
+            if (job) await handler({ id: job.id, jobClass })
+          } finally {
+            wakeSlots(s.queue)
+          }
         },
       )
     },
