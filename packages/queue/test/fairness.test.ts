@@ -252,12 +252,19 @@ for (const processes of [1, 2]) {
         const firstBProduction = Math.min(
           ...lines.filter((l) => l.includes(` start production ${keyB} `)).map(lineTime),
         )
-        console.info(
-          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, first B production start after ${firstBProduction - sentAt} ms, A ended ${aEnded}, phases ${JSON.stringify(phases)}`,
+        const lastBProductionEnd = Math.max(
+          ...lines.filter((l) => l.includes(` end production ${keyB} `)).map(lineTime),
         )
-        // Brand B's production jobs, which wait behind A's backlog in the same class, were served within 10
-        // seconds too, not only its interactive jobs, which have a class of their own.
-        expect(firstBProduction - sentAt).toBeLessThan(10_000)
+        console.info(
+          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, first B production start after ${firstBProduction - sentAt} ms, last B production end after ${lastBProductionEnd - sentAt} ms, A ended ${aEnded}, phases ${JSON.stringify(phases)}`,
+        )
+        // Brand B's production jobs wait behind A's backlog in the same class (its interactive jobs have a
+        // class of their own). The spec's outer limit is 10 seconds; a fair queue serves B's first one within
+        // one 2 s poll plus one of A's 400 ms jobs, so 3 s. All six, at B's cap of 3, end within 6 s.
+        // Without the slot wake in queue.ts, B's first production job waited 8 to 28 s on the dev server and
+        // over 60 s on CI.
+        expect(firstBProduction - sentAt).toBeLessThan(3_000)
+        expect(lastBProductionEnd - sentAt).toBeLessThan(6_000)
         if (processes === 1) expect(peaks.aProduction).toBe(PRODUCTION_CAP)
         else expect(peaks.aProduction).toBeGreaterThanOrEqual(2)
         expect(peaks.aProduction).toBeLessThanOrEqual(PRODUCTION_CAP)

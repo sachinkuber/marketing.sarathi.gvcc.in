@@ -87,9 +87,17 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
   // claimed while that backlog lasts (spec 9.2). Waking the slots as each job ends (while its brand still
   // counts as running) lets the idle ones take the other brands' jobs, and the finishing one take the
   // next job of its own brand, so a brand stays at its limit and the others share the remaining slots.
+  // This leans on library internals (pg-boss 12.30): a slot's notified flag is cleared only at the start of
+  // its next fetch, and a job's brand count is decremented only after the job is completed, that is after
+  // this wake. A pg-boss upgrade must re-run acceptance test 29 (packages/queue/test/fairness.test.ts).
+  // A wake that throws is reported and never replaces the handler's result or fails a finished job.
   const wakeSlots = (queueName: string): void => {
-    for (const slot of boss.getWipData()) {
-      if (slot.name === queueName) boss.notifyWorker(slot.id)
+    try {
+      for (const slot of boss.getWipData()) {
+        if (slot.name === queueName) boss.notifyWorker(slot.id)
+      }
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error(String(error)))
     }
   }
 
