@@ -8,7 +8,10 @@ import { csrfTokenFor } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
+import { registerJobRoutes } from './routes/jobs.ts'
 import { registerUserRoutes } from './routes/users.ts'
+import { registerWorkerRoutes } from './routes/worker.ts'
+import type { JobsDeps } from './jobs/service.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -20,6 +23,8 @@ export interface ApiDeps {
   // The configured public origin: invite links never use anything from the request.
   origin: string
   onMailFailure?: (error: unknown) => void
+  // The work engine; unset, no worker route is declared.
+  jobs?: JobsDeps
 }
 
 export interface ApiContext {
@@ -71,6 +76,11 @@ export function createApi(
     onMailFailure: deps.onMailFailure,
   })
 
+  if (deps.jobs) {
+    registerWorkerRoutes(table, deps.jobs)
+    registerJobRoutes(table, deps.jobs)
+  }
+
   extra?.(table, { auth: deps.auth, pool: deps.pool })
-  return { router: table.build({ auth: deps.auth, pool: deps.pool }), table }
+  return { router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs }), table }
 }

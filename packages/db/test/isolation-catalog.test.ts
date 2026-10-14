@@ -27,7 +27,7 @@ describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)'
   })
 
   it('finds the brand-scoped tables, so the tests below cannot pass on an empty list', () => {
-    expect(scoped.length).toBeGreaterThanOrEqual(15)
+    expect(scoped.length).toBeGreaterThanOrEqual(21)
     expect(scoped).toContain('content_version')
     expect(scoped).not.toContain('brand')
   })
@@ -62,7 +62,7 @@ describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)'
       "select table_name from information_schema.columns where table_schema = 'app' and column_name = 'id' and table_name = any($1)",
       [scoped],
     )
-    expect(withId.rowCount).toBeGreaterThanOrEqual(13)
+    expect(withId.rowCount).toBeGreaterThanOrEqual(17)
     for (const { table_name } of withId.rows) {
       const r = await db.admin.query(
         `select 1 from pg_constraint c where c.conrelid = ('app.' || $1)::regclass and c.contype = 'u'
@@ -83,7 +83,7 @@ describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)'
     )
     const names = new Set(scoped.map((t) => `app.${t}`))
     const between = r.rows.filter((x) => names.has(x.child) && names.has(x.parent))
-    expect(between.length).toBeGreaterThanOrEqual(10)
+    expect(between.length).toBeGreaterThanOrEqual(19)
     for (const fk of between) {
       expect(fk.child_cols, `${fk.conname} child`).toContain('brand_id')
       expect(fk.parent_cols, `${fk.conname} parent`).toContain('brand_id')

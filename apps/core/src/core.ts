@@ -13,6 +13,7 @@ import type { Config } from './config.ts'
 import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
+import type { JobsDeps } from './jobs/service.ts'
 
 export interface CoreDeps {
   config: Config
@@ -21,6 +22,8 @@ export interface CoreDeps {
   authPool: Pool
   mailer: Mailer
   audit: AuditSink
+  // The work engine's dependencies. Unset: the service has no queue (tests that never create jobs).
+  jobs?: JobsDeps
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']
@@ -72,6 +75,7 @@ export function buildCore(deps: CoreDeps): {
       mailer: deps.mailer,
       origin: config.publicOrigin,
       onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+      jobs: deps.jobs,
     },
     deps.extraRoutes,
   )

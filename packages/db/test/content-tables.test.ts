@@ -13,6 +13,7 @@ describe('content and approval tables', () => {
   it('has the eleven content and approval tables as well as the six tenancy tables', async () => {
     const result = await db.admin.query("select tablename from pg_tables where schemaname = 'app' order by 1")
     expect(result.rows.map((r) => r.tablename)).toEqual([
+      'agent_definition_version',
       'approval',
       'approval_invalidation',
       'approval_request',
@@ -24,12 +25,20 @@ describe('content and approval tables', () => {
       'content_version',
       'content_version_state',
       'content_version_state_change',
+      'cost_ledger',
+      'fx_rate',
       'invite',
+      'job_attempt',
+      'job_control',
+      'job_input',
       'kill_switch',
       'membership',
+      'model_call',
+      'model_price',
       'outbox_action',
       'platform_owner',
       'popup_ack',
+      'run',
     ])
   })
 

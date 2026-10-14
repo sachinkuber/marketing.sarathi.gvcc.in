@@ -1,4 +1,4 @@
-import { createTestDatabase } from '@mkt/db/testing'
+import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
 import { describe, expect, it, vi } from 'vitest'
 import { UnconfiguredMailer } from '../src/adapters.ts'
@@ -31,7 +31,7 @@ describe('adapters', () => {
 describe('startServer', () => {
   it('starts on a free port, reports ready against the database, and stops cleanly', async () => {
     await requireDatabase()
-    const db = await createTestDatabase()
+    const db = await createQueueTestDatabase()
     const logger = createLogger('silent')
     const server = await startServer(
       {
@@ -39,7 +39,11 @@ describe('startServer', () => {
         port: 0,
         databaseUrl: db.urlFor('app'),
         auditDatabaseUrl: db.urlFor('audit_writer'),
+        queueDatabaseUrl: db.urlFor('queue'),
         authSecret: 'z'.repeat(48),
+        workerSecret: 'w'.repeat(48),
+        attemptTokenSecret: 'a'.repeat(48),
+        queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
         logLevel: 'silent',
       },
@@ -58,7 +62,7 @@ describe('startServer', () => {
 
   it('logs an error on an idle pool connection instead of crashing the process', async () => {
     await requireDatabase()
-    const db = await createTestDatabase()
+    const db = await createQueueTestDatabase()
     const lines: string[] = []
     const logger = createLogger('info', { write: (line: string) => void lines.push(line) })
     created.length = 0
@@ -68,7 +72,11 @@ describe('startServer', () => {
         port: 0,
         databaseUrl: db.urlFor('app'),
         auditDatabaseUrl: db.urlFor('audit_writer'),
+        queueDatabaseUrl: db.urlFor('queue'),
         authSecret: 'z'.repeat(48),
+        workerSecret: 'w'.repeat(48),
+        attemptTokenSecret: 'a'.repeat(48),
+        queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
         logLevel: 'info',
       },
@@ -88,26 +96,30 @@ describe('startServer', () => {
     }
   })
 
-  const configFor = (databaseUrl: string, port: number) => ({
+  const configFor = (databaseUrl: string, queueUrl: string, port: number) => ({
     nodeEnv: 'test' as const,
     port,
     databaseUrl,
     auditDatabaseUrl: databaseUrl,
+    queueDatabaseUrl: queueUrl,
     authSecret: 'z'.repeat(48),
+    workerSecret: 'w'.repeat(48),
+    attemptTokenSecret: 'a'.repeat(48),
+    queueBacklogLimit: 2000,
     publicOrigin: 'https://app.example.test',
     logLevel: 'silent' as const,
   })
 
   it('rejects when the port is taken, and closes both pools', async () => {
     await requireDatabase()
-    const db = await createTestDatabase()
+    const db = await createQueueTestDatabase()
     const logger = createLogger('silent')
     const deps = { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() }
-    const first = await startServer(configFor(db.urlFor('app'), 0), deps)
+    const first = await startServer(configFor(db.urlFor('app'), db.urlFor('queue'), 0), deps)
     try {
       created.length = 0
       const port = Number(new URL(first.url).port)
-      const second = startServer(configFor(db.urlFor('app'), port), deps)
+      const second = startServer(configFor(db.urlFor('app'), db.urlFor('queue'), port), deps)
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('never settled')), 3000))
       await expect(Promise.race([second, timeout])).rejects.toMatchObject({ code: 'EADDRINUSE' })
       expect(created).toHaveLength(2)
@@ -120,9 +132,9 @@ describe('startServer', () => {
 
   it('can be stopped twice', async () => {
     await requireDatabase()
-    const db = await createTestDatabase()
+    const db = await createQueueTestDatabase()
     const logger = createLogger('silent')
-    const server = await startServer(configFor(db.urlFor('app'), 0), {
+    const server = await startServer(configFor(db.urlFor('app'), db.urlFor('queue'), 0), {
       logger,
       mailer: new UnconfiguredMailer(),
       audit: new MemoryAudit(),

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@mkt/db": "*",
+    "@mkt/queue": "*",
     "better-auth": "1.7.2",
     "express": "5.2.1",
     "helmet": "8.3.0",

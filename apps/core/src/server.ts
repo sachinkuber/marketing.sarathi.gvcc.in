@@ -1,10 +1,12 @@
 import { createPool } from '@mkt/db'
+import { openQueue } from '@mkt/queue'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Logger } from 'pino'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
+import type { ResultHandlers } from './jobs/results.ts'
 
 export interface RunningServer {
   url: string
@@ -15,6 +17,9 @@ export async function startServer(
   config: Config,
   deps: { logger: Logger; mailer: Mailer; audit: AuditSink },
 ): Promise<RunningServer> {
+  // The core's queue connection reads and writes jobs; it does not supervise (the workers do).
+  const queue = await openQueue(config.queueDatabaseUrl)
+  const results: ResultHandlers = new Map()
   const appPool = createPool(config.databaseUrl)
   const authPool = createPool(config.databaseUrl, { searchPath: 'auth' })
   // An idle client dropping (for example when the database restarts) emits 'error' on the pool;
@@ -31,6 +36,16 @@ export async function startServer(
     authPool,
     mailer: deps.mailer,
     audit: deps.audit,
+    jobs: {
+      pool: appPool,
+      queue,
+      audit: deps.audit,
+      workerSecret: config.workerSecret,
+      attemptTokenSecret: config.attemptTokenSecret,
+      backlogLimit: config.queueBacklogLimit,
+      now: () => new Date(),
+      results,
+    },
   })
   let server: Server
   try {
@@ -41,7 +56,7 @@ export async function startServer(
       )
     })
   } catch (error) {
-    await Promise.allSettled([appPool.end(), authPool.end()])
+    await Promise.allSettled([appPool.end(), authPool.end(), queue.stop()])
     throw error
   }
   const { port } = server.address() as AddressInfo
@@ -54,6 +69,7 @@ export async function startServer(
     })
     await appPool.end()
     await authPool.end()
+    await queue.stop()
   }
   return {
     url: `http://127.0.0.1:${port}`,
