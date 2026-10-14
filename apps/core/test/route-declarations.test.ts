@@ -89,6 +89,7 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
       'post /worker/jobs/:jobId/result': 'attempt',
       'post /worker/jobs/:jobId/dead': 'worker',
       'post /worker/reconcile': 'worker',
+      'post /worker/dead/unmarked': 'worker',
     })
   })
 

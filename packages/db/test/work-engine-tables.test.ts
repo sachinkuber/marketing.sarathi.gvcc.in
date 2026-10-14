@@ -136,6 +136,22 @@ describe('work-engine tables', () => {
     }
   })
 
+  it('names unmarked unfinished jobs across brands through a function only the application role may call', async () => {
+    const jobId = '77777777-7777-4777-8777-777777777778'
+    await newJob(A, jobId)
+    const found = await app.query<{ id: string }>('select app.unmarked_dead_jobs($1::uuid[]) as id', [
+      [jobId, '00000000-0000-4000-8000-000000000000'],
+    ])
+    expect(found.rows.map((r) => r.id)).toEqual([jobId])
+    for (const role of ['queue', 'readonly', 'audit_writer'] as const) {
+      const pool = new pg.Pool({ connectionString: db.urlFor(role) })
+      await expect(pool.query('select app.unmarked_dead_jobs($1::uuid[])', [[jobId]])).rejects.toThrow(
+        /permission denied/,
+      )
+      await pool.end()
+    }
+  })
+
   it('marks old started calls unknown across brands, and leaves recent ones', async () => {
     const jobId = '88888888-8888-4888-8888-888888888888'
     const { runId } = await newJob(A, jobId)

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { withBrand } from '@mkt/db'
 import { claimsOf } from '../access/worker-auth.ts'
 import type { RouteTable } from '../access/routes.ts'
-import { markDead, sweepModelCalls } from '../jobs/dead.ts'
+import { markDead, sweepModelCalls, unmarkedDead } from '../jobs/dead.ts'
 import {
   failModelCall,
   postResult,
@@ -54,6 +54,7 @@ const resultBody = z.strictObject({
   type: text(100),
   result: z.json().refine(noNul, 'must not contain U+0000'),
 })
+const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
 const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
@@ -185,6 +186,20 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
     handlers: [
       async (_req, res) => {
         res.json({ marked: await sweepModelCalls(deps) })
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/worker/dead/unmarked',
+    access: { kind: 'worker' },
+    summary: 'The worker asks which of the jobs the queue shows as failed the core has not marked dead',
+    handlers: [
+      validate({ body: unmarkedBody }),
+      async (_req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof unmarkedBody> }>(res)
+        res.json({ jobIds: await unmarkedDead(deps, body.jobIds) })
       },
     ],
   })

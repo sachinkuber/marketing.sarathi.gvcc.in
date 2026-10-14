@@ -32,7 +32,11 @@ export function startMaintenance(options: {
       // A dead-letter copy that never reached the core (it was down longer than the copy is retried) leaves
       // the job failed in its queue with nothing listed: tell the core of every failed job. Repeating is safe.
       for (const jobClass of JOB_CLASSES) {
-        for (const jobId of await options.queue.failedJobIds(jobClass)) {
+        const failed = await options.queue.failedJobIds(jobClass)
+        if (failed.length === 0) continue
+        // Only the ones the core has not marked yet: a job awaiting the owner stays failed in the queue and
+        // is not sent again on every tick.
+        for (const jobId of await options.core.unmarkedDead(failed)) {
           try {
             await options.core.jobDead(jobId)
           } catch (error) {

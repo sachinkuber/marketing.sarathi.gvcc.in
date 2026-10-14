@@ -50,6 +50,8 @@ export interface CoreClient {
   // Worker-level calls (no attempt token): the dead-letter watcher and the reconciliation timer (task 10).
   jobDead(jobId: string): Promise<void>
   reconcile(): Promise<{ marked: number }>
+  // Of these failed job IDs, the ones the core has not yet marked dead.
+  unmarkedDead(jobIds: string[]): Promise<string[]>
 }
 
 // What the core may answer. Extra fields are accepted (the core can grow); a missing or unknown required
@@ -79,6 +81,7 @@ export const replySchemas = {
   checkpoint: z.object({ costed: z.boolean() }),
   postResult: z.object({ status: z.enum(['applied', 'repeated', 'held']) }),
   reconcile: z.object({ marked: z.number().int().min(0) }),
+  unmarkedDead: z.object({ jobIds: z.array(z.string()) }),
 }
 
 function parseReply<T>(schema: z.ZodType, reply: unknown, what: string): T {
@@ -149,6 +152,19 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
       return parseReply(replySchemas.postResult, reply, 'a result')
     },
     jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
+    async unmarkedDead(jobIds) {
+      if (jobIds.length === 0) return []
+      const found: string[] = []
+      for (let at = 0; at < jobIds.length; at += 500) {
+        const reply = await call('POST', '/worker/dead/unmarked', null, {
+          jobIds: jobIds.slice(at, at + 500),
+        })
+        found.push(
+          ...parseReply<{ jobIds: string[] }>(replySchemas.unmarkedDead, reply, 'a dead check').jobIds,
+        )
+      }
+      return found
+    },
     async reconcile() {
       const reply = await call('POST', '/worker/reconcile', null, {})
       return parseReply(replySchemas.reconcile, reply, 'a reconciliation')

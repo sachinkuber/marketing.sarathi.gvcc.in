@@ -57,6 +57,8 @@ describe('maintenance', () => {
     const reported: string[] = []
     const core = {
       reconcile: async () => ({ marked: 0 }),
+      // 'marked' is already known to the core: it is not reported again.
+      unmarkedDead: async (ids: string[]) => ids.filter((id) => id !== 'marked'),
       jobDead: async (id: string) => {
         if (id === 'bad') throw new Error('refused')
         reported.push(id)
@@ -64,7 +66,7 @@ describe('maintenance', () => {
     } as unknown as CoreClient
     const failing = {
       watchdog: async () => ({ waiting: [], running: [] }),
-      failedJobIds: async (c: string) => (c === 'interactive' ? ['bad', 'lost'] : []),
+      failedJobIds: async (c: string) => (c === 'interactive' ? ['bad', 'lost', 'marked'] : []),
     } as unknown as Queue
     const m = startMaintenance({
       core,
@@ -76,6 +78,7 @@ describe('maintenance', () => {
     await new Promise((r) => setTimeout(r, 200))
     m.stop()
     expect(reported).toContain('lost')
+    expect(reported).not.toContain('marked')
     expect(lines.some((l) => l.event === 'dead_report_failed' && l.job_id === 'bad')).toBe(true)
     expect(lines.some((l) => l.event === 'maintenance')).toBe(true)
   })

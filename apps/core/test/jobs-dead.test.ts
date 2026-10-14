@@ -244,4 +244,26 @@ describe('the job routes', () => {
     expect(swept.status).toBe(200)
     expect(await swept.json()).toEqual({ marked: expect.any(Number) })
   })
+
+  it('answers which failed jobs the core has not marked dead, to the worker credential only', async () => {
+    const unmarked = await makeJob(brandA)
+    const marked = await makeJob(brandA)
+    await kill(marked.jobId)
+    await markDead(jobs, marked.jobId)
+    const stranger = '11111111-1111-4111-8111-111111111111'
+    const url = `${stack.server.url}/api/v1/worker/dead/unmarked`
+    const body = JSON.stringify({ jobIds: [unmarked.jobId, marked.jobId, stranger] })
+    const none = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: 'Worker wrong', 'content-type': 'application/json' },
+      body,
+    })
+    expect(none.status).toBe(401)
+    const headers = { authorization: `Worker ${jobs.workerSecret}`, 'content-type': 'application/json' }
+    const reply = await fetch(url, { method: 'POST', headers, body })
+    expect(reply.status).toBe(200)
+    expect(await reply.json()).toEqual({ jobIds: [unmarked.jobId] })
+    const bad = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ jobIds: ['x'] }) })
+    expect(bad.status).toBe(400)
+  })
 })

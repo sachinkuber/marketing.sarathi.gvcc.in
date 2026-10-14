@@ -38,6 +38,9 @@ function fakeCore(overrides: Partial<CoreClient> = {}): CoreClient & { posted: u
       return { status: 'applied' }
     },
     async jobDead() {},
+    async unmarkedDead() {
+      return []
+    },
     async reconcile() {
       return { marked: 0 }
     },

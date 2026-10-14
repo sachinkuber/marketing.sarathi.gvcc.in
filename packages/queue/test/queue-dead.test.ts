@@ -70,4 +70,23 @@ describe('the dead-letter watcher', () => {
     )
     expect(rows[0]).toEqual({ retry_limit: 10, retry_backoff: true })
   })
+
+  it('lists the newest failed jobs first, so 600 old ones cannot hide a new failure', async () => {
+    const ids = Array.from({ length: 600 }, () => randomUUID())
+    await db.admin.query(
+      `insert into pgboss.job (id, name, data, state, completed_on)
+       select i, 'job-production', jsonb_build_object('jobId', i), 'failed', now() - interval '1 day'
+         from unnest($1::uuid[]) as i`,
+      [ids],
+    )
+    const fresh = randomUUID()
+    await db.admin.query(
+      `insert into pgboss.job (id, name, data, state, completed_on)
+       values ($1::uuid, 'job-production', jsonb_build_object('jobId', $1::uuid), 'failed', now())`,
+      [fresh],
+    )
+    const window = await queue.failedJobIds('production', 500)
+    expect(window).toHaveLength(500)
+    expect(window[0]).toBe(fresh)
+  })
 })

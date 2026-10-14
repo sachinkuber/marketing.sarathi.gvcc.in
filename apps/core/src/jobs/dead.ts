@@ -25,6 +25,7 @@ interface Locked {
   runId: string
   finishedAt: Date | null
   deadAt: Date | null
+  runState: string | null
 }
 
 // The lock order of the work engine, everywhere: the job's input row, then its run row, then the writes.
@@ -37,7 +38,9 @@ async function lockJob(client: PoolClient, jobId: string): Promise<Locked> {
   )
   const row = job.rows[0]
   if (!row) throw new AppError(404, 'job_not_found', 'No such job.')
-  await client.query('select 1 from app.run where id = $1 for update', [row.run_id])
+  const run = await client.query<{ state: string }>('select state from app.run where id = $1 for update', [
+    row.run_id,
+  ])
   const control = await client.query<{ dead_at: Date | null }>(
     'select dead_at from app.job_control where job_id = $1',
     [jobId],
@@ -47,6 +50,7 @@ async function lockJob(client: PoolClient, jobId: string): Promise<Locked> {
     runId: row.run_id,
     finishedAt: row.finished_at,
     deadAt: control.rows[0]?.dead_at ?? null,
+    runState: run.rows[0]?.state ?? null,
   }
 }
 
@@ -57,6 +61,8 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
     const job = await lockJob(client, jobId)
     // A job whose result was already applied is not dead, whatever a late copy says.
     if (job.finishedAt) return
+    // Already marked (dead_at set, run failed): a repeated report changes nothing and costs no queue call.
+    if (job.deadAt && job.runState === 'failed') return
     // Nor is a job the queue is running again: a redelivered copy, or the reconciliation, arriving after an
     // owner's requeue must not fail the run or the live attempt. The queue's own record decides.
     if ((await deps.queue.state(job.jobClass, jobId)) !== 'failed') return
@@ -81,6 +87,16 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
       client,
     )
   })
+}
+
+// Of these job IDs, the ones the core has not marked dead and that are not finished. Reads only; an ID the
+// application does not know is simply absent.
+export async function unmarkedDead(deps: JobsDeps, jobIds: string[]): Promise<string[]> {
+  if (jobIds.length === 0) return []
+  const { rows } = await deps.pool.query<{ id: string }>('select app.unmarked_dead_jobs($1::uuid[]) as id', [
+    jobIds,
+  ])
+  return rows.map((r) => r.id)
 }
 
 export async function listDead(deps: JobsDeps, brandId: string): Promise<DeadJob[]> {
