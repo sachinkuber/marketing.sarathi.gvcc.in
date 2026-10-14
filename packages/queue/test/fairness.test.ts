@@ -65,6 +65,68 @@ const PRODUCTION_CAP = CLASS_SETTINGS.production.brandCap
 const INTERACTIVE_CAP = CLASS_SETTINGS.interactive.brandCap
 const A_BACKLOG = 500
 
+// Counts start and end lines per group and class, naming the groups A and B, for a failure report.
+function lineCounts(lines: string[], names: Record<string, string>): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const line of lines) {
+    const [, kind, jobClass, key] = line.split(' ')
+    const name = `${names[key ?? ''] ?? 'other'} ${jobClass} ${kind}`
+    counts[name] = (counts[name] ?? 0) + 1
+  }
+  return counts
+}
+
+// What the database and the worker processes look like when brand B was not served in time. Printed to
+// stderr so a CI log carries it; it never decides the test's outcome.
+async function reportStall(input: {
+  keyA: string
+  keyB: string
+  b: string[]
+  lines: string[]
+  workers: ChildProcess[]
+  phases: Record<string, number>
+}): Promise<void> {
+  const { keyA, keyB, b, lines, workers, phases } = input
+  const report: Record<string, unknown> = { phases }
+  report.lineCounts = lineCounts(lines, { [keyA]: 'A', [keyB]: 'B' })
+  try {
+    const bJobs = await db.admin.query(
+      `select id, name, state, retry_count, created_on, start_after, started_on, completed_on
+         from pgboss.job where id = any($1::uuid[]) order by name, created_on`,
+      [b],
+    )
+    report.bJobs = bJobs.rows
+    const aStates = await db.admin.query(
+      `select state, count(*)::int as n from pgboss.job where group_id = $1 group by state`,
+      [keyA],
+    )
+    report.aStates = aStates.rows
+    const activity = await db.admin.query(
+      `select pid, usename, application_name, state, wait_event_type, wait_event,
+              now() - query_start as running_for, left(query, 160) as query
+         from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid()`,
+    )
+    report.activity = activity.rows
+    const locks = await db.admin.query(
+      `select l.pid, l.locktype, l.mode, l.granted, c.relname
+         from pg_locks l left join pg_class c on c.oid = l.relation
+        where not l.granted`,
+    )
+    report.waitingLocks = locks.rows
+  } catch (error) {
+    report.databaseError = (error as Error).message
+  }
+  report.workers = workers.map((w) => ({
+    pid: w.pid,
+    connected: w.connected,
+    exitCode: w.exitCode,
+    signalCode: w.signalCode,
+  }))
+  report.bLines = lines.filter((l) => l.includes(keyB))
+  report.lastLines = lines.slice(-20)
+  console.error(`fairness stall report ${JSON.stringify(report, null, 1)}`)
+}
+
 function lineTime(line: string): number {
   return Number(line.split(' ')[0])
 }
@@ -103,7 +165,14 @@ for (const processes of [1, 2]) {
       const keyA = randomUUID()
       const keyB = randomUUID()
       const log = join(tmpdir(), `fair-${randomUUID()}.log`)
+      // Elapsed milliseconds at the end of each phase, measured from the start of the test.
+      const t0 = Date.now()
+      const phases: Record<string, number> = {}
+      const mark = (phase: string): void => {
+        phases[phase] = Date.now() - t0
+      }
       await sendMany('production', keyA, A_BACKLOG)
+      mark('sentA')
 
       // stdout is ignored so test output stays clean; stderr is shown so a crash explains itself.
       const workers = Array.from({ length: processes }, () =>
@@ -129,6 +198,7 @@ for (const processes of [1, 2]) {
       }
       try {
         await Promise.all(workers.map((w) => whenReady(w, 30_000)))
+        mark('workersReady')
         // Brand A must be running at its cap before B arrives, so B is competing with a live backlog.
         const startedBy = Date.now() + 30_000
         let lines: string[] = []
@@ -140,10 +210,13 @@ for (const processes of [1, 2]) {
           await sleep(100)
         }
 
+        mark('aAtCap')
+
         const sentAt = Date.now()
         const bProduction = await sendMany('production', keyB, PRODUCTION_CAP * 2)
         const bInteractive = await sendMany('interactive', keyB, INTERACTIVE_CAP + 1)
         const b = [...bProduction, ...bInteractive]
+        mark('sentB')
         // Brand B's jobs must all finish while brand A still has most of its backlog waiting.
         const end = Date.now() + 60_000
         while (Date.now() < end) {
@@ -153,7 +226,10 @@ for (const processes of [1, 2]) {
           await sleep(250)
         }
         failIfCrashed()
-        expect(b.every((id) => lines.some((l) => l.includes('end ') && l.includes(id)))).toBe(true)
+        const bServed = b.every((id) => lines.some((l) => l.includes('end ') && l.includes(id)))
+        mark(bServed ? 'bEnded' : 'bTimedOut')
+        if (!bServed) await reportStall({ keyA, keyB, b, lines, workers, phases })
+        expect(bServed).toBe(true)
 
         // Brand B was served within 10 seconds although brand A had a 500-job backlog.
         const firstB = Math.min(
@@ -173,8 +249,14 @@ for (const processes of [1, 2]) {
           bProduction: peak(lines, keyB, 'production'),
           bInteractive: peak(lines, keyB, 'interactive'),
         }
+        const firstBProduction = Math.min(
+          ...lines.filter((l) => l.includes(` start production ${keyB} `)).map(lineTime),
+        )
         console.info(
-          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, A ended ${aEnded}`,
+          `fairness ${processes} process(es): first B production start after ${firstBProduction - sentAt} ms`,
+        )
+        console.info(
+          `fairness ${processes} process(es): peaks ${JSON.stringify(peaks)}, first B start after ${firstB - sentAt} ms, A ended ${aEnded}, phases ${JSON.stringify(phases)}`,
         )
         if (processes === 1) expect(peaks.aProduction).toBe(PRODUCTION_CAP)
         else expect(peaks.aProduction).toBeGreaterThanOrEqual(2)
