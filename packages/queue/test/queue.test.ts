@@ -83,8 +83,12 @@ describe('the queue interface', () => {
     const watched = await openQueue(url.toString(), { onError: (e) => errors.push(e) })
     try {
       await watched.depth('bulk')
+      // The library's LISTEN connection is left alone: its close path drops its error listener before it
+      // ends the connection, so terminating it as stop() runs makes an unhandled error in the test process
+      // (seen once in a full run). The pooled connections are the ones this test is about.
       await db.admin.query(
-        `select pg_terminate_backend(pid) from pg_stat_activity where application_name = $1`,
+        `select pg_terminate_backend(pid) from pg_stat_activity
+          where application_name = $1 and query not ilike 'listen%' and query not ilike '%pg_listening_channels%'`,
         [tag],
       )
       await until(async () => errors.length > 0, 10_000)
