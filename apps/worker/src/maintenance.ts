@@ -1,4 +1,4 @@
-import type { JobClass, Queue } from '@mkt/queue'
+import { JOB_CLASSES, type JobClass, type Queue } from '@mkt/queue'
 import type { CoreClient } from './core-client.ts'
 
 export interface Maintenance {
@@ -29,6 +29,21 @@ export function startMaintenance(options: {
     busy = true
     try {
       const swept = await options.core.reconcile()
+      // A dead-letter copy that never reached the core (it was down longer than the copy is retried) leaves
+      // the job failed in its queue with nothing listed: tell the core of every failed job. Repeating is safe.
+      for (const jobClass of JOB_CLASSES) {
+        for (const jobId of await options.queue.failedJobIds(jobClass)) {
+          try {
+            await options.core.jobDead(jobId)
+          } catch (error) {
+            options.log({
+              event: 'dead_report_failed',
+              job_id: jobId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+      }
       const seen = await options.queue.watchdog(new Date(), { maxWaitSeconds: options.maxWaitSeconds })
       options.log({
         event: 'maintenance',

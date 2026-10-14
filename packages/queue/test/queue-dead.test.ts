@@ -57,8 +57,17 @@ describe('the dead-letter watcher', () => {
     // Handling the copy completed it: the dead-letter queue holds nothing waiting.
     await until(async () => !(await queue.deadJobs('interactive')).includes(id), 10_000)
     expect(await queue.state('interactive', id)).toBe('failed')
+    expect(await queue.failedJobIds('interactive')).toContain(id)
+    expect(await queue.failedJobIds('bulk')).not.toContain(id)
 
     await queue.cancel('interactive', id)
     expect(await queue.state('interactive', id)).toBe('cancelled')
   }, 120_000)
+
+  it('creates the dead-letter queues with retries sized for a core outage', async () => {
+    const { rows } = await db.admin.query<{ retry_limit: number; retry_backoff: boolean }>(
+      `select retry_limit, retry_backoff from pgboss.queue where name = 'dead-interactive'`,
+    )
+    expect(rows[0]).toEqual({ retry_limit: 10, retry_backoff: true })
+  })
 })

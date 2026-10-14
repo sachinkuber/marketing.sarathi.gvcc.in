@@ -4,6 +4,9 @@ import { CLASS_SETTINGS, JOB_CLASSES } from './classes.ts'
 
 export const QUEUE_SCHEMA = 'pgboss'
 
+export const DEAD_LETTER_RETRY_LIMIT = 10
+export const DEAD_LETTER_RETRY_DELAY_SECONDS = 30
+
 // pg-boss takes an object with executeSql to run a send on the caller's own connection, which is how a
 // job joins the caller's transaction (trial result 1).
 export function executeSqlOn(client: {
@@ -43,7 +46,15 @@ export async function installQueue(adminUrl: string, options: { testScale?: numb
     for (const jobClass of JOB_CLASSES) {
       const s = CLASS_SETTINGS[jobClass]
       // The dead-letter queue must exist before the queue that points at it.
-      if (!(await boss.getQueue(s.deadLetter))) await boss.createQueue(s.deadLetter)
+      // A dead-letter copy is handled by the worker telling the core. If the core is down, the copy must be
+      // retried for hours, not the library's few default seconds: backed-off retries sized for an outage.
+      if (!(await boss.getQueue(s.deadLetter))) {
+        await boss.createQueue(s.deadLetter, {
+          retryLimit: DEAD_LETTER_RETRY_LIMIT,
+          retryDelay: Math.max(1, Math.ceil(DEAD_LETTER_RETRY_DELAY_SECONDS * scale)),
+          retryBackoff: true,
+        })
+      }
       if (!(await boss.getQueue(s.queue))) {
         await boss.createQueue(s.queue, {
           deadLetter: s.deadLetter,

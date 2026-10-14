@@ -57,6 +57,9 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
     const job = await lockJob(client, jobId)
     // A job whose result was already applied is not dead, whatever a late copy says.
     if (job.finishedAt) return
+    // Nor is a job the queue is running again: a redelivered copy, or the reconciliation, arriving after an
+    // owner's requeue must not fail the run or the live attempt. The queue's own record decides.
+    if ((await deps.queue.state(job.jobClass, jobId)) !== 'failed') return
     await client.query(
       'update app.job_control set dead_at = coalesce(dead_at, now()), updated_at = now() where job_id = $1',
       [jobId],
@@ -105,13 +108,21 @@ export async function listDead(deps: JobsDeps, brandId: string): Promise<DeadJob
   })
 }
 
+// Note: the queue is called while the job_input and run locks are held (the queue has its own connection
+// and takes no application lock, so it cannot wait on them; the cost is a longer hold on two rows).
 async function requireDead(
   client: PoolClient,
+  deps: JobsDeps,
   jobId: string,
 ): Promise<{ jobClass: JobClass; runId: string }> {
   const job = await lockJob(client, jobId)
   if (!job.deadAt || job.finishedAt) {
     throw new AppError(409, 'job_not_dead', 'This job is not in the dead-letter list.')
+  }
+  // The queue must agree: retry and cancel act only on a failed job, so a job the queue no longer shows as
+  // failed (a requeue or cancel whose database half rolled back) is refused, and the two cannot diverge.
+  if ((await deps.queue.state(job.jobClass, jobId)) !== 'failed') {
+    throw new AppError(409, 'job_not_dead', 'The queue does not show this job as failed.')
   }
   return { jobClass: job.jobClass, runId: job.runId }
 }
@@ -126,7 +137,7 @@ export async function requeueJob(
   actor: string,
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
-    const { jobClass, runId } = await requireDead(client, jobId)
+    const { jobClass, runId } = await requireDead(client, deps, jobId)
     await deps.queue.requeue(jobClass, jobId)
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
@@ -150,7 +161,7 @@ export async function cancelJob(
   actor: string,
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
-    const { jobClass, runId } = await requireDead(client, jobId)
+    const { jobClass, runId } = await requireDead(client, deps, jobId)
     await deps.queue.cancel(jobClass, jobId)
     await client.query(
       'update app.job_control set cancel_requested = true, dead_at = null, updated_at = now() where job_id = $1',

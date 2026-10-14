@@ -22,6 +22,9 @@ export interface Queue {
   deadJobs(jobClass: JobClass): Promise<string[]>
   // The watcher for a class's dead-letter queue: the handler is given the job ID of each job the library has
   // given up on. Handling a copy completes it, so the queue stays empty: the business tables are the list.
+  // Jobs the library has failed for good in a class's main queue (at most `limit`): the reconciliation that
+  // covers a dead-letter copy that never reached the core.
+  failedJobIds(jobClass: JobClass, limit?: number): Promise<string[]>
   onDead(jobClass: JobClass, handler: (jobId: string) => Promise<void>): Promise<void>
   requeue(jobClass: JobClass, jobId: string): Promise<void>
   cancel(jobClass: JobClass, jobId: string): Promise<void>
@@ -130,6 +133,14 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
         [s.deadLetter, jobId],
       )
       for (const r of rows) await boss.cancel(s.deadLetter, r.id)
+    },
+
+    async failedJobIds(jobClass, limit = 500) {
+      const { rows } = await reader.query<{ id: string }>(
+        `select id from ${QUEUE_SCHEMA}.job where name = $1 and state = 'failed' order by completed_on limit $2`,
+        [CLASS_SETTINGS[jobClass].queue, limit],
+      )
+      return rows.map((r) => r.id)
     },
 
     async onDead(jobClass, handler) {

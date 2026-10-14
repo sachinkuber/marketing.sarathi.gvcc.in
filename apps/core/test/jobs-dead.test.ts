@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
 import { cancelJob, listDead, markDead, requeueJob, sweepModelCalls } from '../src/jobs/dead.ts'
-import { createJob, createRun, startAttempt, type JobsDeps } from '../src/jobs/service.ts'
+import { createJob, createRun, postResult, startAttempt, type JobsDeps } from '../src/jobs/service.ts'
+import { verifyAttemptToken } from '../src/jobs/token.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack } from './support.ts'
 
 let stack: Stack
@@ -100,7 +101,7 @@ describe('dead jobs', () => {
   })
 
   it('does not list a requeued job as dead once its next attempt starts', async () => {
-    const { jobId } = await makeJob(brandA)
+    const { jobId, runId } = await makeJob(brandA)
     await kill(jobId)
     await markDead(jobs, jobId)
     // The queue retried it but the database was not cleared (the order in requeueJob makes this the failure case).
@@ -108,8 +109,52 @@ describe('dead jobs', () => {
     await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
       jobId,
     ])
-    await startAttempt(jobs, jobId, 'w1')
+    const started = await startAttempt(jobs, jobId, 'w1')
+    if (started.finished) throw new Error('unexpected')
     expect((await listDead(jobs, brandA)).map((j) => j.jobId)).not.toContain(jobId)
+    // The requeue's database half never ran, so the run was still failed: the attempt starting revives it,
+    // and the result then ends it as succeeded.
+    expect(await runState(runId)).toBe('running')
+    const check = verifyAttemptToken(
+      jobs.attemptTokenSecret,
+      started.token,
+      Math.floor(jobs.now().getTime() / 1000),
+    )
+    if (!check.ok) throw new Error('token')
+    jobs.results.set('test.echo', async () => ({ ok: true }))
+    const answer = await postResult(jobs, check.claims, { type: 'test.echo', result: {} })
+    expect(answer.status).toBe('applied')
+    expect(await runState(runId)).toBe('succeeded')
+  })
+
+  it('ignores a dead-letter copy that arrives after the job was requeued', async () => {
+    const { jobId, runId } = await makeJob(brandA)
+    await kill(jobId)
+    await markDead(jobs, jobId)
+    await requeueJob(jobs, brandA, jobId, ACTOR)
+    await markDead(jobs, jobId)
+    expect(await runState(runId)).toBe('running')
+    expect((await listDead(jobs, brandA)).map((j) => j.jobId)).not.toContain(jobId)
+  })
+
+  it('does not mark dead a job the queue does not show as failed', async () => {
+    const { jobId, runId } = await makeJob(brandA)
+    await markDead(jobs, jobId)
+    expect(await runState(runId)).toBe('running')
+    expect((await listDead(jobs, brandA)).map((j) => j.jobId)).not.toContain(jobId)
+  })
+
+  it('refuses a requeue or cancel when the queue no longer shows the job as failed', async () => {
+    const { jobId } = await makeJob(brandA)
+    await kill(jobId)
+    await markDead(jobs, jobId)
+    // A cancel whose database half rolled back: the queue says cancelled, the database still lists it.
+    await stack.db.admin.query(`update pgboss.job set state = 'cancelled' where id = $1`, [jobId])
+    await expect(requeueJob(jobs, brandA, jobId, ACTOR)).rejects.toMatchObject({
+      status: 409,
+      code: 'job_not_dead',
+    })
+    await expect(cancelJob(jobs, brandA, jobId, ACTOR)).rejects.toMatchObject({ status: 409 })
   })
 })
 
@@ -172,6 +217,10 @@ describe('the job routes', () => {
     expect((await admin.request('GET', `/api/v1/brands/${brandA}/jobs/dead`)).status).toBe(403)
     expect((await stranger.request('GET', `/api/v1/brands/${brandA}/jobs/dead`)).status).toBe(404)
     expect((await admin.request('POST', `/api/v1/brands/${brandA}/jobs/${jobId}/requeue`)).status).toBe(403)
+    expect((await admin.request('POST', `/api/v1/brands/${brandA}/jobs/${jobId}/cancel`)).status).toBe(403)
+    // Brand A's job under brand B's path is not found, even for the platform owner.
+    expect((await owner.request('POST', `/api/v1/brands/${brandB}/jobs/${jobId}/requeue`)).status).toBe(404)
+    expect((await owner.request('POST', `/api/v1/brands/${brandB}/jobs/${jobId}/cancel`)).status).toBe(404)
 
     expect((await owner.request('POST', `/api/v1/brands/${brandA}/jobs/${jobId}/requeue`)).status).toBe(204)
     expect((await owner.request('POST', `/api/v1/brands/${brandA}/jobs/${jobId}/requeue`)).status).toBe(409)

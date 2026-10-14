@@ -99,13 +99,14 @@ export async function startAttempt(
   return withBrand(deps.pool, brandId, async (client) => {
     const job = await client.query<{
       class: JobClass
+      run_id: string
       input: unknown
       saved_steps: unknown[]
       expected_result_type: string
       outcome: unknown
       finished_at: Date | null
     }>(
-      `select class, input, saved_steps, expected_result_type, outcome, finished_at
+      `select class, run_id, input, saved_steps, expected_result_type, outcome, finished_at
          from app.job_input where job_id = $1 for update`,
       [jobId],
     )
@@ -136,10 +137,17 @@ export async function startAttempt(
       [brandId, jobId, attemptNumber, workerId, tokenId],
     )
     const attemptId = created.rows[0]!.id
-    // A requeued job is no longer dead.
+    // A requeued job is no longer dead, and its run (failed when the job was marked dead) runs again. This
+    // is what makes a requeue whose database half rolled back still end right. The job_input lock is held;
+    // the run row is taken next, the engine's lock order.
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
     ])
+    await client.query('select 1 from app.run where id = $1 for update', [row.run_id])
+    await client.query(
+      `update app.run set state = 'running', finished_at = null where id = $1 and state = 'failed'`,
+      [row.run_id],
+    )
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)
     const claims: AttemptClaims = {
