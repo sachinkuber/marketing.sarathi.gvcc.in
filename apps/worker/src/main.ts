@@ -33,8 +33,10 @@ export interface StopOptions {
 export async function startWorker(
   options: WorkerOptions,
 ): Promise<{ stop(options?: StopOptions): Promise<void> }> {
+  const log = options.log ?? ((line) => console.log(JSON.stringify(line)))
   const queue = await openQueue(options.queueUrl, {
     supervise: true,
+    onError: (error) => log({ event: 'queue_error', error: error.message }),
     ...(options.superviseIntervalSeconds
       ? { superviseIntervalSeconds: options.superviseIntervalSeconds }
       : {}),
@@ -58,7 +60,7 @@ export async function startWorker(
     queue,
     intervalSeconds: options.reconcileIntervalSeconds ?? 300,
     maxWaitSeconds: options.maxWaitSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
-    log: options.log ?? ((line) => console.log(JSON.stringify(line))),
+    log,
   })
   return {
     stop: async (stopOptions) => {

@@ -130,17 +130,22 @@ async function requireDead(
   client: PoolClient,
   deps: JobsDeps,
   jobId: string,
-): Promise<{ jobClass: JobClass; runId: string }> {
+  options: { allowCancelled?: boolean } = {},
+): Promise<{ jobClass: JobClass; runId: string; queueCancelled: boolean }> {
   const job = await lockJob(client, jobId)
   if (!job.deadAt || job.finishedAt) {
     throw new AppError(409, 'job_not_dead', 'This job is not in the dead-letter list.')
   }
   // The queue must agree: retry and cancel act only on a failed job, so a job the queue no longer shows as
   // failed (a requeue or cancel whose database half rolled back) is refused, and the two cannot diverge.
-  if ((await deps.queue.state(job.jobClass, jobId)) !== 'failed') {
+  const state = await deps.queue.state(job.jobClass, jobId)
+  // A cancel whose queue half succeeded and whose database half rolled back leaves the queue at cancelled:
+  // the cancel (only) finishes the database half.
+  const queueCancelled = options.allowCancelled === true && state === 'cancelled'
+  if (state !== 'failed' && !queueCancelled) {
     throw new AppError(409, 'job_not_dead', 'The queue does not show this job as failed.')
   }
-  return { jobClass: job.jobClass, runId: job.runId }
+  return { jobClass: job.jobClass, runId: job.runId, queueCancelled }
 }
 
 // The queue is asked first, the database second: a job the queue has retried and the database still lists
@@ -158,10 +163,14 @@ export async function requeueJob(
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
     ])
-    // Only a run the dead job failed runs again; a run someone cancelled stays cancelled.
+    // Only a run the dead job failed runs again, and only when no other job of it is still dead; a run
+    // someone cancelled stays cancelled.
     await client.query(
-      `update app.run set state = 'running', finished_at = null where id = $1 and state = 'failed'`,
-      [runId],
+      `update app.run set state = 'running', finished_at = null
+        where id = $1 and state = 'failed' and not exists (
+          select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
+           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2)`,
+      [runId, jobId],
     )
     await deps.audit.record(
       { action: 'jobs.requeued', actor, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
@@ -177,8 +186,10 @@ export async function cancelJob(
   actor: string,
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
-    const { jobClass, runId } = await requireDead(client, deps, jobId)
-    await deps.queue.cancel(jobClass, jobId)
+    const { jobClass, runId, queueCancelled } = await requireDead(client, deps, jobId, {
+      allowCancelled: true,
+    })
+    if (!queueCancelled) await deps.queue.cancel(jobClass, jobId)
     await client.query(
       'update app.job_control set cancel_requested = true, dead_at = null, updated_at = now() where job_id = $1',
       [jobId],

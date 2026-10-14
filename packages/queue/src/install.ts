@@ -4,6 +4,10 @@ import { CLASS_SETTINGS, JOB_CLASSES } from './classes.ts'
 
 export const QUEUE_SCHEMA = 'pgboss'
 
+function defaultInstallOnError(error: Error): void {
+  process.stderr.write(`${JSON.stringify({ event: 'queue_error', error: error.message })}\n`)
+}
+
 export const DEAD_LETTER_RETRY_LIMIT = 10
 export const DEAD_LETTER_RETRY_DELAY_SECONDS = 30
 
@@ -37,10 +41,13 @@ grant select on ${QUEUE_SCHEMA}.queue to mkt_app;
 
 // Run at deployment, and by the test harness, as the role that owns the database (never at run time).
 // testScale shortens the timings of the queues for a test database only; production installs at 1.
-export async function installQueue(adminUrl: string, options: { testScale?: number } = {}): Promise<void> {
+export async function installQueue(
+  adminUrl: string,
+  options: { testScale?: number; onError?: (error: Error) => void } = {},
+): Promise<void> {
   const scale = options.testScale ?? 1
   const boss = new PgBoss({ connectionString: adminUrl, schema: QUEUE_SCHEMA })
-  boss.on('error', () => {})
+  boss.on('error', options.onError ?? defaultInstallOnError)
   await boss.start()
   try {
     for (const jobClass of JOB_CLASSES) {

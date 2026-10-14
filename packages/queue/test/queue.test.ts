@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { requireDatabase, sleep } from '@mkt/test-support'
 import type { TestDatabase } from '@mkt/db/testing'
-import { openQueue, type Queue } from '../src/queue.ts'
+import { defaultOnError, openQueue, type Queue } from '../src/queue.ts'
 import { createQueueTestDatabase } from '../src/testing.ts'
 
 let db: TestDatabase
@@ -68,6 +68,40 @@ describe('the queue interface', () => {
     const id = await send('interactive')
     await until(async () => (await queue.state('interactive', id)) === 'completed')
     expect(seen).toContain(id)
+  })
+
+  it('refuses a send whose ID is already in the queue, so the caller can roll back', async () => {
+    const id = await send('bulk')
+    await expect(send('bulk', randomUUID(), id)).rejects.toThrow(/did not accept/)
+  })
+
+  it('hands an error from its connections to onError', async () => {
+    const url = new URL(db.urlFor('queue'))
+    const tag = `onerror-${randomUUID()}`
+    url.searchParams.set('application_name', tag)
+    const errors: Error[] = []
+    const watched = await openQueue(url.toString(), { onError: (e) => errors.push(e) })
+    try {
+      await watched.depth('bulk')
+      await db.admin.query(
+        `select pg_terminate_backend(pid) from pg_stat_activity where application_name = $1`,
+        [tag],
+      )
+      await until(async () => errors.length > 0, 10_000)
+      expect(errors[0]).toBeInstanceOf(Error)
+    } finally {
+      await watched.stop().catch(() => {})
+    }
+  })
+
+  it('writes one JSON line to stderr by default', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      defaultOnError(new Error('lost'))
+      expect(write).toHaveBeenCalledWith('{"event":"queue_error","error":"lost"}\n')
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it('counts waiting jobs for backpressure', async () => {

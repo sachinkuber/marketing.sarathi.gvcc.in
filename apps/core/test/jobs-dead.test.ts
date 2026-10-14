@@ -31,6 +31,32 @@ async function makeJob(brandId: string): Promise<{ jobId: string; runId: string 
   })
   return { jobId, runId }
 }
+async function addJob(brandId: string, runId: string): Promise<string> {
+  return withBrand(stack.appPool, brandId, (client) =>
+    createJob(client, jobs, brandId, {
+      runId,
+      jobClass: 'interactive',
+      input: {},
+      expectedResultType: 'test.echo',
+    }),
+  )
+}
+async function finishAttempt(jobId: string): Promise<void> {
+  await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+    jobId,
+  ])
+  const started = await startAttempt(jobs, jobId, 'w1')
+  if (started.finished) throw new Error('unexpected')
+  const check = verifyAttemptToken(
+    jobs.attemptTokenSecret,
+    started.token,
+    Math.floor(jobs.now().getTime() / 1000),
+  )
+  if (!check.ok) throw new Error('token')
+  jobs.results.set('test.echo', async () => ({ ok: true }))
+  const answer = await postResult(jobs, check.claims, { type: 'test.echo', result: {} })
+  expect(answer.status).toBe('applied')
+}
 // What the library does after the last retry: the job is failed, and a copy goes to the dead-letter queue.
 const kill = (jobId: string) =>
   stack.db.admin.query(`update pgboss.job set state = 'failed' where id = $1`, [jobId])
@@ -127,6 +153,58 @@ describe('dead jobs', () => {
     expect(await runState(runId)).toBe('succeeded')
   })
 
+  it('keeps a run failed while a sibling job is dead, and ends it succeeded once both finish', async () => {
+    const { jobId: j1, runId } = await makeJob(brandA)
+    const j2 = await addJob(brandA, runId)
+    await kill(j1)
+    await markDead(jobs, j1)
+    expect(await runState(runId)).toBe('failed')
+    // J2 gets an attempt (a retry by the queue): it must not revive a run whose sibling is dead.
+    await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+      j2,
+    ])
+    const started = await startAttempt(jobs, j2, 'w1')
+    if (started.finished) throw new Error('unexpected')
+    expect(await runState(runId)).toBe('failed')
+    // Requeueing J1 while J2 is only started: nothing else is dead, so the run runs again.
+    await requeueJob(jobs, brandA, j1, ACTOR)
+    expect(await runState(runId)).toBe('running')
+    await finishAttempt(j1)
+    const check = verifyAttemptToken(
+      jobs.attemptTokenSecret,
+      started.token,
+      Math.floor(jobs.now().getTime() / 1000),
+    )
+    if (!check.ok) throw new Error('token')
+    jobs.results.set('test.echo', async () => ({ ok: true }))
+    await postResult(jobs, check.claims, { type: 'test.echo', result: {} })
+    expect(await runState(runId)).toBe('succeeded')
+  })
+
+  it('does not revive the run on a requeue while another job of it is still dead', async () => {
+    const { jobId: j1, runId } = await makeJob(brandA)
+    const j2 = await addJob(brandA, runId)
+    await kill(j1)
+    await markDead(jobs, j1)
+    await kill(j2)
+    await markDead(jobs, j2)
+    await requeueJob(jobs, brandA, j1, ACTOR)
+    expect(await runState(runId)).toBe('failed')
+    await requeueJob(jobs, brandA, j2, ACTOR)
+    expect(await runState(runId)).toBe('running')
+  })
+
+  it('finishes the database half of a cancel whose queue half already ran', async () => {
+    const { jobId, runId } = await makeJob(brandA)
+    await kill(jobId)
+    await markDead(jobs, jobId)
+    await stack.db.admin.query(`update pgboss.job set state = 'cancelled' where id = $1`, [jobId])
+    await expect(requeueJob(jobs, brandA, jobId, ACTOR)).rejects.toMatchObject({ status: 409 })
+    await cancelJob(jobs, brandA, jobId, ACTOR)
+    expect((await listDead(jobs, brandA)).map((j) => j.jobId)).not.toContain(jobId)
+    expect(await runState(runId)).toBe('cancelled')
+  })
+
   it('ignores a dead-letter copy that arrives after the job was requeued', async () => {
     const { jobId, runId } = await makeJob(brandA)
     await kill(jobId)
@@ -154,7 +232,8 @@ describe('dead jobs', () => {
       status: 409,
       code: 'job_not_dead',
     })
-    await expect(cancelJob(jobs, brandA, jobId, ACTOR)).rejects.toMatchObject({ status: 409 })
+    // A cancel is not refused: the queue half is already done and only the database half is finished.
+    await expect(cancelJob(jobs, brandA, jobId, ACTOR)).resolves.toBeUndefined()
   })
 })
 

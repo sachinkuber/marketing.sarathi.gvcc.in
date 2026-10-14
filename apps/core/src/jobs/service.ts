@@ -138,15 +138,20 @@ export async function startAttempt(
     )
     const attemptId = created.rows[0]!.id
     // A requeued job is no longer dead, and its run (failed when the job was marked dead) runs again. This
-    // is what makes a requeue whose database half rolled back still end right. The job_input lock is held;
+    // is what makes a requeue whose database half rolled back still end right. A run with another job still
+    // dead stays failed: reviving it would leave it running with a job that is listed as dead. The job_input
+    // lock is held;
     // the run row is taken next, the engine's lock order.
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
     ])
     await client.query('select 1 from app.run where id = $1 for update', [row.run_id])
     await client.query(
-      `update app.run set state = 'running', finished_at = null where id = $1 and state = 'failed'`,
-      [row.run_id],
+      `update app.run set state = 'running', finished_at = null
+        where id = $1 and state = 'failed' and not exists (
+          select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
+           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2)`,
+      [row.run_id, jobId],
     )
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)

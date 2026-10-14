@@ -17,4 +17,10 @@ describe('.env.example', () => {
     expect(live).toHaveLength(1)
     expect(live[0]).toMatch(/^AUDIT_DATABASE_URL=postgres:\/\/mkt_audit_writer:/)
   })
+
+  it('lists the keys the worker requires, live', () => {
+    for (const key of ['CORE_URL', 'WORKER_SECRET', 'QUEUE_DATABASE_URL', 'ANTHROPIC_API_KEY']) {
+      expect(lines.some((line) => line.startsWith(`${key}=`))).toBe(true)
+    }
+  })
 })

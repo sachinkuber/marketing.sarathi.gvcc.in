@@ -23,3 +23,4 @@ revoke create on schema app from mkt_definer;
 -- Down Migration
 drop function app.unmarked_dead_jobs(uuid[]);
 drop policy definer_read_job_control on app.job_control;
+revoke select on app.job_control from mkt_definer;

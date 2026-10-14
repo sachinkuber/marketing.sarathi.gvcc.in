@@ -44,12 +44,20 @@ export interface OpenOptions {
   // How often a supervising process looks for expired or heartbeat-less jobs. The library's default is
   // far longer than the crash tests can wait; tests (and the queue trial) use 1.
   superviseIntervalSeconds?: number
+  // Called with every error the library or the reading pool emits (a lost connection, a failed supervise).
+  // The default writes one JSON line to stderr; a process with its own log passes it here.
+  onError?: (error: Error) => void
+}
+
+export function defaultOnError(error: Error): void {
+  process.stderr.write(`${JSON.stringify({ event: 'queue_error', error: error.message })}\n`)
 }
 
 // Slots per process: always several, never one, so a brand at its limit cannot hold up another (spec 9.2).
 const SLOTS_PER_CLASS = 6
 
 export async function openQueue(queueUrl: string, options: OpenOptions = {}): Promise<Queue> {
+  const onError = options.onError ?? defaultOnError
   const boss = new PgBoss({
     connectionString: queueUrl,
     schema: QUEUE_SCHEMA,
@@ -65,21 +73,24 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
     schedule: false,
     useListenNotify: true,
   })
-  boss.on('error', () => {})
+  boss.on('error', onError)
   await boss.start()
   // Reads the library has no call for (depth, dead copies, the watchdog) go through the queue role directly.
   const reader = new pg.Pool({ connectionString: queueUrl, max: 2 })
-  reader.on('error', () => {})
+  reader.on('error', onError)
 
   return {
     async send(client, { jobId, jobClass, scheduleKey }) {
       // A job is a job ID (in the data, so a dead-letter copy can be traced back), a class (the queue) and a
       // scheduling key (the group). Nothing else: no client content, no business input (spec 9.1).
-      await boss.send(
+      const id = await boss.send(
         CLASS_SETTINGS[jobClass].queue,
         { jobId },
         { id: jobId, group: { id: scheduleKey }, db: executeSqlOn(client) },
       )
+      // The library answers null for a duplicate ID (or a missing queue) instead of throwing. A job row
+      // without a queue row would never run, so the caller's transaction must roll back.
+      if (!id) throw new Error(`The queue did not accept job ${jobId}.`)
     },
 
     async work(jobClass, { processes }, handler) {
