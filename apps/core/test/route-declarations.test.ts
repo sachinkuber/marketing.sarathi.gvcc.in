@@ -87,6 +87,25 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
       'post /worker/jobs/:jobId/model-calls/:callId/checkpoint': 'attempt',
       'post /worker/jobs/:jobId/model-calls/:callId/failure': 'attempt',
       'post /worker/jobs/:jobId/result': 'attempt',
+      'post /worker/jobs/:jobId/dead': 'worker',
+      'post /worker/reconcile': 'worker',
+    })
+  })
+
+  it('declares the dead-letter routes as the platform owner permission', () => {
+    const declared = Object.fromEntries(
+      stack.core.routes
+        .list()
+        .filter((r) => r.path.startsWith('/brands/:brandId/jobs/'))
+        .map((r) => [
+          `${r.method} ${r.path}`,
+          r.access.kind === 'permission' ? r.access.permission : r.access.kind,
+        ]),
+    )
+    expect(declared).toEqual({
+      'get /brands/:brandId/jobs/dead': 'see_other_brands',
+      'post /brands/:brandId/jobs/:jobId/requeue': 'see_other_brands',
+      'post /brands/:brandId/jobs/:jobId/cancel': 'see_other_brands',
     })
   })
 })

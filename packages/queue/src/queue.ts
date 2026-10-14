@@ -20,6 +20,9 @@ export interface Queue {
   state(jobClass: JobClass, jobId: string): Promise<JobState | null>
   depth(jobClass: JobClass): Promise<number>
   deadJobs(jobClass: JobClass): Promise<string[]>
+  // The watcher for a class's dead-letter queue: the handler is given the job ID of each job the library has
+  // given up on. Handling a copy completes it, so the queue stays empty: the business tables are the list.
+  onDead(jobClass: JobClass, handler: (jobId: string) => Promise<void>): Promise<void>
   requeue(jobClass: JobClass, jobId: string): Promise<void>
   cancel(jobClass: JobClass, jobId: string): Promise<void>
   watchdog(
@@ -129,8 +132,33 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
       for (const r of rows) await boss.cancel(s.deadLetter, r.id)
     },
 
+    async onDead(jobClass, handler) {
+      const s = CLASS_SETTINGS[jobClass]
+      await boss.work(s.deadLetter, { pollingIntervalSeconds: s.pollingIntervalSeconds }, async (batch) => {
+        for (const copy of batch) {
+          const jobId = (copy.data as { jobId?: string }).jobId
+          if (jobId) await handler(jobId)
+        }
+      })
+    },
+
     async cancel(jobClass, jobId) {
-      await boss.cancel(CLASS_SETTINGS[jobClass].queue, jobId)
+      const s = CLASS_SETTINGS[jobClass]
+      await boss.cancel(s.queue, jobId)
+      // The library cancels only jobs that have not finished. A dead job is "failed", which it leaves alone,
+      // so a cancel of a dead job ends it here (a failed job is never picked up again, but "cancelled" is
+      // what it is). Only a failed job is touched.
+      await reader.query(
+        `update ${QUEUE_SCHEMA}.job set state = 'cancelled', completed_on = now()
+          where name = $1 and id = $2 and state = 'failed'`,
+        [s.queue, jobId],
+      )
+      // Its dead-letter copy, if the watcher has not completed it yet, has nothing left to report.
+      const { rows } = await reader.query<{ id: string }>(
+        `select id from ${QUEUE_SCHEMA}.job where name = $1 and data->>'jobId' = $2 and state = 'created'`,
+        [s.deadLetter, jobId],
+      )
+      for (const r of rows) await boss.cancel(s.deadLetter, r.id)
     },
 
     async watchdog(now, limits) {

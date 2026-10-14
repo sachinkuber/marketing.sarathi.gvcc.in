@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { withBrand } from '@mkt/db'
 import { claimsOf } from '../access/worker-auth.ts'
 import type { RouteTable } from '../access/routes.ts'
+import { markDead, sweepModelCalls } from '../jobs/dead.ts'
 import {
   failModelCall,
   postResult,
@@ -157,6 +158,33 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
         const { body } = inputOf<{ body: z.infer<typeof resultBody> }>(res)
         const answer = await postResult(deps, claimsOf(res), body)
         res.status(answer.status === 'held' ? 202 : 200).json(answer)
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/worker/jobs/:jobId/dead',
+    access: { kind: 'worker' },
+    summary: 'The dead-letter watcher reports a job the queue gave up on',
+    handlers: [
+      validate({ params: jobParams }),
+      async (_req, res) => {
+        const { params } = inputOf<{ params: z.infer<typeof jobParams> }>(res)
+        await markDead(deps, params.jobId)
+        res.status(204).end()
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/worker/reconcile',
+    access: { kind: 'worker' },
+    summary: 'The worker timer marks model calls left started past their class expiry as unknown',
+    handlers: [
+      async (_req, res) => {
+        res.json({ marked: await sweepModelCalls(deps) })
       },
     ],
   })

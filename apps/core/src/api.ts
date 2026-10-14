@@ -8,6 +8,7 @@ import { csrfTokenFor } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
+import { registerJobRoutes } from './routes/jobs.ts'
 import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
 import type { JobsDeps } from './jobs/service.ts'
@@ -75,7 +76,10 @@ export function createApi(
     onMailFailure: deps.onMailFailure,
   })
 
-  if (deps.jobs) registerWorkerRoutes(table, deps.jobs)
+  if (deps.jobs) {
+    registerWorkerRoutes(table, deps.jobs)
+    registerJobRoutes(table, deps.jobs)
+  }
 
   extra?.(table, { auth: deps.auth, pool: deps.pool })
   return { router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs }), table }

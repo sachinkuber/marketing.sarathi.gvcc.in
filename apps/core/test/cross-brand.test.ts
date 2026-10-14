@@ -13,7 +13,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   let admin: TestClient
 
   beforeAll(async () => {
-    stack = await createStack()
+    // With the queue, so the job routes (declared only when the work engine is) are walked too.
+    stack = await createStack({ withQueue: true })
     brandA = await addBrand(stack, 'brand-a')
     brandB = await addBrand(stack, 'brand-b')
     await addUser(stack, {
@@ -32,6 +33,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
     const scoped = stack.core.routes.list().filter((r) => r.path.includes(':brandId'))
     expect(scoped.length).toBeGreaterThanOrEqual(5)
+    expect(scoped.some((r) => r.path === '/brands/:brandId/jobs/dead')).toBe(true)
   })
 
   it('answers 404 to a member of brand A for every route when the path names brand B', async () => {

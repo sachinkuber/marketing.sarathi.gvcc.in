@@ -78,6 +78,7 @@ export const replySchemas = {
   ]),
   checkpoint: z.object({ costed: z.boolean() }),
   postResult: z.object({ status: z.enum(['applied', 'repeated', 'held']) }),
+  reconcile: z.object({ marked: z.number().int().min(0) }),
 }
 
 function parseReply<T>(schema: z.ZodType, reply: unknown, what: string): T {
@@ -148,6 +149,9 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
       return parseReply(replySchemas.postResult, reply, 'a result')
     },
     jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
-    reconcile: () => call('POST', '/worker/reconcile', null, {}),
+    async reconcile() {
+      const reply = await call('POST', '/worker/reconcile', null, {})
+      return parseReply(replySchemas.reconcile, reply, 'a reconciliation')
+    },
   }
 }
