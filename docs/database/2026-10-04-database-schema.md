@@ -10,6 +10,7 @@
 | Prepared by | Claude Code |
 | Canonical source | `docs/database/2026-10-04-database-schema.md`. The Word file is generated from it. |
 | Changes in version 2 | Owner decisions of 2026-10-04: the refinements in section 12 accepted; 90-day retention for job inputs and notifications confirmed; every cost recorded in both US dollars and Indian rupees (sections 2, 7.6 to 7.8). |
+| Changes at milestone 4 (2026-10-14) | Brought in line with migrations 0011 to 0013 as built: sections 7.3, 7.5, 7.6, new 7.9 and 7.10, and 11.1. The Word copy is not regenerated (it needs `mmdc`, which the server lacks); this Markdown file is canonical. |
 | Based on | Phase 1 spec version 4, Architecture version 2, Master PRD version 3, App flow version 2, Content guidelines version 2, Tech stack version 1. All approved. |
 
 ## 1. Scope and status of each part
@@ -417,6 +418,7 @@ erDiagram
   JOB_ATTEMPT ||--o{ MODEL_CALL : "makes"
   MODEL_CALL ||--o| COST_LEDGER : "costs"
   FX_RATE ||--o{ COST_LEDGER : "converts"
+  MODEL_PRICE }o--o{ MODEL_CALL : "prices (by model and date)"
   RUN ||--o{ COST_LEDGER : "totals"
 ```
 
@@ -462,8 +464,15 @@ What a job needs. The queue never holds this, and the queue role cannot read it.
 | class | job_class | Not null |
 | input | jsonb | Not null |
 | saved_steps | jsonb | Not null, default empty list. Checkpoints. |
-| result_hash | text | Set when a result is accepted |
+| expected_result_type | text | Not null. The result type the job must post; a result of another type is refused. |
+| result_type | text | Set with `result_hash` when a result is accepted |
+| result_hash | text | Set when a result is accepted. The hash of the canonical, key-sorted result. |
+| outcome | jsonb | What the result handler reported. Set when a result is accepted. |
+| held_result | jsonb | A result posted while the job was held, kept for the release step. Last write wins. |
+| finished_at | timestamptz | Set when a result is accepted. A cancelled job keeps it null. |
 | created_at | timestamptz | Not null |
+
+`expected_result_type`, `result_type`, `outcome`, `held_result` and `finished_at` are additions to the spec's columns (milestone 4 plan, decision 4). Unique on `(brand_id, job_id)` and a foreign key `(brand_id, run_id)` to `app.run`.
 
 ### 7.4 `app.job_attempt`
 
@@ -490,6 +499,7 @@ At most one active attempt per job (partial unique index where state is `active`
 | brand_id | uuid | Not null |
 | cancel_requested | boolean | Not null, default false |
 | held | boolean | Not null, default false |
+| dead_at | timestamptz | Set when the queue's dead-letter copy of the job was reported (or reconciled). Cleared when the job is requeued. |
 | updated_at | timestamptz | Not null |
 
 ### 7.6 `app.model_call`
@@ -516,6 +526,12 @@ The model-call ledger. One row per request sent to the provider, written before 
 
 Index on `(job_id, step, request_hash)` for the duplicate check, and on `(status, started_at)` for reconciliation.
 
+A call whose model has no row in `model_price`, or made when no exchange rate exists, is recorded as `succeeded` with no cost fields and gets no `cost_ledger` row (it is "uncosted"; plan decision 5). Nothing is guessed.
+
+Known limit: the foreign keys are `(brand_id, run_id)`, `(brand_id, job_id)` and `(brand_id, attempt_id)` separately. They keep a call inside one brand but do not tie the run, job and attempt of a call to each other within that brand. The service writes them consistently; the database does not enforce it.
+
+Calls still `started` after their job class's expiry are marked `unknown` by `app.sweep_model_calls(class, cutoff)` (section 7.10).
+
 ### 7.7 `app.cost_ledger`
 
 | Column | Type | Rules |
@@ -531,7 +547,7 @@ Index on `(job_id, step, request_hash)` for the duplicate check, and on `(status
 | fx_rate_id | uuid | Not null; references `fx_rate` |
 | at | timestamptz | Not null |
 
-Index on `(brand_id, at)`.
+Unique partial index `cost_ledger_one_per_call` on `(model_call_id)` where it is set (a call is costed once), and an index on `(brand_id, at)`. A row is written once: the application role has select and insert only.
 
 ### 7.8 `app.fx_rate`
 
@@ -554,6 +570,37 @@ Not brand-scoped. The exchange rates used to record costs in both currencies.
 - One rate a day is stored. If the day's rate has not yet been fetched, the most recent one is used and the row records which.
 - Reports, the cost screens and budgets show both currencies. A brand chooses which one leads.
 - A cost charged in rupees, such as ad spend later, is stored the same way with the dollar amount calculated.
+
+### 7.9 `app.model_price`
+
+Not brand-scoped. Added by migration 0012. The price of a model's tokens, as data the owner confirms from the provider's own price page; nothing is built into the code. Changed only by the release step; the application, read-only and owner-view roles can read it.
+
+| Column | Type | Rules |
+|---|---|---|
+| id | uuid | Primary key |
+| model | text | Not null. Unique with `effective_from`. |
+| effective_from | date | Not null. The date this price starts. |
+| input_micros | bigint | Not null, not negative. Millionths of a US dollar per million input tokens. |
+| output_micros | bigint | Not null, not negative. Per million output tokens. |
+| cache_read_micros | bigint | Not null, not negative. Per million cache-read tokens. |
+| cache_write_micros | bigint | Not null, not negative. Per million cache-write tokens. |
+| source | text | Not null. Where the figures came from. |
+| created_at | timestamptz | Not null |
+
+The price used for a call is the row for its model with the latest `effective_from` on or before the day of the call. If there is none, the call is uncosted (see 7.6). A price that is entered later does not change a past cost.
+
+### 7.10 Functions added by migrations 0011 to 0013
+
+All are `security definer`, owned by `mkt_definer`, with `search_path` fixed to `pg_catalog, app`, and no execute right for `PUBLIC`. The definer role holds `create` on schema `app` only while a migration changes a function's owner.
+
+| Function | Executed by | What it does |
+|---|---|---|
+| `app.job_brand(job uuid)` | Application | Returns the brand of a job from `job_input`. The core needs it to open a brand context from a token's job, before it has a brand. |
+| `app.sweep_model_calls(class job_class, cutoff timestamptz)` | Application | Marks calls of that job class still `started` and older than the cutoff as `unknown`; returns the count. The caller passes one cutoff per class (the class's expiry), so it is for a trusted caller (the worker's maintenance tick). |
+| `app.record_fx_rate(date, rate_micros bigint, source text)` | Owner-view | Stores one USD to INR rate per day; entering the same day again changes nothing and returns the stored row's id. |
+| `app.unmarked_dead_jobs(jobs uuid[])` | Application | Of the given job IDs, returns those with no `dead_at` and no `finished_at`. Reads only; the worker's reconciliation uses it to report failed jobs whose dead-letter copy was lost. |
+
+The functions need rights the roles do not otherwise have, so the definer role has: read policies `using (true)` for the definer role only on `job_input`, `model_call` and `job_control` (with `select` on each); an update policy `using (true) with check (true)` for the definer role only on `model_call` (with `select, update` on the table); and `select, insert` on `fx_rate`.
 
 ## 8. Phase 1: notifications, alerts and triggers
 
@@ -704,10 +751,10 @@ The hashed content payload gains references to offers, products and the complian
 | Role | `app` business tables | `auth` | `pgboss` | `audit` | `secrets` |
 |---|---|---|---|---|---|
 | Migration | Create and alter; used only at deployment | Create and alter | Create and alter | Create and alter | Create and alter |
-| Application | Read and write, through row-level security. Cannot alter tables. | Read and write | Create jobs only | Execute `audit.append` only | None |
-| Queue (workers) | None | None | Claim and update jobs | None | None |
+| Application | Read and write, through row-level security. Cannot alter tables. | Read and write | Create jobs only: insert on `pgboss.job` and `pgboss.job_common`, select on `pgboss.queue`, and select on the two columns `(id, start_after)` of `pgboss.job_common`; nothing else | Execute `audit.append` only | None |
+| Queue (workers) | None | None | Claim and update jobs: all rights on the `pgboss` tables, and a guarded direct update of a failed job to cancelled when a dead job is cancelled | None | None |
 | Audit-writer | None | None | None | Execute `audit.append` and `audit.record_export`; no right on any audit table | None |
-| Owner-view | Read across brands through named functions only | None | Read | Execute the read and verify functions | None |
+| Owner-view | Read across brands through named functions only; execute `app.record_fx_rate` | None | Read | Execute the read and verify functions | None |
 | Read-only | Read, through row-level security | None | None | None | None |
 | Connection (phase 3) | Outbox and connection tables only | None | Claim publishing jobs | None | Read and write |
 
@@ -724,7 +771,7 @@ No run-time role can bypass row-level security, and none owns a table.
 | An approval names the real hash of its version | Trigger on insert |
 | The audit log is never changed | No update or delete rights, and a trigger |
 | One live definition per agent; one active attempt per job; one active kill switch per scope | Partial unique indexes |
-| A model call is costed once | Unique `model_call_id` in the cost ledger |
+| A model call is costed once | Unique partial index `cost_ledger_one_per_call` on `model_call_id` in the cost ledger |
 
 ### 11.3 Retention
 
@@ -760,6 +807,8 @@ These are small additions or changes made while specifying columns. **The owner 
 | 7 | `app.notification` records the channel and delivery time | Alert delivery must be confirmed, not only attempted |
 | 8 | A `secrets` schema is reserved for phase 3 | Keeps tokens out of reach of every role but one |
 | 9 | `app.fx_rate` is added | Needed to record each cost in both currencies |
+| 10 | `app.job_input` gains `expected_result_type`, `result_type`, `outcome`, `held_result`, `finished_at`; `app.job_control` gains `dead_at` (milestone 4, plan decision 4) | A result is checked against the type the job expects, a held result is kept, and a dead job is told apart from a failed one |
+| 11 | `app.model_price` is added (milestone 4, plan decision 5) | A model's price is data the owner confirms, not a figure in the code |
 
 ## 13. Decisions and open points
 
