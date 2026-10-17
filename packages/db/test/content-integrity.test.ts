@@ -144,6 +144,10 @@ describe('content versions cannot change and cannot lie about their hash', () =>
         [id, A],
       )
       await c.query(
+        "update app.content_version_state set state = 'in_checks' where content_version_id = $1",
+        [id],
+      )
+      await c.query(
         "update app.content_version_state set state = 'awaiting_approval' where content_version_id = $1",
         [id],
       )
