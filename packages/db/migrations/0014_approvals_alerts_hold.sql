@@ -44,6 +44,10 @@ begin
     end if;
     return new;
   end if;
+  -- A touch that leaves the state alone (an updated_at refresh) is allowed and changes nothing.
+  if new.state = old.state then
+    return new;
+  end if;
   if not exists (
     select 1 from app.version_state_transition t
      where t.from_state = old.state and t.to_state = new.state
@@ -170,6 +174,10 @@ create function app.hold_brand_jobs(p_brand uuid, p_agent text, p_hold boolean) 
 language plpgsql security definer set search_path = pg_catalog, app
 as $$
 begin
+  -- The policies the definer holds see every brand, so the function itself keeps a caller to its own brand.
+  if p_brand is distinct from nullif(current_setting('app.brand_id', true), '')::uuid then
+    raise exception 'a session may hold or release only its own brand''s jobs' using errcode = '42501';
+  end if;
   return query
   update app.job_control c set held = p_hold, updated_at = now()
     from app.job_input i, app.run r

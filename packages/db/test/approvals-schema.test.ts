@@ -143,7 +143,7 @@ describe('version state transitions', () => {
             'update app.content_version_state set state = $1 where content_version_id = $2',
             [to, versionA.id],
           )
-          if (allowed.has(`${from}>${to}`)) {
+          if (from === to || allowed.has(`${from}>${to}`)) {
             await move
             accepted++
           } else {
@@ -153,8 +153,9 @@ describe('version state transitions', () => {
         })
       }
     }
-    expect(accepted).toBe(ALLOWED.length)
-    expect(refused).toBe(144 - ALLOWED.length)
+    // Same-state touches (12) are accepted as no-ops.
+    expect(accepted).toBe(ALLOWED.length + 12)
+    expect(refused).toBe(144 - 12 - ALLOWED.length)
   })
 
   it('refuses a version that starts in any state but draft', async () => {
@@ -308,6 +309,19 @@ describe('hold_brand_jobs', () => {
     expect(await held(a1)).toBe(true)
     expect(await hold(A, null, false)).toEqual([a1])
     expect(await held(a1)).toBe(false)
+  })
+
+  it("refuses a session that names another brand and leaves that brand's jobs alone", async () => {
+    const b = await job(B, 'writer')
+    expect(await held(b)).toBe(false)
+    await expect(
+      withBrand(app, A, (c) => c.query('select * from app.hold_brand_jobs($1, null, true)', [B])),
+    ).rejects.toThrow(/only its own brand/)
+    expect(await held(b)).toBe(false)
+    // With no brand set at all, nothing is held either.
+    await expect(app.query('select * from app.hold_brand_jobs($1, null, true)', [B])).rejects.toThrow(
+      /only its own brand/,
+    )
   })
 
   it('is executable by the application role only', async () => {
