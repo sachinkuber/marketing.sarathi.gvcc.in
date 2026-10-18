@@ -11,6 +11,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   let brandA: string
   let brandB: string
   let admin: TestClient
+  // A real content item in each brand, so a route that looks the item up is not answered 404 for a made-up id.
+  const items = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -24,11 +26,21 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       brandId: brandA,
     })
     admin = (await enrolledClient(stack, 'admin@example.test', PASSWORD)).client
+    for (const brand of [brandA, brandB]) {
+      const made = await stack.db.admin.query(
+        `insert into app.content_item (brand_id, kind) values ($1, 'article') returning id`,
+        [brand],
+      )
+      items.set(brand, made.rows[0].id as string)
+    }
   })
   afterAll(async () => stack?.close())
 
   const fill = (path: string, brand: string) =>
-    path.replace(':brandId', brand).replace(/:[a-zA-Z]+/g, SOME_USER)
+    path
+      .replace(':brandId', brand)
+      .replace(':itemId', items.get(brand) ?? SOME_USER)
+      .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
     const scoped = stack.core.routes.list().filter((r) => r.path.includes(':brandId'))
