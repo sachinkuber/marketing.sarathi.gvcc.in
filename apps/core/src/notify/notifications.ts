@@ -1,6 +1,6 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { raiseAlert } from './alerts.ts'
-import { errorName, type NotifyDeps } from './ports.ts'
+import { errorName, overBudget, withSendTimeout, type NotifyDeps } from './ports.ts'
 import { emailOf } from './recipients.ts'
 
 // A notification is tried at most this many times; the last failure makes it `failed` and raises an alert.
@@ -51,13 +51,19 @@ export interface DeliverResult {
 // handled on its own: its row is locked for the send, so two deliverers never send the same one. A failure
 // counts an attempt; the fifth makes it `failed` and raises a severity 2 alert. The log gets the error name
 // only, never the address, the subject or the error message.
-export async function deliverPending(pool: Pool, deps: NotifyDeps, limit: number): Promise<DeliverResult> {
+export async function deliverPending(
+  pool: Pool,
+  deps: NotifyDeps,
+  limit: number,
+  startedAt = Date.now(),
+): Promise<DeliverResult> {
   const out: DeliverResult = { sent: 0, retried: 0, failed: 0 }
   const queued = await pool.query<{ id: string; brand_id: string }>(
     'select id, brand_id from app.pending_notifications($1, $2)',
     [limit, MAX_ATTEMPTS],
   )
   for (const { id, brand_id: brandId } of queued.rows) {
+    if (overBudget(deps, startedAt)) break
     const outcome = await withBrand(pool, brandId, async (client) => {
       const found = await client.query<Row>(
         `select id, user_id, kind, subject_kind, attempts from app.notification
@@ -69,7 +75,7 @@ export async function deliverPending(pool: Pool, deps: NotifyDeps, limit: number
       try {
         const to = await emailOf(client, row.user_id)
         if (!to) throw Object.assign(new Error('recipient'), { name: 'RecipientNotFound' })
-        const receipt = await deps.mailer.send({ to, ...messageFor(row) })
+        const receipt = await withSendTimeout(deps, () => deps.mailer.send({ to, ...messageFor(row) }))
         if (!receipt?.providerId)
           throw Object.assign(new Error('receipt'), { name: 'NoProviderConfirmation' })
         await client.query(
@@ -94,13 +100,22 @@ export async function deliverPending(pool: Pool, deps: NotifyDeps, limit: number
     else if (outcome === 'retried') out.retried += 1
     else if (outcome === 'failed') {
       out.failed += 1
-      await raiseAlert(pool, deps, {
-        brandId,
-        severity: 2,
-        kind: 'notification_failed',
-        ref: id,
-        detail: { notificationId: id },
-      })
+      // A failure to raise must not end the loop; the notification stays failed and is found by the next
+      // attempt of whoever raises it again (the ref dedupes).
+      try {
+        await raiseAlert(pool, deps, {
+          brandId,
+          severity: 2,
+          kind: 'notification_failed',
+          ref: id,
+          detail: { notificationId: id },
+        })
+      } catch (error) {
+        deps.logger?.error(
+          { err: errorName(error), notification: id },
+          'alert for a failed notification not raised',
+        )
+      }
     }
   }
   return out

@@ -1,6 +1,6 @@
 import { withBrand, type Pool } from '@mkt/db'
 import type { Finding } from '../audit/verify.ts'
-import { errorName, type NotifyDeps } from './ports.ts'
+import { ALERT_MAX_ATTEMPTS, errorName, overBudget, withSendTimeout, type NotifyDeps } from './ports.ts'
 import { emailOf, platformOwnersOf } from './recipients.ts'
 
 export interface NewAlert {
@@ -20,6 +20,9 @@ export interface AlertRow {
   severity: number
   kind: string
   detail: Record<string, unknown> | null
+  // What is already confirmed: the owners emailed and the second channel. A retry sends only the rest.
+  mailed_to?: string[]
+  channel_confirmed_at?: Date | null
 }
 
 export interface RaiseResult {
@@ -59,37 +62,65 @@ export async function deliverAlert(pool: Pool, deps: NotifyDeps, alert: AlertRow
   const text = `${subject}. ${alert.brand_id ? 'A brand is affected.' : 'It concerns the platform.'} Open Marketing Sarathi to see it.`
   const guard = async (what: string, send: () => Promise<{ providerId: string }>): Promise<boolean> => {
     try {
-      return Boolean((await send())?.providerId)
+      return Boolean((await withSendTimeout(deps, send))?.providerId)
     } catch (error) {
       deps.logger?.warn({ err: errorName(error), alert: alert.id, via: what }, 'alert not delivered')
       return false
     }
   }
   const owners = await platformOwnersOf(pool)
-  let allMailed = owners.length > 0
+  const already = new Set(alert.mailed_to ?? [])
+  const newlyMailed: string[] = []
+  let emailFailed = false
   for (const owner of owners) {
+    if (already.has(owner)) continue
     const ok = await guard('email', async () => {
       const to = await emailOf(pool, owner)
       if (!to) throw Object.assign(new Error('recipient'), { name: 'RecipientNotFound' })
       return deps.mailer.send({ to, subject, text })
     })
-    allMailed = allMailed && ok
+    if (ok) newlyMailed.push(owner)
+    else emailFailed = true
   }
-  if (owners.length === 0) deps.logger?.warn({ alert: alert.id }, 'alert has no platform owner to email')
-  const channelled = await guard('channel', () => deps.channel.send({ subject, text }))
-  const delivered = allMailed && channelled
-  await pool.query('select app.mark_alert_delivery($1, $2)', [alert.id, delivered])
-  return delivered
+  let channelOk = Boolean(alert.channel_confirmed_at)
+  let channelNew = false
+  if (!channelOk) {
+    channelOk = await guard('channel', () => deps.channel.send({ subject, text }))
+    channelNew = channelOk
+  }
+  const issues: string[] = []
+  if (owners.length === 0) issues.push('no_platform_owner')
+  else if (emailFailed) issues.push('email')
+  if (!channelOk) issues.push('channel')
+  const issue = issues.length > 0 ? issues.join('+') : null
+  await pool.query('select app.mark_alert_delivery($1, $2::uuid[], $3, $4, $5, $6)', [
+    alert.id,
+    newlyMailed,
+    channelNew,
+    issue,
+    deps.clock.now(),
+    ALERT_MAX_ATTEMPTS,
+  ])
+  return issue === null
 }
 
-// Tries again the alerts that no one has confirmed, oldest first. Returns how many are now delivered.
-export async function retryAlerts(pool: Pool, deps: NotifyDeps, limit: number): Promise<number> {
-  const { rows } = await pool.query<AlertRow>(
-    'select id, brand_id, severity, kind, detail from app.undelivered_alerts($1)',
-    [limit],
-  )
+// Tries again the alerts that are due (backoff of 2^attempts minutes, at most 60; none after the attempt cap),
+// oldest first, sending only what is not yet confirmed. Returns how many are now delivered.
+export async function retryAlerts(
+  pool: Pool,
+  deps: NotifyDeps,
+  limit: number,
+  startedAt = Date.now(),
+): Promise<number> {
+  const { rows } = await pool.query<AlertRow>('select * from app.undelivered_alerts($1, $2)', [
+    limit,
+    deps.clock.now(),
+  ])
   let delivered = 0
-  for (const row of rows) if (await deliverAlert(pool, deps, row)) delivered += 1
+  for (const row of rows) {
+    if (overBudget(deps, startedAt)) break
+    if (await deliverAlert(pool, deps, row)) delivered += 1
+  }
   return delivered
 }
 
@@ -121,7 +152,11 @@ const KINDS: Record<string, { kind: string; severity: 1 | 2 | 3 }> = {
 
 // Dead jobs, long-waiting jobs and unknown model calls become brand alerts, deduped by the job or call id.
 // Returns how many alerts it created.
-export async function alertOnOperationalFindings(pool: Pool, deps: NotifyDeps): Promise<number> {
+export async function alertOnOperationalFindings(
+  pool: Pool,
+  deps: NotifyDeps,
+  startedAt = Date.now(),
+): Promise<number> {
   const before = new Date(deps.clock.now().getTime() - WAITING_JOB_AFTER_MS)
   const { rows } = await pool.query<{ brand_id: string; kind: string; ref: string }>(
     'select brand_id, kind, ref from app.operational_findings($1)',
@@ -129,6 +164,7 @@ export async function alertOnOperationalFindings(pool: Pool, deps: NotifyDeps): 
   )
   let created = 0
   for (const row of rows) {
+    if (overBudget(deps, startedAt)) break
     const map = KINDS[row.kind]
     if (!map) continue
     const result = await raiseAlert(pool, deps, {

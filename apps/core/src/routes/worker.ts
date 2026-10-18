@@ -14,10 +14,8 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
-import { alertOnOperationalFindings, retryAlerts } from '../notify/alerts.ts'
-import { deliverPending } from '../notify/notifications.ts'
+import { runNotifyTick } from '../notify/tick.ts'
 import type { NotifyDeps } from '../notify/ports.ts'
-import { errorName } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
@@ -191,18 +189,8 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     handlers: [
       async (_req, res) => {
         const marked = await sweepModelCalls(deps)
-        // The timer's other work, after the sweep and never in its way: alerts for what is dead, waiting or
-        // unknown, a retry of the alerts no one has confirmed, and the queued notifications. A failure here
-        // is logged by name and leaves the sweep's answer as it was.
-        if (notify) {
-          try {
-            await alertOnOperationalFindings(notify.pool, notify)
-            await retryAlerts(notify.pool, notify, 50)
-            await deliverPending(notify.pool, notify, 50)
-          } catch (error) {
-            notify.logger?.error({ err: errorName(error) }, 'alert and notification delivery failed')
-          }
-        }
+        // The timer's other work, after the sweep and never in its way: each stage isolated, one budget.
+        if (notify) await runNotifyTick(notify)
         res.json({ marked })
       },
     ],

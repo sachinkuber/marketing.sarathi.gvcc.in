@@ -28,6 +28,9 @@ interface AlertRecord {
   acknowledged_at: Date | null
   resolved_at: Date | null
   delivered_at: Date | null
+  delivery_attempts: number
+  delivery_stalled: boolean
+  delivery_issue: string | null
 }
 
 const shape = (r: AlertRecord) => ({
@@ -40,10 +43,13 @@ const shape = (r: AlertRecord) => ({
   acknowledgedAt: r.acknowledged_at,
   resolvedAt: r.resolved_at,
   delivered: r.delivered_at !== null,
+  deliveryAttempts: r.delivery_attempts,
+  deliveryStalled: r.delivery_stalled,
+  deliveryIssue: r.delivery_issue,
 })
 
 const COLUMNS =
-  'id, severity, kind, detail, raised_at, acknowledged_by, acknowledged_at, resolved_at, delivered_at'
+  'id, severity, kind, detail, raised_at, acknowledged_by, acknowledged_at, resolved_at, delivered_at, delivery_attempts, delivery_stalled, delivery_issue'
 
 export function registerAlertRoutes(table: RouteTable, deps: AlertRouteDeps): void {
   table.add({
@@ -134,26 +140,40 @@ export function registerAlertRoutes(table: RouteTable, deps: AlertRouteDeps): vo
       async (_req, res) => {
         const { params } = inputOf<{ params: z.infer<typeof alertParams> }>(res)
         const userId = principalOf(res).userId
-        const result = await deps.pool.query<{ found: boolean; newly: boolean }>(
-          'select found, newly from app.ack_platform_alert($1, $2)',
-          [params.alertId, userId],
-        )
-        const { found, newly } = result.rows[0] ?? { found: false, newly: false }
-        if (!found) throw notFound()
-        if (newly) {
-          await deps.audit.record({
-            action: 'alerts.acknowledged',
-            actor: userId,
-            brandId: null,
-            subject: params.alertId,
-            outcome: 'success',
-            detail: { alertId: params.alertId },
-          })
+        // The acknowledgement and its audit entry are one transaction.
+        const client = await deps.pool.connect()
+        let found: boolean
+        try {
+          await client.query('begin')
+          const result = await client.query<{ found: boolean; newly: boolean }>(
+            'select found, newly from app.ack_platform_alert($1, $2)',
+            [params.alertId, userId],
+          )
+          found = result.rows[0]?.found ?? false
+          if (result.rows[0]?.newly) {
+            await deps.audit.record(
+              {
+                action: 'alerts.acknowledged',
+                actor: userId,
+                brandId: null,
+                subject: params.alertId,
+                outcome: 'success',
+                detail: { alertId: params.alertId },
+              },
+              client,
+            )
+          }
+          await client.query('commit')
+        } catch (error) {
+          await client.query('rollback').catch(() => undefined)
+          throw error
+        } finally {
+          client.release()
         }
-        const now = await deps.pool.query<AlertRecord>(
-          'select * from app.list_platform_alerts() where id = $1',
-          [params.alertId],
-        )
+        if (!found) throw notFound()
+        const now = await deps.pool.query<AlertRecord>('select * from app.get_platform_alert($1)', [
+          params.alertId,
+        ])
         res.json(shape(now.rows[0] as AlertRecord))
       },
     ],

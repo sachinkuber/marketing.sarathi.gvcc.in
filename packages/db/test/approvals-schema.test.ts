@@ -350,11 +350,11 @@ describe('migration 0015 alert delivery', () => {
       'select app.raise_alert(null, 2::smallint, \'x\', \'{"ref":"r"}\') as id',
     )
     expect(again.rows[0]?.id).toBeNull()
-    expect((await app.query('select * from app.undelivered_alerts(10)')).rowCount).toBeGreaterThan(0)
+    expect((await app.query('select * from app.undelivered_alerts(10, now())')).rowCount).toBeGreaterThan(0)
     await expect(app.query("select app.raise_alert($1, 1::smallint, 'x', '{}')", [A])).rejects.toThrow(
       /own brand/,
     )
-    await expect(ownerView.query('select * from app.undelivered_alerts(1)')).rejects.toThrow(
+    await expect(ownerView.query('select * from app.undelivered_alerts(1, now())')).rejects.toThrow(
       /permission denied/,
     )
     await expect(ownerView.query('select app.platform_owner_ids()')).rejects.toThrow(/permission denied/)
@@ -375,8 +375,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0015 sits on top of 0014: both come off.
-      await runner({ ...base, direction: 'down', count: 2 })
+      // 0016 and 0015 sit on top of 0014: all three come off.
+      await runner({ ...base, direction: 'down', count: 3 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )

@@ -11,6 +11,7 @@ import { DoubleAlertChannel, DoubleMailer, ManualClock } from '../src/notify/dou
 import { deliverPending, enqueueNotification } from '../src/notify/notifications.ts'
 import type { NotifyDeps } from '../src/notify/ports.ts'
 import { approversOf, brandAdminsOf, emailOf, platformOwnersOf } from '../src/notify/recipients.ts'
+import { runNotifyTick } from '../src/notify/tick.ts'
 import { createJob, createRun } from '../src/jobs/service.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
@@ -193,7 +194,10 @@ describe('alert delivery', () => {
     })
     expect(first).toMatchObject({ created: true, delivered: false })
     expect((await alertRows())[0]).toMatchObject({ delivered_at: null, delivery_attempts: 1 })
+    clock.advance(2 * 60_000)
     expect(await retryAlerts(stack.appPool, deps, 10)).toBe(1)
+    // Both owners were already emailed: only the channel leg is sent again.
+    expect(mailer.sent).toHaveLength(2)
     expect((await alertRows())[0].delivered_at).not.toBeNull()
     expect(await retryAlerts(stack.appPool, deps, 10)).toBe(0)
   })
@@ -209,7 +213,10 @@ describe('alert delivery', () => {
     expect(result.delivered).toBe(false)
     expect(channel.sent).toHaveLength(1)
     mailer.confirm = true
+    clock.advance(2 * 60_000)
     expect(await retryAlerts(stack.appPool, deps, 10)).toBe(1)
+    // The channel leg was confirmed the first time and is not sent again.
+    expect(channel.sent).toHaveLength(1)
   })
 
   it('stays undelivered when the channel confirms but an email fails', async () => {
@@ -494,5 +501,145 @@ describe('reconciliation timer', () => {
     } finally {
       await own.close()
     }
+  })
+})
+
+describe('alert retry policy', () => {
+  const alert = (ref: string) =>
+    raiseAlert(stack.appPool, deps, { brandId: brandA, severity: 2, kind: 'dead_job', ref })
+  const MIN = 60_000
+
+  it('resends only the owner whose email failed', async () => {
+    mailer.failNext(1)
+    await alert('leg')
+    expect(mailer.sent).toHaveLength(1)
+    expect((await alertRows())[0].mailed_to).toHaveLength(1)
+    clock.advance(2 * MIN)
+    expect(await retryAlerts(stack.appPool, deps, 10)).toBe(1)
+    expect(mailer.sent).toHaveLength(2)
+    expect(new Set(mailer.sent.map((m) => m.to)).size).toBe(2)
+    expect(channel.sent).toHaveLength(1)
+  })
+
+  it('waits 2^attempts minutes (at most 60) between retries, by the controlled clock', async () => {
+    channel.failNext(99)
+    await alert('backoff')
+    // One attempt so far: due after 2 minutes.
+    clock.advance(1 * MIN)
+    expect(await retryAlerts(stack.appPool, deps, 10)).toBe(0)
+    expect(channel.attempts).toBe(1)
+    clock.advance(1 * MIN)
+    await retryAlerts(stack.appPool, deps, 10)
+    expect(channel.attempts).toBe(2)
+    // Two attempts: now 4 minutes.
+    clock.advance(3 * MIN)
+    await retryAlerts(stack.appPool, deps, 10)
+    expect(channel.attempts).toBe(2)
+    clock.advance(1 * MIN)
+    await retryAlerts(stack.appPool, deps, 10)
+    expect(channel.attempts).toBe(3)
+    // The wait is capped at 60 minutes.
+    await stack.db.admin.query('update app.alert set delivery_attempts = 9')
+    clock.advance(60 * MIN)
+    await retryAlerts(stack.appPool, deps, 10)
+    expect(channel.attempts).toBe(4)
+  })
+
+  it('stalls after 10 attempts, stops retrying and shows it in the listing', async () => {
+    channel.failNext(99)
+    await alert('stall')
+    for (let i = 0; i < 12; i += 1) {
+      clock.advance(61 * MIN)
+      await retryAlerts(stack.appPool, deps, 10)
+    }
+    const [row] = await alertRows()
+    expect(row).toMatchObject({
+      delivery_attempts: 10,
+      delivery_stalled: true,
+      delivery_issue: 'channel',
+      delivered_at: null,
+    })
+    expect(channel.attempts).toBe(10)
+    const listed = await viewer.request('GET', `/api/v1/brands/${brandA}/alerts`)
+    expect(listed.json.alerts[0]).toMatchObject({
+      delivered: false,
+      deliveryAttempts: 10,
+      deliveryStalled: true,
+      deliveryIssue: 'channel',
+    })
+  })
+
+  it('surfaces a missing platform owner as the issue and stalls the same way', async () => {
+    const saved = (await stack.db.admin.query('select * from app.platform_owner')).rows
+    await stack.db.admin.query('delete from app.platform_owner')
+    try {
+      await alert('noowner2')
+      expect((await alertRows())[0].delivery_issue).toBe('no_platform_owner')
+      for (let i = 0; i < 12; i += 1) {
+        clock.advance(61 * MIN)
+        await retryAlerts(stack.appPool, deps, 10)
+      }
+      expect((await alertRows())[0]).toMatchObject({ delivery_stalled: true, delivery_attempts: 10 })
+    } finally {
+      for (const r of saved) {
+        await stack.db.admin.query('insert into app.platform_owner (user_id, granted_at) values ($1, $2)', [
+          r.user_id,
+          r.granted_at,
+        ])
+      }
+    }
+  })
+
+  it('acknowledges an alert older than the newest 200 and answers with it', async () => {
+    await raiseAlert(stack.appPool, deps, { brandId: null, severity: 1, kind: 'old_one', ref: 'old' })
+    const id = (await alertRows('kind = $$old_one$$'))[0].id as string
+    for (let i = 0; i < 201; i += 1) {
+      await stack.db.admin.query(
+        "insert into app.alert (brand_id, severity, kind, detail) values (null, 3, 'filler', $1::jsonb)",
+        [JSON.stringify({ ref: `f${i}` })],
+      )
+    }
+    const ok = await owner.request('POST', `/api/v1/alerts/${id}/ack`, { body: {} })
+    expect(ok.status).toBe(200)
+    expect(ok.json.id).toBe(id)
+  })
+})
+
+describe('notify tick', () => {
+  it('runs every stage even when the first throws, naming the failure only', async () => {
+    await enqueue()
+    const broken = {
+      query: (text: string, ...rest: unknown[]) => {
+        if (String(text).includes('operational_findings'))
+          return Promise.reject(new Error('secret@example.test'))
+        return (stack.appPool.query as (...a: unknown[]) => unknown)(text, ...rest)
+      },
+      connect: () => stack.appPool.connect(),
+    } as unknown as NotifyDeps['pool']
+    const failed = await runNotifyTick({ ...deps, pool: broken })
+    expect(failed).toEqual(['findings'])
+    expect(mailer.sent).toHaveLength(1)
+    expect(logged.join('\n')).toContain('notify stage failed')
+    expect(logged.join('\n')).not.toContain('secret@example.test')
+  })
+
+  it('does not let a hung transport stall the tick, and stops starting sends over the budget', async () => {
+    // Nothing else for the tick to report (earlier tests left jobs and a model call behind).
+    await stack.db.admin.query('update app.job_input set finished_at = now() where finished_at is null')
+    await stack.db.admin.query("update app.model_call set status = 'failed' where status = 'unknown'")
+    await enqueue()
+    await enqueue()
+    mailer.hang = true
+    const slow = { ...deps, sendTimeoutMs: 300, tickBudgetMs: 250 }
+    const t0 = Date.now()
+    const failed = await runNotifyTick(slow)
+    expect(failed).toEqual([])
+    expect(Date.now() - t0).toBeLessThan(2000)
+    // Each hung send timed out and counted an attempt; the budget stopped further starts in the tick.
+    const rows = (await stack.db.admin.query('select attempts, state from app.notification')).rows
+    expect(rows.every((r) => r.state === 'queued')).toBe(true)
+    expect(rows.reduce((n, r) => n + r.attempts, 0)).toBe(1)
+    expect(mailer.attempts).toBe(1)
+    expect(logged.join('\n')).toContain('SendTimeout')
   })
 })
