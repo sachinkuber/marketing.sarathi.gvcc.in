@@ -10,6 +10,7 @@ import { registerBrandRoutes } from './routes/brands.ts'
 import { registerAlertRoutes } from './routes/alerts.ts'
 import type { NotifyDeps } from './notify/ports.ts'
 import { registerApprovalRoutes } from './routes/approvals.ts'
+import { registerApprovalSettingsRoutes } from './routes/approval-settings.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
@@ -84,6 +85,7 @@ export function createApi(
 
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
 
   if (deps.jobs) {

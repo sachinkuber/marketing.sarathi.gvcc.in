@@ -14,6 +14,7 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
+import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
 import type { NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
@@ -195,6 +196,22 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
       },
     ],
   })
+
+  // Reminders and escalation for open approval requests; the worker timer calls it. Counts only in the answer.
+  if (notify) {
+    table.add({
+      method: 'post',
+      path: '/worker/approvals/tick',
+      access: { kind: 'worker' },
+      summary:
+        'The worker timer sends due approval reminders and marks and escalates overdue requests; it never approves or changes a version',
+      handlers: [
+        async (_req, res) => {
+          res.json(await approvalsTick(notify.pool, notify))
+        },
+      ],
+    })
+  }
 
   table.add({
     method: 'post',
