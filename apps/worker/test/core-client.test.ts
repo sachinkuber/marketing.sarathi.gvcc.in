@@ -73,4 +73,34 @@ describe('the HTTP core client', () => {
       held: false,
     })
   })
+
+  it('reads an approvals tick reply and rejects a malformed one', async () => {
+    const ok = { reminded: 1, overdue: 2, escalated: 0, failedBrands: 0 }
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(ok), { status: 200 }))
+    expect(await httpCoreClient('http://core.test', 'secret').approvalsTick()).toEqual(ok)
+    for (const bad of [
+      { reminded: 1, overdue: 2, escalated: 0 },
+      { ...ok, overdue: -1 },
+      { ...ok, reminded: 1.5 },
+    ]) {
+      vi.stubGlobal('fetch', async () => new Response(JSON.stringify(bad), { status: 200 }))
+      await expect(httpCoreClient('http://core.test', 'secret').approvalsTick()).rejects.toThrow(
+        /unexpected reply/,
+      )
+    }
+  })
+
+  it('posts the approvals tick with the worker credential', async () => {
+    const seen: { url: string; method?: string; auth?: string }[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({ url, method: init.method, auth: (init.headers as Record<string, string>).authorization })
+      return new Response(JSON.stringify({ reminded: 0, overdue: 0, escalated: 0, failedBrands: 0 }), {
+        status: 200,
+      })
+    })
+    await httpCoreClient('http://core.test', 'secret').approvalsTick()
+    expect(seen).toEqual([
+      { url: 'http://core.test/api/v1/worker/approvals/tick', method: 'POST', auth: 'Worker secret' },
+    ])
+  })
 })

@@ -58,6 +58,8 @@ export interface CoreClient {
   reconcile(): Promise<{ marked: number }>
   // Of these failed job IDs, the ones the core has not yet marked dead.
   unmarkedDead(jobIds: string[]): Promise<string[]>
+  // The approvals timer: the core sends due reminders and marks and escalates overdue requests.
+  approvalsTick(): Promise<{ reminded: number; overdue: number; escalated: number; failedBrands: number }>
 }
 
 // What the core may answer. Extra fields are accepted (the core can grow); a missing or unknown required
@@ -88,6 +90,12 @@ export const replySchemas = {
   checkpoint: z.object({ costed: z.boolean() }),
   postResult: z.object({ status: z.enum(['applied', 'repeated', 'held']) }),
   reconcile: z.object({ marked: z.number().int().min(0) }),
+  approvalsTick: z.object({
+    reminded: z.number().int().min(0),
+    overdue: z.number().int().min(0),
+    escalated: z.number().int().min(0),
+    failedBrands: z.number().int().min(0),
+  }),
   unmarkedDead: z.object({ jobIds: z.array(z.string()) }),
 }
 
@@ -178,6 +186,10 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     async reconcile() {
       const reply = await call('POST', '/worker/reconcile', null, {})
       return parseReply(replySchemas.reconcile, reply, 'a reconciliation')
+    },
+    async approvalsTick() {
+      const reply = await call('POST', '/worker/approvals/tick', null, {})
+      return parseReply(replySchemas.approvalsTick, reply, 'an approvals tick')
     },
   }
 }
