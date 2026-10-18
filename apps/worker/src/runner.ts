@@ -60,6 +60,8 @@ export async function runJob(deps: RunnerDeps, job: { id: string; jobClass: JobC
   const started = await deps.core.startAttempt(job.id, deps.workerId)
   // Finished already (the core accepted the result and the worker died before completing the queue row).
   if (started.finished) return
+  // Held (by a kill switch or a hold): no attempt was made; stop and post nothing.
+  if ('outcome' in started) return
   const handler = deps.handlers[started.expectedResultType]
   if (!handler) throw new Error(`no handler for ${started.expectedResultType}`)
 

@@ -48,7 +48,7 @@ async function startedJob(existingRunId?: string): Promise<{
     jobId,
   ])
   const started = await startAttempt(jobs, jobId, 'w1')
-  if (started.finished) throw new Error('unexpected')
+  if (started.finished || 'outcome' in started) throw new Error('unexpected')
   const check = verifyAttemptToken(
     jobs.attemptTokenSecret,
     started.token,
@@ -151,7 +151,7 @@ describe('posting a result', () => {
     jobs.results.set('test.echo', echo)
     const { jobId, claims: old } = await startedJob()
     const started = await startAttempt(jobs, jobId, 'w2')
-    if (started.finished) throw new Error('unexpected')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
     const check = verifyAttemptToken(
       jobs.attemptTokenSecret,
       started.token,

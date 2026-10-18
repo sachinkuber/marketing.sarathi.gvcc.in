@@ -1,4 +1,5 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
+import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 
 export type KillScope = 'brand' | 'channel' | 'agent'
@@ -61,6 +62,14 @@ async function hold(
   return rows.map((r) => r.hold_brand_jobs)
 }
 
+// Set and release take the brand row FOR UPDATE first, so they run one at a time per brand (release reads the
+// remaining switches, which a concurrent set must not change underneath it), and job creation, which takes the
+// same row FOR SHARE (jobs/service.ts createJob), is ordered against them.
+async function lockBrand(client: PoolClient, brandId: string): Promise<void> {
+  const locked = await client.query('select id from app.brand where id = $1 for update', [brandId])
+  if (!locked.rows[0]) throw new AppError(404, 'not_found', 'There is nothing at this address.')
+}
+
 export async function listActive(pool: Pool, brandId: string): Promise<KillSwitch[]> {
   return withBrand(pool, brandId, async (client) => {
     const { rows } = await client.query<Row>(
@@ -81,6 +90,7 @@ export async function setSwitch(
   input: Input,
 ): Promise<{ switch: KillSwitch; held: number; created: boolean }> {
   return withBrand(pool, input.brandId, async (client) => {
+    await lockBrand(client, input.brandId)
     const inserted = await client.query<Row>(
       `insert into app.kill_switch (brand_id, scope, target, active, set_by)
        values ($1, $2, $3, true, $4)
@@ -94,7 +104,11 @@ export async function setSwitch(
           where brand_id = $1 and scope = $2 and target is not distinct from $3 and active`,
         [input.brandId, input.scope, input.target],
       )
-      return { switch: shape(existing.rows[0]!), held: 0, created: false }
+      // Under the brand lock a conflict means a committed active row; if it is somehow gone, ask for a retry
+      // rather than failing on a missing row.
+      const found = existing.rows[0]
+      if (!found) throw new AppError(409, 'conflict', 'The switch changed while it was being set. Try again.')
+      return { switch: shape(found), held: 0, created: false }
     }
     const held =
       input.scope === 'channel'
@@ -124,6 +138,7 @@ export async function releaseSwitch(
   input: Input,
 ): Promise<{ released: boolean; unheldJobIds: string[] }> {
   return withBrand(pool, input.brandId, async (client) => {
+    await lockBrand(client, input.brandId)
     const updated = await client.query<{ id: string }>(
       `update app.kill_switch set active = false, released_by = $4, released_at = now()
         where brand_id = $1 and scope = $2 and target is not distinct from $3 and active

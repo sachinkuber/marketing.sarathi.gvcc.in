@@ -28,7 +28,7 @@ export interface CoreClient {
   startAttempt(
     jobId: string,
     workerId: string,
-  ): Promise<StartedAttempt | { finished: true; outcome: unknown }>
+  ): Promise<StartedAttempt | { finished: true; outcome: unknown } | { finished: false; outcome: 'held' }>
   control(jobId: string, token: string): Promise<{ cancelRequested: boolean; held: boolean }>
   registerModelCall(
     jobId: string,
@@ -67,6 +67,7 @@ export const replySchemas = {
   control: z.object({ cancelRequested: z.boolean(), held: z.boolean() }),
   startAttempt: z.union([
     z.object({ finished: z.literal(true), outcome: z.unknown() }),
+    z.object({ finished: z.literal(false), outcome: z.literal('held') }),
     z.object({
       finished: z.literal(false),
       attemptId: z.string().min(1),

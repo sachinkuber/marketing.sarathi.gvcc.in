@@ -1,7 +1,7 @@
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createJob, createRun, registerModelCall, startAttempt } from '../src/jobs/service.ts'
+import { createJob, createRun, postResult, registerModelCall, startAttempt } from '../src/jobs/service.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
 import { verifyAttemptToken } from '../src/jobs/token.ts'
 import { releaseSwitch, setSwitch } from '../src/killswitch/service.ts'
@@ -146,7 +146,7 @@ describe('setting and releasing the kill switch over HTTP', () => {
       j1,
     ])
     const started = await startAttempt(jobs, j1, 'w1')
-    if (started.finished) throw new Error('unexpected')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
     const check = verifyAttemptToken(
       jobs.attemptTokenSecret,
       started.token,
@@ -365,5 +365,142 @@ describe('the kill switch service', () => {
     await setSwitch(stack.appPool, withHook, input)
     await releaseSwitch(stack.appPool, withHook, input)
     expect(seen).toEqual([[w]])
+  })
+})
+
+describe('a switch covers jobs created after it, and job start (spec 13)', () => {
+  const deps = () => ({ audit: stack.audit })
+  const claimsFor = async (jobId: string) => {
+    await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+      jobId,
+    ])
+    const started = await startAttempt(jobs, jobId, 'w1')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
+    const check = verifyAttemptToken(
+      jobs.attemptTokenSecret,
+      started.token,
+      Math.floor(jobs.now().getTime() / 1000),
+    )
+    if (!check.ok) throw new Error('token')
+    return check.claims
+  }
+
+  it('a job created after a brand switch is born held: model call and result answer held, flag persisted', async () => {
+    const b = await makeBrand()
+    await setSwitch(stack.appPool, deps(), {
+      brandId: b.brandId,
+      scope: 'brand',
+      target: null,
+      actor: b.adminId,
+    })
+    const job = await newJob(b.brandId, 'writer')
+    expect(await heldOf([job])).toEqual([true])
+    const calls = await stack.db.admin.query(
+      'select count(*)::int as n from app.model_call where job_id = $1',
+      [job],
+    )
+    expect(calls.rows[0].n).toBe(0)
+    const rel = await releaseSwitch(stack.appPool, deps(), {
+      brandId: b.brandId,
+      scope: 'brand',
+      target: null,
+      actor: b.adminId,
+    })
+    expect(rel.unheldJobIds).toEqual([job])
+  })
+
+  it('startAttempt on a held job answers held and creates no attempt', async () => {
+    const b = await makeBrand()
+    const job = await newJob(b.brandId, 'writer')
+    await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+      job,
+    ])
+    await setSwitch(stack.appPool, deps(), {
+      brandId: b.brandId,
+      scope: 'brand',
+      target: null,
+      actor: b.adminId,
+    })
+    expect(await startAttempt(jobs, job, 'w1')).toEqual({ finished: false, outcome: 'held' })
+    const n = await stack.db.admin.query('select count(*)::int as n from app.job_attempt where job_id = $1', [
+      job,
+    ])
+    expect(n.rows[0].n).toBe(0)
+  })
+
+  it('a switch set after the flag snapshot still holds: a derived hold is persisted, model call and result held', async () => {
+    const b = await makeBrand()
+    const job = await newJob(b.brandId, 'writer')
+    const claims = await claimsFor(job)
+    // A switch row inserted behind the service's back (as if its hold had missed this job).
+    await stack.db.admin.query(
+      `insert into app.kill_switch (brand_id, scope, target, active, set_by) values ($1, 'agent', 'writer', true, $2)`,
+      [b.brandId, b.adminId],
+    )
+    expect(await registerModelCall(jobs, claims, { step: 's', requestHash: 'h', model: 'm' })).toEqual({
+      outcome: 'held',
+    })
+    expect(await heldOf([job])).toEqual([true])
+    const posted = await postResult(jobs, claims, { type: 'test.echo', result: {} })
+    expect(posted).toEqual({ status: 'held' })
+  })
+
+  it('an agent switch covers only that agent’s later jobs', async () => {
+    const b = await makeBrand()
+    await setSwitch(stack.appPool, deps(), {
+      brandId: b.brandId,
+      scope: 'agent',
+      target: 'writer',
+      actor: b.adminId,
+    })
+    const w = await newJob(b.brandId, 'writer')
+    const d = await newJob(b.brandId, 'designer')
+    expect(await heldOf([w, d])).toEqual([true, false])
+  })
+
+  it('a channel switch covers no later job', async () => {
+    const b = await makeBrand()
+    await setSwitch(stack.appPool, deps(), {
+      brandId: b.brandId,
+      scope: 'channel',
+      target: 'x',
+      actor: b.adminId,
+    })
+    expect(await heldOf([await newJob(b.brandId, 'writer')])).toEqual([false])
+  })
+
+  it('a wrong code on release is audited like on set', async () => {
+    const b = await makeBrand()
+    stack.audit.entries.length = 0
+    const r = await b.admin.request('POST', path(b.brandId, '/release'), {
+      body: { scope: 'brand', code: '000000' },
+    })
+    expect(r.status).toBe(403)
+    expect(
+      stack.audit.entries.some((e) => e.action === 'auth.second_factor' && e.outcome === 'failure'),
+    ).toBe(true)
+  })
+
+  it('set racing with release and job creation ends consistent (best effort, repeated)', async () => {
+    for (let i = 0; i < 5; i += 1) {
+      const b = await makeBrand()
+      const input = { brandId: b.brandId, scope: 'brand' as const, target: null, actor: b.adminId }
+      await setSwitch(stack.appPool, deps(), input)
+      await Promise.all([
+        releaseSwitch(stack.appPool, deps(), input),
+        setSwitch(stack.appPool, deps(), input),
+        newJob(b.brandId, 'writer'),
+        newJob(b.brandId, 'writer'),
+      ])
+      const active = await stack.db.admin.query(
+        'select count(*)::int as n from app.kill_switch where brand_id = $1 and active',
+        [b.brandId],
+      )
+      const flags = await stack.db.admin.query('select held from app.job_control where brand_id = $1', [
+        b.brandId,
+      ])
+      if (active.rows[0].n > 0) expect(flags.rows.every((r) => r.held === true)).toBe(true)
+      else expect(flags.rows.every((r) => r.held === false)).toBe(true)
+    }
   })
 })

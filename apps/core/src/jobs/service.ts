@@ -55,8 +55,12 @@ export async function createJob(
   if (BACKPRESSURE.has(job.jobClass) && (await deps.queue.depth(job.jobClass)) >= deps.backlogLimit) {
     throw new AppError(503, 'queue_busy', 'Too much work is waiting. Try again shortly.')
   }
+  // Kill switch ordering (spec 13). The brand row is taken FOR SHARE here, and set/release take it FOR UPDATE
+  // (killswitch/service.ts). So a job created concurrently with a set either committed first (the set waits
+  // for this transaction, then its hold sees the job) or starts after the set committed (and sees the active
+  // switch just below). Share locks do not block each other, so job creation stays concurrent.
   const brand = await client.query<{ schedule_key: string }>(
-    'select schedule_key from app.brand where id = $1',
+    'select schedule_key from app.brand where id = $1 for share',
     [brandId],
   )
   const scheduleKey = brand.rows[0]?.schedule_key
@@ -67,7 +71,19 @@ export async function createJob(
      values ($1, $2, $3, $4, $5::jsonb, $6)`,
     [jobId, brandId, job.runId, job.jobClass, JSON.stringify(job.input), job.expectedResultType],
   )
-  await client.query('insert into app.job_control (job_id, brand_id) values ($1, $2)', [jobId, brandId])
+  // Born held when an active kill switch covers the brand or the run's agent, so release finds it by its flag.
+  const covered = await client.query<{ covered: boolean }>(
+    `select exists (
+        select 1 from app.kill_switch k, app.run r
+         where r.id = $2 and k.brand_id = $1 and k.active
+           and (k.scope = 'brand' or (k.scope = 'agent' and k.target = r.agent))) as covered`,
+    [brandId, job.runId],
+  )
+  await client.query('insert into app.job_control (job_id, brand_id, held) values ($1, $2, $3)', [
+    jobId,
+    brandId,
+    covered.rows[0]?.covered ?? false,
+  ])
   await deps.queue.send(client, { jobId, jobClass: job.jobClass, scheduleKey })
   return jobId
 }
@@ -86,12 +102,17 @@ export interface FinishedJob {
   finished: true
   outcome: unknown
 }
+// A held job (by its flag or an active kill switch) is not started: no attempt is created, the worker stops.
+export interface HeldJob {
+  finished: false
+  outcome: 'held'
+}
 
 export async function startAttempt(
   deps: JobsDeps,
   jobId: string,
   workerId: string,
-): Promise<StartedAttempt | FinishedJob> {
+): Promise<StartedAttempt | FinishedJob | HeldJob> {
   const found = await deps.pool.query<{ brand: string | null }>('select app.job_brand($1) as brand', [jobId])
   const brandId = found.rows[0]?.brand
   if (!brandId) throw new AppError(404, 'job_not_found', 'No such job.')
@@ -115,6 +136,9 @@ export async function startAttempt(
     // A job already finished (the worker crashed after the core accepted the result): tell it so, and the
     // worker completes the queue row. No new attempt.
     if (row.finished_at) return { finished: true as const, outcome: row.outcome }
+
+    // "Workers check it before every job" (spec 13): a held job gets no attempt.
+    if ((await readControl(client, jobId)).held) return { finished: false as const, outcome: 'held' as const }
 
     // The queue's own record, not the worker's word: the job must be active.
     if ((await deps.queue.state(row.class, jobId)) !== 'active') {
@@ -209,16 +233,35 @@ export async function requireCurrentAttempt(
   throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
 }
 
+// The cancel flag and whether the job is held. Held is the job's own flag OR an active kill switch that covers
+// it (brand scope, or agent scope naming the run's agent; channel scope covers no job). When a switch holds a
+// job whose flag is still false, the flag is set here in the same transaction, so the flag always tells the
+// truth and a release, which works from flagged jobs, finds it.
 export async function readControl(
   client: PoolClient,
   jobId: string,
 ): Promise<{ cancelRequested: boolean; held: boolean }> {
-  const { rows } = await client.query<{ cancel_requested: boolean; held: boolean }>(
-    'select cancel_requested, held from app.job_control where job_id = $1',
+  const { rows } = await client.query<{ cancel_requested: boolean; held: boolean; covered: boolean }>(
+    `select c.cancel_requested, c.held,
+            exists (select 1 from app.kill_switch k
+                     where k.brand_id = c.brand_id and k.active
+                       and (k.scope = 'brand' or (k.scope = 'agent' and k.target = r.agent))) as covered
+       from app.job_control c
+       left join app.job_input i on i.job_id = c.job_id
+       left join app.run r on r.id = i.run_id
+      where c.job_id = $1`,
     [jobId],
   )
   const row = rows[0]
-  return { cancelRequested: row?.cancel_requested ?? false, held: row?.held ?? false }
+  if (row && row.covered && !row.held) {
+    await client.query('update app.job_control set held = true, updated_at = now() where job_id = $1', [
+      jobId,
+    ])
+  }
+  return {
+    cancelRequested: row?.cancel_requested ?? false,
+    held: (row?.held ?? false) || (row?.covered ?? false),
+  }
 }
 
 export interface RegisterInput {

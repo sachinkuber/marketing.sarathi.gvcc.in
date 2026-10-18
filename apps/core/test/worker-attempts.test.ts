@@ -252,7 +252,7 @@ describe('the attempt must be the current one when it acts', () => {
   async function started(jobId: string): Promise<AttemptClaims> {
     await markActive(jobId)
     const result = await startAttempt(jobs, jobId, 'w1')
-    if (result.finished) throw new Error('unexpected')
+    if (result.finished || 'outcome' in result) throw new Error('unexpected')
     const checked = verifyAttemptToken(jobs.attemptTokenSecret, result.token, Math.floor(Date.now() / 1000))
     if (!checked.ok) throw new Error('token')
     return checked.claims
