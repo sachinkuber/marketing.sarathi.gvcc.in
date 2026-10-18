@@ -34,9 +34,10 @@ export function releaseHeldJobs(
 ): (client: PoolClient, unheldJobIds: string[]) => Promise<void> {
   return async (client, unheldJobIds) => {
     if (unheldJobIds.length === 0) return
-    // Every freed job's input row is locked first, in id order: the engine's lock order (job_input, then run)
-    // holds for the whole release, and an attempt start or a result post for one of these jobs waits for the
-    // release to commit, then sees the job free and its current queue id.
+    // releaseSwitch already locked these input rows, in id order, before hold_brand_jobs touched job_control
+    // (the engine's lock order is job_input, then run, then job_control). Taking them again here is a no-op
+    // that reads them; an attempt start or a result post for one of these jobs waits for the release to
+    // commit, then sees the job free and its current queue id.
     const { rows } = await client.query<Freed>(
       `select i.job_id, i.brand_id, i.run_id, i.class, i.held_result, i.finished_at, c.cancel_requested
          from app.job_input i join app.job_control c on c.job_id = i.job_id
@@ -67,12 +68,15 @@ export function releaseHeldJobs(
             brandId: job.brand_id,
             subject: job.job_id,
             outcome: 'success',
-            detail: { jobId: job.job_id, reason: discarded },
+            detail: { jobId: job.job_id, ...discarded },
           },
           client,
         )
       }
       if (job.cancel_requested) continue
+      // Known limitation: release during an in-flight call can cost one duplicate model call; the proper fix is
+      // the worker ending its attempt when it stops on held. (An attempt still running when its job is freed
+      // here is superseded by the new copy's attempt, whose model call is flagged possible_duplicate.)
       const queueId = randomUUID()
       await client.query('update app.job_control set queue_id = $2, updated_at = now() where job_id = $1', [
         job.job_id,
@@ -94,7 +98,7 @@ async function consumeHeldResult(
   client: PoolClient,
   deps: Pick<JobsDeps, 'results'>,
   job: Freed,
-): Promise<'stale' | 'not_applied' | null> {
+): Promise<{ reason: 'stale' | 'not_applied'; error?: string } | null> {
   const held = job.held_result!
   const latest = await client.query<{ id: string; state: string }>(
     'select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1',
@@ -109,7 +113,7 @@ async function consumeHeldResult(
     !job.cancel_requested
   if (!current) {
     await clearHeld(client, job.job_id)
-    return 'stale'
+    return { reason: 'stale' }
   }
   // A handler that throws must not make the switch impossible to release: its writes are rolled back to
   // here, the result is discarded and the job runs again (its paid-for steps are checkpointed).
@@ -124,9 +128,21 @@ async function consumeHeldResult(
     })
     await client.query('release savepoint held_result')
     return null
-  } catch {
+  } catch (error) {
     await client.query('rollback to savepoint held_result')
     await clearHeld(client, job.job_id)
-    return 'not_applied'
+    return { reason: 'not_applied', error: errorName(error) }
   }
+}
+
+// The error's code (an AppError's or the database's) or its class name; never its message, which may carry
+// business content into the audit log.
+function errorName(error: unknown): string {
+  if (error !== null && typeof error === 'object') {
+    const code = (error as { code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code.slice(0, 100)
+    const name = (error as { name?: unknown }).name
+    if (typeof name === 'string' && name.length > 0) return name.slice(0, 100)
+  }
+  return 'unknown'
 }

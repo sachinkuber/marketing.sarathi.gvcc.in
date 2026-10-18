@@ -6,6 +6,7 @@ import { httpCoreClient } from '../../worker/src/core-client.ts'
 import { startWorker } from '../../worker/src/main.ts'
 import type { ModelClient } from '../../worker/src/model.ts'
 import type { JobHandler } from '../../worker/src/runner.ts'
+import { markDead, requeueJob } from '../src/jobs/dead.ts'
 import { createJob, createRun, type JobsDeps } from '../src/jobs/service.ts'
 import { setSwitch } from '../src/killswitch/service.ts'
 import {
@@ -63,6 +64,11 @@ const oneStep: JobHandler = async (ctx) => {
 // The result handler a real agent would register: it would create a content version. Here it records the
 // call, so the tests can show it was not called while the job was held, and called once after release.
 const applied: string[] = []
+// Jobs whose result handler throws (the release must survive it).
+const failing = new Set<string>()
+class HandlerBoom extends Error {
+  override name = 'HandlerBoom'
+}
 
 let worker: { stop(): Promise<void> } | null = null
 async function startTestWorker(id: string): Promise<void> {
@@ -90,6 +96,7 @@ beforeAll(async () => {
   jobs = stack.jobs
   definitionId = await seedDefinition(stack.db)
   jobs.results.set(RESULT_TYPE, async (_client, ctx) => {
+    if (failing.has(ctx.jobId)) throw new HandlerBoom('content that must not reach the audit log')
     applied.push(ctx.jobId)
     return { jobId: ctx.jobId }
   })
@@ -191,6 +198,17 @@ async function brandEffects(
     [brandId],
   )
   return rows[0]!
+}
+
+async function heldFlag(jobId: string): Promise<boolean> {
+  const { rows } = await stack.db.admin.query('select held from app.job_control where job_id = $1', [jobId])
+  return rows[0]!.held as boolean
+}
+
+// What the library does after the last retry: the job's queue row is failed (as in jobs-dead.test.ts).
+async function dieInQueue(jobId: string): Promise<void> {
+  await stack.db.admin.query(`update pgboss.job set state = 'failed' where id = $1`, [jobId])
+  await markDead(jobs, jobId)
 }
 
 describe('test 30: the kill switch set while jobs wait', () => {
@@ -318,6 +336,35 @@ describe('test 31: the kill switch set while a job is running', () => {
     expect(applied.filter((id) => id === jobId)).toHaveLength(1)
   }, 240_000)
 
+  it('a held result whose handler throws: the release succeeds, the result is discarded and audited with the error name, and the job is sent again', async () => {
+    const b = await makeBrand()
+    const jobId = await runIntoHold(b)
+    failing.add(jobId)
+
+    expect(await release(b)).toEqual({ released: true, unheld: 1 })
+    expect(applied).not.toContain(jobId)
+    const row = await stack.db.admin.query(
+      'select held_result, finished_at from app.job_input where job_id = $1',
+      [jobId],
+    )
+    expect(row.rows[0]).toEqual({ held_result: null, finished_at: null })
+    const discarded = stack.audit.entries.filter(
+      (e) => e.action === 'jobs.held_result_discarded' && e.subject === jobId,
+    )
+    expect(discarded).toHaveLength(1)
+    expect(discarded[0]!.detail).toEqual({ jobId, reason: 'not_applied', error: 'HandlerBoom' })
+    expect(JSON.stringify(discarded[0]!.detail)).not.toContain('must not reach')
+    // What the code does: the job is sent again under a new queue id, like any freed job.
+    expect(await queueRows(jobId)).toEqual(['completed', 'created'])
+
+    // Once the handler accepts it, the new copy runs: its step is checkpointed, so no second model call.
+    failing.delete(jobId)
+    await startTestWorker('w31-boom')
+    await until(async () => (await finished([jobId])) === 1)
+    expect(applied.filter((id) => id === jobId)).toHaveLength(1)
+    expect(modelCalls.get(jobId)).toBe(1)
+  }, 240_000)
+
   it('discards a held result whose attempt was ended, and runs the job again once instead', async () => {
     const b = await makeBrand()
     const jobId = await runIntoHold(b)
@@ -344,5 +391,94 @@ describe('test 31: the kill switch set while a job is running', () => {
     // The step was checkpointed by the held attempt, so the new attempt makes no second model call.
     expect(modelCalls.get(jobId)).toBe(1)
     expect(await queueRows(jobId)).toEqual(['completed', 'completed'])
+  }, 240_000)
+})
+
+describe('release and the other paths of the work engine', () => {
+  it('a job that died while held runs after release and requeue; requeued under an active switch it is held again', async () => {
+    const b = await makeBrand()
+    // Dies on its last try while the switch is on: a release skips dead jobs, so it keeps its held flag.
+    const j1 = await newJob(b.brandId)
+    expect((await setBrandSwitch(b)).held).toBe(1)
+    await dieInQueue(j1)
+    expect(await release(b)).toEqual({ released: true, unheld: 0 })
+    expect(await heldFlag(j1)).toBe(true)
+    // The requeue clears the flag; no switch is active, so the job runs and finishes.
+    await requeueJob(jobs, b.brandId, j1, b.adminId)
+    expect(await heldFlag(j1)).toBe(false)
+    await startTestWorker('w-dead-1')
+    await until(async () => (await finished([j1])) === 1)
+    expect(modelCalls.get(j1)).toBe(1)
+    expect(applied.filter((id) => id === j1)).toHaveLength(1)
+    await stopTestWorker()
+
+    // Requeued while the switch is still on: the start re-derives the hold from the active switch.
+    const j2 = await newJob(b.brandId)
+    expect((await setBrandSwitch(b)).held).toBe(1)
+    await dieInQueue(j2)
+    await requeueJob(jobs, b.brandId, j2, b.adminId)
+    await startTestWorker('w-dead-2')
+    await until(async () => (await heldFlag(j2)) && (await queueRows(j2)).join() === 'completed')
+    expect(modelCalls.get(j2)).toBeUndefined()
+    expect(await finished([j2])).toBe(0)
+    // The switch's release then sends it, and it runs once.
+    expect(await release(b)).toEqual({ released: true, unheld: 1 })
+    await until(async () => (await finished([j2])) === 1)
+    expect(modelCalls.get(j2)).toBe(1)
+    expect(applied.filter((id) => id === j2)).toHaveLength(1)
+  }, 240_000)
+
+  it('a release and a dead mark on the same job do not deadlock: both take job_input first', async () => {
+    const b = await makeBrand()
+    const jobId = await newJob(b.brandId)
+    expect((await setBrandSwitch(b)).held).toBe(1)
+    // A transaction shaped like markDead: the job's input row first, then its control row.
+    const other = await stack.db.admin.connect()
+    try {
+      await other.query('begin')
+      await other.query('select 1 from app.job_input where job_id = $1 for update', [jobId])
+      const releasing = release(b)
+      // The release is now waiting for the input row. It must not hold the control row while it waits.
+      await until(async () => {
+        const { rows } = await stack.db.admin.query(
+          `select count(*)::int as n from pg_stat_activity
+            where datname = current_database() and wait_event_type = 'Lock'`,
+        )
+        return rows[0].n > 0
+      }, 20_000)
+      await other.query('update app.job_control set updated_at = now() where job_id = $1', [jobId])
+      await other.query('commit')
+      expect(await releasing).toEqual({ released: true, unheld: 1 })
+    } finally {
+      other.release()
+    }
+    expect(await heldFlag(jobId)).toBe(false)
+  }, 60_000)
+
+  it('release during an in-flight model call: applied once, the second call is flagged a possible duplicate (known limitation)', async () => {
+    const b = await makeBrand()
+    let entered!: () => void
+    const inCall = new Promise<void>((resolve) => (entered = resolve))
+    let open!: () => void
+    gate = { entered, release: new Promise<void>((resolve) => (open = resolve)) }
+    const jobId = await newJob(b.brandId)
+    await startTestWorker('w-inflight')
+    await inCall
+    expect((await setBrandSwitch(b)).held).toBe(1)
+    // Released while the first call is still paused: the job is sent again, and the new copy's attempt
+    // supersedes the paused one and sends the same step again.
+    expect(await release(b)).toEqual({ released: true, unheld: 1 })
+    await until(async () => modelCalls.get(jobId) === 2)
+    open()
+    await until(async () => (await finished([jobId])) === 1)
+    // The paused attempt's checkpoint is refused; its queue copy is retried and turned away as superseded.
+    await until(async () => (await queueRows(jobId)).every((x) => x === 'completed'), 90_000)
+    expect(applied.filter((id) => id === jobId)).toHaveLength(1)
+    expect(modelCalls.get(jobId)).toBe(2)
+    const calls = await stack.db.admin.query<{ possible_duplicate: boolean }>(
+      'select possible_duplicate from app.model_call where job_id = $1 order by started_at',
+      [jobId],
+    )
+    expect(calls.rows.map((r) => r.possible_duplicate)).toEqual([false, true])
   }, 240_000)
 })

@@ -150,6 +150,16 @@ export async function releaseSwitch(
 
     let unheld: string[] = []
     if (input.scope !== 'channel') {
+      // The engine's lock order is job_input first, then job_control (markDead, startAttempt, a result post).
+      // hold_brand_jobs updates job_control, and the release hook then locks job_input; so the input rows of
+      // every job this release may free are locked here first, in id order, before any job_control row.
+      await client.query(
+        `select i.job_id from app.job_input i join app.job_control c on c.job_id = i.job_id
+          where i.brand_id = $1 and i.finished_at is null and c.dead_at is null and c.held
+          order by i.job_id
+          for update of i`,
+        [input.brandId],
+      )
       const remaining = await client.query<{ scope: KillScope; target: string | null }>(
         `select scope, target from app.kill_switch where brand_id = $1 and active and scope in ('brand', 'agent')`,
         [input.brandId],

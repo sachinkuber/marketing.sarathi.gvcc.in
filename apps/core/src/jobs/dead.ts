@@ -161,6 +161,13 @@ export async function requeueJob(
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
     const { jobClass, runId, queueId } = await requireDead(client, deps, jobId)
+    // A job that died while a kill switch held it keeps its held flag (a release skips dead jobs), and with
+    // it set the job would never start again. The flag is cleared here; the next start re-derives it from any
+    // switch still active (readControl), so a job requeued under an active switch is held again, and the
+    // switch's release then sends it.
+    await client.query('update app.job_control set held = false, updated_at = now() where job_id = $1', [
+      jobId,
+    ])
     await deps.queue.requeue(jobClass, jobId, queueId)
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
