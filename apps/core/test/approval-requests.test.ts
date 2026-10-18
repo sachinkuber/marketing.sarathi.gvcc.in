@@ -147,14 +147,16 @@ describe('reminders and escalation (test 20)', () => {
     const w = await waiting(b.brandId)
     clock.advance(96 * H)
     // Late ticks catch up one reminder each; the gap to overdue then starts from the last of them.
-    for (let i = 0; i < 3; i += 1) expect((await runTick()).reminded).toBe(1)
-    clock.advance(DAY)
-    expect(await runTick()).toEqual({ reminded: 0, overdue: 1, escalated: 1 })
+    for (let i = 0; i < 3; i += 1) {
+      expect((await runTick()).reminded).toBe(1)
+      clock.advance(DAY)
+    }
+    expect(await runTick()).toEqual({ failedBrands: 0, reminded: 0, overdue: 1, escalated: 1 })
     const afterAdmin = await requestRow(w.requestId)
     expect(afterAdmin.escalated_to).toBe(b.adminId)
     clock.advance(DAY)
     const out = await runTick()
-    expect(out).toEqual({ reminded: 0, overdue: 0, escalated: 1 })
+    expect(out).toEqual({ failedBrands: 0, reminded: 0, overdue: 0, escalated: 1 })
     const owner = (
       await stack.db.admin.query(`select u.id from auth."user" u where u.email = 'owner@example.test'`)
     ).rows[0].id as string
@@ -162,7 +164,7 @@ describe('reminders and escalation (test 20)', () => {
     expect(row.escalated_to).toBe(owner)
     expect(await notified(w.versionId, 'approval_overdue')).toEqual([b.adminId, owner])
     clock.advance(30 * DAY)
-    expect(await runTick()).toEqual({ reminded: 0, overdue: 0, escalated: 0 })
+    expect(await runTick()).toEqual({ failedBrands: 0, reminded: 0, overdue: 0, escalated: 0 })
   })
 
   it('marks overdue only, with no escalation, when the only approver is a platform owner', async () => {
@@ -232,7 +234,7 @@ describe('silence is not approval (test 21)', () => {
       clock.now(),
     ])
     clock.advance(10 * DAY)
-    expect(await runTick()).toEqual({ reminded: 0, overdue: 0, escalated: 0 })
+    expect(await runTick()).toEqual({ failedBrands: 0, reminded: 0, overdue: 0, escalated: 0 })
   })
 })
 
@@ -260,16 +262,54 @@ describe('idempotence', () => {
     expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(1)
   })
 
-  it('sends one reminder per tick, not a burst, after a long outage', async () => {
+  it('keeps reminders one gap apart after a long outage, not back to back', async () => {
     const b = await makeBrand()
     const w = await waiting(b.brandId)
     clock.advance(10 * DAY)
     expect((await runTick()).reminded).toBe(1)
-    expect((await requestRow(w.requestId)).reminders_sent).toBe(1)
-    expect((await runTick()).reminded).toBe(1)
-    expect((await runTick()).reminded).toBe(1)
     expect((await runTick()).reminded).toBe(0)
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(3)
+    clock.advance(60_000)
+    expect((await runTick()).reminded).toBe(0)
+    clock.advance(DAY - 60_000)
+    expect((await runTick()).reminded).toBe(1)
+    expect((await requestRow(w.requestId)).reminders_sent).toBe(2)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
+  })
+})
+
+describe('one failing brand', () => {
+  it('is rolled back, counted and logged by name, and the other brands still get their reminders', async () => {
+    const bad = await makeBrand()
+    const good = await makeBrand()
+    const wBad = await waiting(bad.brandId)
+    const wGood = await waiting(good.brandId)
+    await stack.db.admin.query(`
+      create function app.test_fail_notification() returns trigger language plpgsql as $$
+      begin
+        if new.brand_id = '${bad.brandId}' then raise exception 'boom secret-detail'; end if;
+        return new;
+      end $$`)
+    await stack.db.admin.query(
+      'create trigger test_fail before insert on app.notification for each row execute function app.test_fail_notification()',
+    )
+    const logged: unknown[] = []
+    const logger = { warn: () => undefined, error: (o: unknown) => void logged.push(o) }
+    try {
+      clock.advance(24 * H)
+      const out = await tick(stack.appPool, { clock, audit: stack.audit, logger })
+      expect(out).toEqual({ failedBrands: 1, reminded: 1, overdue: 0, escalated: 0 })
+    } finally {
+      await stack.db.admin.query('drop trigger test_fail on app.notification')
+      await stack.db.admin.query('drop function app.test_fail_notification()')
+    }
+    expect(await notified(wGood.versionId, 'approval_reminder')).toEqual([good.approverId])
+    expect(await notified(wBad.versionId, 'approval_reminder')).toEqual([])
+    expect((await requestRow(wBad.requestId)).reminders_sent).toBe(0)
+    expect(logged).toHaveLength(1)
+    expect(JSON.stringify(logged)).not.toContain('secret-detail')
+    expect(logged[0]).toMatchObject({ brand: bad.brandId })
+    // Once the fault is gone the brand catches up on the next tick.
+    expect((await runTick()).reminded).toBe(1)
   })
 })
 
@@ -292,7 +332,7 @@ describe('approval settings (test 23)', () => {
     expect((await runTick()).reminded).toBe(1)
     clock.advance(24 * H)
     // No third reminder: the request is overdue one gap after the second instead.
-    expect(await runTick()).toEqual({ reminded: 0, overdue: 1, escalated: 1 })
+    expect(await runTick()).toEqual({ failedBrands: 0, reminded: 0, overdue: 1, escalated: 1 })
     expect((await requestRow(w.requestId)).reminders_sent).toBe(2)
     expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
   })
@@ -371,7 +411,7 @@ describe('worker route', () => {
       body: '{}',
     })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ reminded: 1, overdue: 0, escalated: 0 })
+    expect(await res.json()).toEqual({ failedBrands: 0, reminded: 1, overdue: 0, escalated: 0 })
     expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(1)
     const anonymous = await fetch(`${stack.server.url}/api/v1/worker/approvals/tick`, { method: 'POST' })
     expect(anonymous.status).toBeGreaterThanOrEqual(401)
