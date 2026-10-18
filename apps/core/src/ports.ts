@@ -6,9 +6,15 @@ export interface MailMessage {
   text: string
 }
 
-// Email delivery. The real implementation (Nodemailer) arrives with notification delivery, package 11.
+// The provider's confirmation that it took a message.
+export interface SendReceipt {
+  providerId: string
+}
+
+// Email delivery. The real implementation (Nodemailer) is an owner item (A11). A send that returns has been
+// confirmed by the provider; one that cannot confirm throws.
 export interface Mailer {
-  send(message: MailMessage): Promise<void>
+  send(message: MailMessage): Promise<SendReceipt>
 }
 
 export interface AuditEntry {

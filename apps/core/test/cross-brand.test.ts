@@ -13,6 +13,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   let admin: TestClient
   // A real content item in each brand, so a route that looks the item up is not answered 404 for a made-up id.
   const items = new Map<string, string>()
+  // Likewise a real alert in each brand, for the acknowledgement route.
+  const alerts = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -32,6 +34,11 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         [brand],
       )
       items.set(brand, made.rows[0].id as string)
+      const alert = await stack.db.admin.query(
+        `insert into app.alert (brand_id, severity, kind) values ($1, 3, 'test') returning id`,
+        [brand],
+      )
+      alerts.set(brand, alert.rows[0].id as string)
     }
   })
   afterAll(async () => stack?.close())
@@ -40,6 +47,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
     path
       .replace(':brandId', brand)
       .replace(':itemId', items.get(brand) ?? SOME_USER)
+      .replace(':alertId', alerts.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {

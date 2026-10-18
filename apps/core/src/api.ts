@@ -7,6 +7,8 @@ import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
+import { registerAlertRoutes } from './routes/alerts.ts'
+import type { NotifyDeps } from './notify/ports.ts'
 import { registerApprovalRoutes } from './routes/approvals.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
@@ -27,6 +29,8 @@ export interface ApiDeps {
   onMailFailure?: (error: unknown) => void
   // The work engine; unset, no worker route is declared.
   jobs?: JobsDeps
+  // Notification and alert delivery; the reconciliation timer route runs it.
+  notify?: NotifyDeps
 }
 
 export interface ApiContext {
@@ -80,9 +84,10 @@ export function createApi(
 
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
 
   if (deps.jobs) {
-    registerWorkerRoutes(table, deps.jobs)
+    registerWorkerRoutes(table, deps.jobs, deps.notify)
     registerJobRoutes(table, deps.jobs)
   }
 

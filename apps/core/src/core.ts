@@ -12,6 +12,8 @@ import { createAuth, type Auth } from './auth/options.ts'
 import type { Config } from './config.ts'
 import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
+import { UnconfiguredAlertChannel } from './adapters.ts'
+import { systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import type { JobsDeps } from './jobs/service.ts'
 
@@ -24,6 +26,10 @@ export interface CoreDeps {
   audit: AuditSink
   // The work engine's dependencies. Unset: the service has no queue (tests that never create jobs).
   jobs?: JobsDeps
+  // The second alert channel; unset (production until the real one exists) it is one that always fails.
+  alertChannel?: AlertChannel
+  // Unset: the system clock.
+  clock?: Clock
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']
@@ -65,6 +71,14 @@ export function buildCore(deps: CoreDeps): {
       return session?.session.id ?? null
     },
   })
+  const notify: NotifyDeps = {
+    pool: deps.appPool,
+    mailer: deps.mailer,
+    channel: deps.alertChannel ?? new UnconfiguredAlertChannel(),
+    clock: deps.clock ?? systemClock,
+    audit: deps.audit,
+    logger: deps.logger,
+  }
   const { router: api, table: routes } = createApi(
     {
       auth,
@@ -76,6 +90,7 @@ export function buildCore(deps: CoreDeps): {
       origin: config.publicOrigin,
       onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
       jobs: deps.jobs,
+      notify,
     },
     deps.extraRoutes,
   )

@@ -340,6 +340,28 @@ describe('job_control.queue_id', () => {
   })
 })
 
+describe('migration 0015 alert delivery', () => {
+  it('lets the app role use the delivery functions and nobody else', async () => {
+    const id = await app.query<{ id: string | null }>(
+      'select app.raise_alert(null, 2::smallint, \'x\', \'{"ref":"r"}\') as id',
+    )
+    expect(id.rows[0]?.id).toMatch(/^[0-9a-f-]{36}$/)
+    const again = await app.query<{ id: string | null }>(
+      'select app.raise_alert(null, 2::smallint, \'x\', \'{"ref":"r"}\') as id',
+    )
+    expect(again.rows[0]?.id).toBeNull()
+    expect((await app.query('select * from app.undelivered_alerts(10)')).rowCount).toBeGreaterThan(0)
+    await expect(app.query("select app.raise_alert($1, 1::smallint, 'x', '{}')", [A])).rejects.toThrow(
+      /own brand/,
+    )
+    await expect(ownerView.query('select * from app.undelivered_alerts(1)')).rejects.toThrow(
+      /permission denied/,
+    )
+    await expect(ownerView.query('select app.platform_owner_ids()')).rejects.toThrow(/permission denied/)
+    await db.admin.query("delete from app.alert where kind = 'x'")
+  })
+})
+
 describe('migration 0014 down and up', () => {
   it('can be undone and applied again', async () => {
     const own = await createTestDatabase()
@@ -353,7 +375,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      await runner({ ...base, direction: 'down', count: 1 })
+      // 0015 sits on top of 0014: both come off.
+      await runner({ ...base, direction: 'down', count: 2 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )

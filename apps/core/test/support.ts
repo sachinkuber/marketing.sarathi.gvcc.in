@@ -17,6 +17,7 @@ import { createUserWithPassword } from '../src/auth/users.ts'
 import type { Role } from '../src/auth/session.ts'
 import type { AuditSink, MailMessage } from '../src/ports.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
+import type { AlertChannel, Clock } from '../src/notify/ports.ts'
 import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 
 export interface TestServer {
@@ -76,6 +77,9 @@ export async function createStack(
     withQueue?: boolean
     // The class backlog at which production and bulk jobs are refused (default 2000).
     backlogLimit?: number
+    // The second alert channel and the clock the core's delivery uses (default: always failing, system).
+    alertChannel?: AlertChannel
+    clock?: Clock
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
@@ -127,6 +131,8 @@ export async function createStack(
     mailer,
     audit: sink,
     jobs: jobs ?? undefined,
+    alertChannel: options.alertChannel,
+    clock: options.clock,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
     extraRoutes: options.extraRoutes,
