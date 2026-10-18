@@ -189,7 +189,7 @@ describe('posting a result', () => {
       [jobId],
     )
     expect(job.rows[0]).toMatchObject({
-      held_result: { type: 'test.echo', result: { held: true } },
+      held_result: { type: 'test.echo', result: { held: true }, attemptId: claims.attemptId },
       finished_at: null,
     })
   })

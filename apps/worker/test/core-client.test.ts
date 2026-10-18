@@ -28,6 +28,10 @@ describe('the replies the worker accepts from the core', () => {
 
   it('accepts both shapes of a start and rejects a malformed one', () => {
     expect(replySchemas.startAttempt.safeParse({ finished: true, outcome: { a: 1 } }).success).toBe(true)
+    for (const outcome of ['held', 'superseded']) {
+      expect(replySchemas.startAttempt.safeParse({ finished: false, outcome }).success).toBe(true)
+    }
+    expect(replySchemas.startAttempt.safeParse({ finished: false, outcome: 'other' }).success).toBe(false)
     const started = {
       finished: false,
       attemptId: 'a',

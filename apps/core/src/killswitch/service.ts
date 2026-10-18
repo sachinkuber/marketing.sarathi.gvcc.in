@@ -15,8 +15,8 @@ export interface KillSwitch {
 
 export interface KillSwitchDeps {
   audit: AuditSink
-  // Task 8 (release): called inside the release transaction with the ids of the jobs whose held flag was
-  // cleared, so the queue entries that already completed while the job was held can be put back to ready.
+  // Called inside the release transaction with the ids of the jobs whose held flag was cleared: the service
+  // passes releaseHeldJobs (killswitch/release.ts), which applies held results and sends the jobs again.
   // The default does nothing.
   afterRelease?: (client: PoolClient, unheldJobIds: string[]) => Promise<void>
 }
@@ -130,8 +130,8 @@ export async function setSwitch(
 }
 
 // Releasing returns the jobs to ready, except those another active switch still covers (a brand switch
-// covers every job; an agent switch covers its agent's). Re-enqueueing jobs the queue already completed while
-// they were held is not done here: `deps.afterRelease` is where it is added, given the freed ids.
+// covers every job; an agent switch covers its agent's). Sending the freed jobs again and applying their held
+// results is `deps.afterRelease`, given the freed ids (killswitch/release.ts).
 export async function releaseSwitch(
   pool: Pool,
   deps: KillSwitchDeps,

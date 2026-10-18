@@ -6,7 +6,7 @@ import type { RouteTable } from '../access/routes.ts'
 import type { Auth } from '../auth/options.ts'
 import { principalOf } from '../auth/session.ts'
 import { AppError } from '../errors.ts'
-import { listActive, releaseSwitch, setSwitch } from '../killswitch/service.ts'
+import { listActive, releaseSwitch, setSwitch, type KillSwitchDeps } from '../killswitch/service.ts'
 import type { AuditSink } from '../ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
@@ -14,6 +14,8 @@ export interface KillSwitchRouteDeps {
   auth: Auth
   pool: Pool
   audit: AuditSink
+  // What a release does with the jobs it frees (killswitch/release.ts); unset when there is no work engine.
+  afterRelease?: KillSwitchDeps['afterRelease']
 }
 
 const params = z.strictObject({ brandId: z.uuid() })
@@ -89,7 +91,7 @@ export function registerKillSwitchRoutes(table: RouteTable, deps: KillSwitchRout
         await verifySecondFactorCode(deps.auth, req, b.code)
         const result = await releaseSwitch(
           deps.pool,
-          { audit: deps.audit },
+          { audit: deps.audit, afterRelease: deps.afterRelease },
           {
             brandId: brandContextOf(res).brandId,
             scope: b.scope,

@@ -20,7 +20,8 @@ import type { NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
-const startBody = z.strictObject({ workerId: z.string().min(1).max(200) })
+// queueId: the queue row the worker claimed (optional, so an older worker is still understood).
+const startBody = z.strictObject({ workerId: z.string().min(1).max(200), queueId: z.uuid().optional() })
 
 // jsonb and text columns reject U+0000; refusing it here is a 400 instead of a 500 after the provider call.
 const hasNul = (value: unknown): boolean => {
@@ -74,7 +75,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
           params: z.infer<typeof jobParams>
           body: z.infer<typeof startBody>
         }>(res)
-        res.json(await startAttempt(deps, params.jobId, body.workerId))
+        res.json(await startAttempt(deps, params.jobId, body.workerId, body.queueId))
       },
     ],
   })

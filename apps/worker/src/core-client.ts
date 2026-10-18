@@ -25,10 +25,16 @@ export interface CheckpointBody {
   usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
 }
 export interface CoreClient {
+  // `queueId`: the queue row the worker claimed, so the core can turn away a copy a release has replaced.
   startAttempt(
     jobId: string,
     workerId: string,
-  ): Promise<StartedAttempt | { finished: true; outcome: unknown } | { finished: false; outcome: 'held' }>
+    queueId?: string,
+  ): Promise<
+    | StartedAttempt
+    | { finished: true; outcome: unknown }
+    | { finished: false; outcome: 'held' | 'superseded' }
+  >
   control(jobId: string, token: string): Promise<{ cancelRequested: boolean; held: boolean }>
   registerModelCall(
     jobId: string,
@@ -67,7 +73,7 @@ export const replySchemas = {
   control: z.object({ cancelRequested: z.boolean(), held: z.boolean() }),
   startAttempt: z.union([
     z.object({ finished: z.literal(true), outcome: z.unknown() }),
-    z.object({ finished: z.literal(false), outcome: z.literal('held') }),
+    z.object({ finished: z.literal(false), outcome: z.enum(['held', 'superseded']) }),
     z.object({
       finished: z.literal(false),
       attemptId: z.string().min(1),
@@ -130,8 +136,11 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     return json as T
   }
   return {
-    async startAttempt(jobId, workerId) {
-      const reply = await call('POST', `/worker/jobs/${jobId}/attempts`, null, { workerId })
+    async startAttempt(jobId, workerId, queueId) {
+      const reply = await call('POST', `/worker/jobs/${jobId}/attempts`, null, {
+        workerId,
+        ...(queueId === undefined ? {} : { queueId }),
+      })
       return parseReply(replySchemas.startAttempt, reply, 'a start of attempt')
     },
     async control(jobId, token) {

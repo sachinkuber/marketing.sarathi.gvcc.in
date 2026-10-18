@@ -103,15 +103,28 @@ export interface FinishedJob {
   outcome: unknown
 }
 // A held job (by its flag or an active kill switch) is not started: no attempt is created, the worker stops.
+// So is a queue copy that is not the job's current one (a release sent the job again under a new queue id):
+// the worker stops and the queue completes that copy, so only the newest copy can run the job.
 export interface HeldJob {
   finished: false
-  outcome: 'held'
+  outcome: 'held' | 'superseded'
 }
 
+// The id of the job's current queue row: the job id, unless a kill-switch release sent the job again.
+export async function currentQueueId(client: PoolClient, jobId: string): Promise<string> {
+  const { rows } = await client.query<{ queue_id: string }>(
+    'select coalesce(queue_id, job_id) as queue_id from app.job_control where job_id = $1',
+    [jobId],
+  )
+  return rows[0]?.queue_id ?? jobId
+}
+
+// `queueId` is the queue row the worker claimed (absent from an older worker: the current row is assumed).
 export async function startAttempt(
   deps: JobsDeps,
   jobId: string,
   workerId: string,
+  queueId?: string,
 ): Promise<StartedAttempt | FinishedJob | HeldJob> {
   const found = await deps.pool.query<{ brand: string | null }>('select app.job_brand($1) as brand', [jobId])
   const brandId = found.rows[0]?.brand
@@ -137,11 +150,18 @@ export async function startAttempt(
     // worker completes the queue row. No new attempt.
     if (row.finished_at) return { finished: true as const, outcome: row.outcome }
 
+    // A copy a release has replaced never starts an attempt. The job_input row lock is held, and a release
+    // takes it before it sets a new queue id, so this read is the committed current id.
+    const current = await currentQueueId(client, jobId)
+    if (queueId !== undefined && queueId !== current) {
+      return { finished: false as const, outcome: 'superseded' as const }
+    }
+
     // "Workers check it before every job" (spec 13): a held job gets no attempt.
     if ((await readControl(client, jobId)).held) return { finished: false as const, outcome: 'held' as const }
 
     // The queue's own record, not the worker's word: the job must be active.
-    if ((await deps.queue.state(row.class, jobId)) !== 'active') {
+    if ((await deps.queue.state(row.class, current)) !== 'active') {
       throw new AppError(409, 'job_not_active', 'The queue does not show this job as claimed.')
     }
 
@@ -547,45 +567,74 @@ export async function postResult(
     if (control.cancelRequested) throw new AppError(409, 'job_cancelled', 'This job was cancelled.')
     if (control.held) {
       // Kept, not applied: no content version, no further job, no notification until release (spec 9.4).
+      // The posting attempt is kept with it, so the release can tell a current result from a stale one.
+      const held: HeldResult = { type: posted.type, result: posted.result, attemptId: claims.attemptId }
       await client.query('update app.job_input set held_result = $2::jsonb where job_id = $1', [
         claims.jobId,
-        JSON.stringify(posted),
+        JSON.stringify(held),
       ])
       return { status: 'held' as const }
     }
-    const handler = deps.results.get(posted.type)
-    if (!handler) throw new AppError(422, 'no_result_handler', 'Nothing accepts a result of that type.')
-
-    // Lock order is always job_input, then run, then whatever the handler writes. Taking the run lock before
-    // the handler matters: a handler row that references the run takes a shared lock on it, and two siblings
-    // holding that and then asking for the exclusive lock would deadlock.
-    await client.query('select 1 from app.run where id = $1 for update', [job.run_id])
-
-    const outcome = await handler(client, {
+    const outcome = await applyResult(client, deps, {
       brandId: claims.brandId,
       jobId: claims.jobId,
       runId: job.run_id,
-      result: posted.result,
+      attemptId: claims.attemptId,
+      posted,
     })
-    await client.query(
-      `update app.job_input set result_type = $2, result_hash = $3, outcome = $4::jsonb, finished_at = now()
-        where job_id = $1`,
-      [claims.jobId, posted.type, hash, JSON.stringify(outcome ?? null)],
-    )
-    await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
-      claims.attemptId,
-    ])
-    // The run succeeds when none of its jobs is left unfinished. The run row is already locked (above), so a
-    // sibling finishing at the same moment waited for us and re-reads this job's finished_at once we commit:
-    // one of the two always sees the run complete. Only a run that is still going is moved; a failed,
-    // cancelled, held or needs_manual run keeps its state.
-    await client.query(
-      `update app.run set state = 'succeeded', finished_at = now()
-        where id = $1 and state in ('created', 'running')
-          and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
-      [job.run_id],
-    )
-    // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
-    return { status: 'applied' as const, outcome: JSON.parse(JSON.stringify(outcome ?? null)) as unknown }
+    return { status: 'applied' as const, outcome }
   })
+}
+
+// A result posted while the job was held (job_input.held_result), with the attempt that posted it.
+export interface HeldResult {
+  type: string
+  result: unknown
+  attemptId: string
+}
+
+// The business effect of a result and the job's end, in the caller's transaction, which holds the job's
+// job_input row lock. Used by postResult and by the kill-switch release that applies a held result, so a
+// held result goes through exactly the path a normal post does.
+export async function applyResult(
+  client: PoolClient,
+  deps: Pick<JobsDeps, 'results'>,
+  input: { brandId: string; jobId: string; runId: string; attemptId: string; posted: PostedResult },
+): Promise<unknown> {
+  const { posted } = input
+  const handler = deps.results.get(posted.type)
+  if (!handler) throw new AppError(422, 'no_result_handler', 'Nothing accepts a result of that type.')
+
+  // Lock order is always job_input, then run, then whatever the handler writes. Taking the run lock before
+  // the handler matters: a handler row that references the run takes a shared lock on it, and two siblings
+  // holding that and then asking for the exclusive lock would deadlock.
+  await client.query('select 1 from app.run where id = $1 for update', [input.runId])
+
+  const outcome = await handler(client, {
+    brandId: input.brandId,
+    jobId: input.jobId,
+    runId: input.runId,
+    result: posted.result,
+  })
+  await client.query(
+    `update app.job_input set result_type = $2, result_hash = $3, outcome = $4::jsonb, finished_at = now(),
+            held_result = null
+      where job_id = $1`,
+    [input.jobId, posted.type, resultHash(posted), JSON.stringify(outcome ?? null)],
+  )
+  await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
+    input.attemptId,
+  ])
+  // The run succeeds when none of its jobs is left unfinished. The run row is already locked (above), so a
+  // sibling finishing at the same moment waited for us and re-reads this job's finished_at once we commit:
+  // one of the two always sees the run complete. Only a run that is still going is moved; a failed,
+  // cancelled, held or needs_manual run keeps its state.
+  await client.query(
+    `update app.run set state = 'succeeded', finished_at = now()
+      where id = $1 and state in ('created', 'running')
+        and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
+    [input.runId],
+  )
+  // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
+  return JSON.parse(JSON.stringify(outcome ?? null)) as unknown
 }

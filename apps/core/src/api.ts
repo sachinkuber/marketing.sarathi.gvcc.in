@@ -13,6 +13,7 @@ import type { NotifyDeps } from './notify/ports.ts'
 import { registerApprovalRoutes } from './routes/approvals.ts'
 import { registerApprovalSettingsRoutes } from './routes/approval-settings.ts'
 import { registerKillSwitchRoutes } from './routes/killswitch.ts'
+import { releaseHeldJobs } from './killswitch/release.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
@@ -88,7 +89,12 @@ export function createApi(
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
-  registerKillSwitchRoutes(table, { auth: deps.auth, pool: deps.pool, audit: deps.audit })
+  registerKillSwitchRoutes(table, {
+    auth: deps.auth,
+    pool: deps.pool,
+    audit: deps.audit,
+    afterRelease: deps.jobs ? releaseHeldJobs(deps.jobs) : undefined,
+  })
   registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerOverdueRoutes(table, { pool: deps.pool, audit: deps.audit })
 
