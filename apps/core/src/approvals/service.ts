@@ -65,14 +65,18 @@ async function auditRefusal(
   error: unknown,
 ): Promise<void> {
   if (!(error instanceof AppError) || error.status !== 409) return
-  await deps.audit.record({
-    action,
-    actor: target.actor.userId,
-    subject: target.versionId,
-    brandId: target.brandId,
-    outcome: 'failure',
-    detail: { code: error.code },
-  })
+  try {
+    await deps.audit.record({
+      action,
+      actor: target.actor.userId,
+      subject: target.versionId,
+      brandId: target.brandId,
+      outcome: 'failure',
+      detail: { code: error.code },
+    })
+  } catch {
+    // The caller's 409 must not be replaced by a failure of the audit.
+  }
 }
 
 export async function approve(

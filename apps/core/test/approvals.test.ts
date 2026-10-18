@@ -237,6 +237,69 @@ describe('approvals', () => {
     expect(await stateOf(w.versionId)).toBe('awaiting_approval')
   })
 
+  it('does not carry an approval over to the next version after an edit (test 18)', async () => {
+    const w = await waiting('one')
+    await approve(stack.appPool, deps, { ...target(w.item, w.versionId), hash: w.hash, scheme: 'cv1' })
+    expect(await stateOf(w.versionId)).toBe('approved')
+    const two = await withBrand(stack.appPool, brandA, async (client) => {
+      const created = await createVersion(client, deps, {
+        brandId: brandA,
+        contentItemId: w.item,
+        payload: body('two'),
+        createdBy: actor(),
+      })
+      await moveState(client, deps, created.versionId, 'in_checks', actor())
+      await moveState(client, deps, created.versionId, 'awaiting_approval', actor())
+      return created
+    })
+    expect(await stateOf(w.versionId)).toBe('superseded')
+    expect(await count('approval', w.versionId)).toBe(1)
+    expect(await count('approval', two.versionId)).toBe(0)
+    expect(await count('outbox_action', two.versionId)).toBe(0)
+    expect(await stateOf(two.versionId)).toBe('awaiting_approval')
+    const error = await approve(stack.appPool, deps, {
+      ...target(w.item, two.versionId),
+      hash: w.hash,
+      scheme: 'cv1',
+    }).catch((e: unknown) => e)
+    expect((error as AppError).status).toBe(409)
+    expect(code(error)).toBe('stale_hash')
+    expect(await count('approval', two.versionId)).toBe(0)
+    expect(await stateOf(two.versionId)).toBe('awaiting_approval')
+  })
+
+  it('answers already_decided to a second approval of an approved version, even with a wrong hash', async () => {
+    const w = await waiting()
+    await approve(stack.appPool, deps, { ...target(w.item, w.versionId), hash: w.hash, scheme: 'cv1' })
+    const error = await approve(stack.appPool, deps, {
+      ...target(w.item, w.versionId),
+      hash: 'sha256:' + '0'.repeat(64),
+      scheme: 'cv1',
+    }).catch((e: unknown) => e)
+    expect((error as AppError).status).toBe(409)
+    expect(code(error)).toBe('already_decided')
+    expect(await count('approval', w.versionId)).toBe(1)
+  })
+
+  it('keeps the 409 when the audit of the refusal fails', async () => {
+    const w = await waiting()
+    const broken: ApprovalDeps = {
+      ...deps,
+      audit: {
+        record: async (entry, tx) => {
+          if (entry.outcome === 'failure') throw new Error('audit down')
+          return deps.audit.record(entry, tx)
+        },
+      },
+    }
+    const error = await approve(stack.appPool, broken, {
+      ...target(w.item, w.versionId),
+      hash: 'sha256:' + '1'.repeat(64),
+      scheme: 'cv1',
+    }).catch((e: unknown) => e)
+    expect(code(error)).toBe('stale_hash')
+  })
+
   it('refuses to decide a version that is not awaiting approval', async () => {
     const item = (
       await stack.db.admin.query(
