@@ -132,6 +132,42 @@ describe('content versions', () => {
     expect(added).toEqual(['content.version_created'])
   })
 
+  it('serialises two simultaneous edits: numbers 1 and 2, the first superseded once, one audit entry', async () => {
+    const item = await newItem(brandA)
+    const results = await Promise.all([create(brandA, item, 'left'), create(brandA, item, 'right')])
+    expect(results.map((r) => r.number).sort()).toEqual([1, 2])
+    const first = results.find((r) => r.number === 1)!
+    const second = results.find((r) => r.number === 2)!
+    expect(await stateOf(first.versionId)).toBe('superseded')
+    expect(await stateOf(second.versionId)).toBe('draft')
+    const moves = await stack.db.admin.query(
+      `select count(*)::int as n from app.content_version_state_change
+        where content_version_id = $1 and to_state = 'superseded'`,
+      [first.versionId],
+    )
+    expect(moves.rows[0].n).toBe(1)
+    const audited = stack.audit.entries.filter(
+      (e) => e.action === 'content.state_changed' && e.subject === first.versionId,
+    )
+    expect(audited).toHaveLength(1)
+    const current = await stack.db.admin.query(
+      'select current_version_id from app.content_item where id = $1',
+      [item],
+    )
+    expect(current.rows[0].current_version_id).toBe(second.versionId)
+  })
+
+  it('does not move a version of another brand: 404 and nothing changed', async () => {
+    const item = await newItem(brandA)
+    const v = await create(brandA, item)
+    const before = stack.audit.entries.length
+    const error = await move(brandB, v.versionId, 'in_checks').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(AppError)
+    expect((error as AppError).status).toBe(404)
+    expect(await stateOf(v.versionId)).toBe('draft')
+    expect(stack.audit.entries).toHaveLength(before)
+  })
+
   it('rejects an invisible character with the path and stores nothing', async () => {
     const item = await newItem(brandA)
     const error = await create(brandA, item, 'bad​text').catch((e: unknown) => e)
@@ -285,6 +321,7 @@ describe('content versions', () => {
       const bad = await post(body('bad​text'))
       expect(bad.status).toBe(400)
       expect(bad.json.error.code).toBe('payload_rejected')
+      expect(bad.text).not.toContain('bad')
       expect(await count()).toBe(0)
     })
 
