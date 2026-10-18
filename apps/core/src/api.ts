@@ -7,6 +7,7 @@ import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
+import { registerApprovalRoutes } from './routes/approvals.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
@@ -78,6 +79,7 @@ export function createApi(
   })
 
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
 
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs)
