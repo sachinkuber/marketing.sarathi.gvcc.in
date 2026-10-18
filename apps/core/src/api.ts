@@ -8,6 +8,7 @@ import { csrfTokenFor } from './guard.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
 import { registerAlertRoutes } from './routes/alerts.ts'
+import { registerOverdueRoutes } from './routes/overdue.ts'
 import type { NotifyDeps } from './notify/ports.ts'
 import { registerApprovalRoutes } from './routes/approvals.ts'
 import { registerApprovalSettingsRoutes } from './routes/approval-settings.ts'
@@ -87,6 +88,7 @@ export function createApi(
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerOverdueRoutes(table, { pool: deps.pool, audit: deps.audit })
 
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs, deps.notify)

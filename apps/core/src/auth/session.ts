@@ -9,6 +9,8 @@ export type Role = 'brand_admin' | 'approver' | 'sales_contact' | 'viewer'
 export interface Principal {
   userId: string
   sessionId: string
+  // When this sign-in began (the session's creation, not its last renewal).
+  sessionStartedAt: Date
   email: string
   name: string
   twoFactorEnabled: boolean
@@ -44,6 +46,7 @@ export function loadPrincipal(auth: Auth, pool: Pool): RequestHandler {
     const principal: Principal = {
       userId,
       sessionId: session.session.id,
+      sessionStartedAt: new Date(session.session.createdAt),
       email: session.user.email,
       name: session.user.name,
       twoFactorEnabled: Boolean((session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled),
