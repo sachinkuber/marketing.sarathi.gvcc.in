@@ -21,6 +21,7 @@ const UNSUPPORTED = new Set([
   'exclusiveMinimum',
   'exclusiveMaximum',
   'pattern',
+  '$schema',
 ])
 export function providerSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const reduce = (value: unknown): unknown => {

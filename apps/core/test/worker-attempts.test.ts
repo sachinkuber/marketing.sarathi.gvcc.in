@@ -386,6 +386,23 @@ describe('ending an attempt that stopped because its job is held', () => {
     expect((await end(ghost, forged)).status).toBe(404)
   })
 
+  it('lets a fresh attempt start afterwards, and the old token is then refused', async () => {
+    const jobId = await makeJob(brandA)
+    const old = await begin(jobId)
+    expect((await end(jobId, old.token)).status).toBe(204)
+    const next = await (
+      await call('POST', `/worker/jobs/${jobId}/attempts`, { body: { workerId: 'w2' } })
+    ).json()
+    expect(next.attemptNumber).toBe(2)
+    expect(await states(jobId)).toEqual([
+      { state: 'failed', ended: true },
+      { state: 'active', ended: false },
+    ])
+    expect((await call('GET', `/worker/jobs/${jobId}/control`, { token: old.token })).status).toBe(403)
+    expect((await end(jobId, old.token)).status).toBe(403)
+    expect((await call('GET', `/worker/jobs/${jobId}/control`, { token: next.token })).status).toBe(200)
+  })
+
   it('does not take a reason other than held', async () => {
     const jobId = await makeJob(brandA)
     const started = await begin(jobId)

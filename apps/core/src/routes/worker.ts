@@ -45,6 +45,7 @@ const registerBody = z.strictObject({
 const checkpointBody = z.strictObject({
   step: text(200),
   output: z.json().refine(noNul, 'must not contain U+0000'),
+  stopped: z.literal(true).optional(),
   model: text(200),
   providerMessageId: text(200),
   providerRequestId: z.string().max(200).refine(noNul, 'must not contain U+0000').nullable(),

@@ -64,7 +64,17 @@ describe('the summary handler', () => {
     const error = await summaryHandler(ctx).catch((e: unknown) => e)
     expect((error as Error).name).toBe(name)
     expect((error as Error).message).not.toContain('not json')
-    expect((error as Error).message).not.toContain('u200b')
+  })
+
+  it('rejects a zero-width character in the summary or a keyword', async () => {
+    for (const bad of [
+      { ...good, summary: 'a\u200Bb' },
+      { ...good, keywords: ['a', 'b', 'c\u200B'] },
+    ]) {
+      const { ctx } = stubContext({ text: JSON.stringify(bad), stopReason: 'end_turn' })
+      const error = await summaryHandler(ctx).catch((e: unknown) => e)
+      expect((error as Error).name).toBe('SummaryReplyInvalid')
+    }
   })
 
   it('refuses an input that is not a brief', async () => {
@@ -139,11 +149,11 @@ describe('the summary handler through the runner', () => {
     expect(r.posted).toEqual([])
   })
 
-  it('posts nothing and saves no checkpoint when the reply was cut off', async () => {
+  it('posts nothing and saves only a cost checkpoint when the reply was cut off', async () => {
     const r = run(JSON.stringify(good), 'max_tokens')
     await expect(r.done).rejects.toBeInstanceOf(ModelStopped)
     expect(r.posted).toEqual([])
-    expect(r.calls).toEqual([])
+    expect(r.calls).toEqual(['checkpoint'])
   })
 })
 
@@ -176,6 +186,13 @@ describe('the provider schema', () => {
     expect(Object.keys(reduced.properties)).toEqual(['summary', 'keywords'])
     expect(reduced.properties.summary).toEqual({ type: 'string' })
     expect(reduced.properties.keywords).toEqual({ type: 'array', items: { type: 'string' } })
+  })
+
+  it('drops $schema too, and keeps nothing else at the top that the stored one lacks', () => {
+    expect(stored['$schema']).toBeDefined()
+    const reduced = providerSchema(stored)
+    expect('$schema' in reduced).toBe(false)
+    expect(Object.keys(reduced).sort()).toEqual(['additionalProperties', 'properties', 'required', 'type'])
   })
 
   it('does not change the stored schema, and does not strip a property that is named like a keyword', () => {

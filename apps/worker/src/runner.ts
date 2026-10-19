@@ -115,12 +115,15 @@ export async function runJob(
         }
         throw error
       }
-      // A reply that did not end its turn is not saved: the call stays 'started' and a retry asks again.
-      if (reply.stopReason !== 'end_turn') throw new ModelStopped(reply.stopReason)
-      const output = { text: reply.text, stopReason: reply.stopReason }
+      const stopped = reply.stopReason !== 'end_turn'
+      // A reply that did not end its turn was still paid for: the call is completed and costed (no step is
+      // saved, so a retry asks again), and only then does the job stop. It is not failCall: that means the
+      // provider refused and did no work.
+      const output = stopped ? null : { text: reply.text, stopReason: reply.stopReason }
       const body = {
         step,
         output,
+        ...(stopped ? { stopped: true as const } : {}),
         model: request.model,
         providerMessageId: reply.messageId,
         providerRequestId: reply.requestId,
@@ -137,7 +140,8 @@ export async function runJob(
           delay *= 2
         }
       }
-      return output
+      if (stopped) throw new ModelStopped(reply.stopReason)
+      return output as { text: string; stopReason: string | null }
     },
   }
 

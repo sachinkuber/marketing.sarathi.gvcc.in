@@ -19,6 +19,8 @@ export type Registered =
 export interface CheckpointBody {
   step: string
   output: unknown
+  // Set when the reply did not end its turn: the core costs the call and saves no step.
+  stopped?: true
   model: string
   providerMessageId: string
   providerRequestId: string | null

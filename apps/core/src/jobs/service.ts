@@ -409,6 +409,9 @@ export interface CheckpointInput {
   callId: string
   step: string
   output: unknown
+  // The provider answered but the reply did not finish its turn: the call is completed and costed, and no
+  // step is saved, so a retry asks again (it is not a duplicate: this call has an outcome).
+  stopped?: true
   model: string
   providerMessageId: string
   providerRequestId: string | null
@@ -535,6 +538,7 @@ export async function saveCheckpoint(
         ],
       )
     }
+    if (input.stopped) return { costed }
     const steps: SavedStep[] = [
       ...job.rows[0]!.saved_steps.filter((s) => !(s.step === row.step && s.requestHash === row.request_hash)),
       { step: row.step, requestHash: row.request_hash, output: input.output, callId: input.callId },

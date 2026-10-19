@@ -421,26 +421,42 @@ describe('running a job', () => {
     await expect(runJob(deps(core), { id: 'jh2', jobClass: 'interactive' })).resolves.toBeUndefined()
   })
 
-  it('throws ModelStopped before saving a checkpoint when the reply did not end its turn', async () => {
+  it('costs a reply that did not end its turn with a cost-only checkpoint, then throws ModelStopped', async () => {
     const stopped: ModelClient = {
       async send() {
         return {
           text: '{"cut":',
-          messageId: 'm',
-          requestId: null,
+          messageId: 'm-stop',
+          requestId: 'r-stop',
           stopReason: 'max_tokens',
-          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          usage: { inputTokens: 7, outputTokens: 1024, cacheReadTokens: 0, cacheWriteTokens: 0 },
         }
       },
     }
-    const core = fakeCore()
+    const bodies: unknown[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, callId, body) {
+        core.calls.push(`checkpoint:${callId}`)
+        bodies.push(body)
+        return { costed: true }
+      },
+    })
     const error = await runJob(
       { ...deps(core), model: stopped },
       { id: 'js', jobClass: 'interactive' },
     ).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ModelStopped)
     expect((error as Error).name).toBe('ModelStopped')
-    expect(core.calls).toEqual(['register:one'])
+    expect(core.calls).toEqual(['register:one', 'checkpoint:call-one'])
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        step: 'one',
+        stopped: true,
+        output: null,
+        providerMessageId: 'm-stop',
+        usage: { inputTokens: 7, outputTokens: 1024, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      }),
+    ])
   })
 
   it('saves the stop reason in the checkpoint', async () => {
