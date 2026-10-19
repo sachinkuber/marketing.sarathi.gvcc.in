@@ -201,6 +201,13 @@ describe('content versions', () => {
     expect(await request(v.versionId)).toBeUndefined()
     await move(brandA, v.versionId, 'awaiting_approval')
     expect((await request(v.versionId))?.closed_at).toBeNull()
+    // The database refuses `approved` without an approving decision on record (milestone 6, follow-up M-7).
+    await stack.db.admin.query(
+      `insert into app.approval (brand_id, content_version_id, version_hash, hash_scheme, decision, decided_by)
+       select v.brand_id, v.id, v.hash, v.hash_scheme, 'approved', (select auth_user.id from auth."user" auth_user limit 1)
+         from app.content_version v where v.id = $1`,
+      [v.versionId],
+    )
     await move(brandA, v.versionId, 'approved')
     expect((await request(v.versionId))?.closed_at).not.toBeNull()
   })

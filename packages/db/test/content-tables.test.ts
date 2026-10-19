@@ -27,6 +27,7 @@ describe('content and approval tables', () => {
       'content_version_state',
       'content_version_state_change',
       'cost_ledger',
+      'duty_run',
       'fx_rate',
       'invite',
       'job_attempt',
@@ -41,6 +42,7 @@ describe('content and approval tables', () => {
       'platform_owner',
       'popup_ack',
       'run',
+      'trigger_nonce',
       'version_state_transition',
     ])
   })

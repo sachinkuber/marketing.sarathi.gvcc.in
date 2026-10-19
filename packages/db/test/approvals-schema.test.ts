@@ -138,6 +138,14 @@ describe('version state transitions', () => {
             versionA.id,
           ])
           await c.query('alter table app.content_version_state enable trigger version_state_transition')
+          if (from === 'awaiting_approval' && to === 'approved') {
+            // Milestone 6: this one move needs an approving decision on record.
+            await c.query(
+              `insert into app.approval (brand_id, content_version_id, version_hash, hash_scheme, decision, decided_by)
+               values ($1, $2, $3, $4, 'approved', $5)`,
+              [A, versionA.id, versionA.hash, versionA.scheme, userA],
+            )
+          }
           await c.query('savepoint move')
           const move = c.query(
             'update app.content_version_state set state = $1 where content_version_id = $2',
@@ -375,8 +383,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0017, 0016 and 0015 sit on top of 0014: all four come off.
-      await runner({ ...base, direction: 'down', count: 4 })
+      // 0018, 0017, 0016 and 0015 sit on top of 0014: all five come off.
+      await runner({ ...base, direction: 'down', count: 5 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )
@@ -392,7 +400,7 @@ describe('migration 0014 down and up', () => {
     }
   })
 
-  it('rolling back 0015 and the two after it leaves platform_alerts() working (0014 granted its select)', async () => {
+  it('rolling back 0015 and the three after it leaves platform_alerts() working (0014 granted its select)', async () => {
     const own = await createTestDatabase()
     try {
       const url = own.urlFor('migration')
@@ -404,7 +412,7 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      await runner({ ...base, direction: 'down', count: 3 })
+      await runner({ ...base, direction: 'down', count: 4 })
       const gone = await own.admin.query(
         "select to_regprocedure('app.raise_alert(uuid,smallint,text,jsonb)') as r",
       )
