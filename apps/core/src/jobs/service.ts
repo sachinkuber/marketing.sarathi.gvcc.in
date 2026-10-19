@@ -253,6 +253,38 @@ export async function requireCurrentAttempt(
   throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
 }
 
+// A worker ends its own attempt because the job is held. The job's row lock is taken first (the lock
+// order is job_input, then run; nothing here needs the run), so this cannot interleave with a supersede.
+// Only the job's latest attempt, the one in the token, may end: an older token is refused and recorded
+// like any other stale attempt. An attempt that has already ended (a repeat) is left as it is. The state is
+// 'failed' (the enum has no 'held'); nothing is audited, as a hold is not an event of the attempt's own.
+export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise<void> {
+  await withBrand(deps.pool, claims.brandId, async (client) => {
+    await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
+    const { rows } = await client.query<{ id: string; state: string }>(
+      `select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1`,
+      [claims.jobId],
+    )
+    const latest = rows[0]
+    if (!latest) throw new AppError(404, 'job_not_found', 'No such job.')
+    if (latest.id !== claims.attemptId) {
+      await deps.audit.record({
+        action: 'worker.attempt_refused',
+        actor: null,
+        brandId: claims.brandId,
+        subject: claims.jobId,
+        outcome: 'failure',
+        detail: { reason: 'attempt_superseded', jobId: claims.jobId, attemptId: claims.attemptId },
+      })
+      throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
+    }
+    await client.query(
+      `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
+      [claims.attemptId],
+    )
+  })
+}
+
 // The cancel flag and whether the job is held. Held is the job's own flag OR an active kill switch that covers
 // it (brand scope, or agent scope naming the run's agent; channel scope covers no job). When a switch holds a
 // job whose flag is still false, the flag is set here in the same transaction, so the flag always tells the

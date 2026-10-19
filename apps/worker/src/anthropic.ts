@@ -27,7 +27,16 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
           model: request.model,
           max_tokens: request.maxTokens,
           ...(request.system ? { system: request.system } : {}),
-          ...(request.effort ? { output_config: { effort: request.effort } } : {}),
+          ...(request.effort || request.outputSchema
+            ? {
+                output_config: {
+                  ...(request.effort ? { effort: request.effort } : {}),
+                  ...(request.outputSchema
+                    ? { format: { type: 'json_schema' as const, schema: request.outputSchema } }
+                    : {}),
+                },
+              }
+            : {}),
           messages: request.messages,
         })
       } catch (error) {
@@ -41,6 +50,7 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
       return {
         text,
         messageId: response.id,
+        stopReason: response.stop_reason ?? null,
         requestId: (response as { _request_id?: string | null })._request_id ?? null,
         usage: {
           inputTokens: response.usage.input_tokens,

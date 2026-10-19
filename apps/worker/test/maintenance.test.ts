@@ -183,4 +183,78 @@ describe('maintenance', () => {
       expect(calls).toBe(1)
     })
   })
+
+  describe('what is logged and when a tick may start again', () => {
+    it('logs a failing first duty by error name only, and still runs the approvals tick', async () => {
+      let ticked = 0
+      const lines: Record<string, unknown>[] = []
+      const m = startMaintenance({
+        core: {
+          reconcile: async () => {
+            throw new TypeError('http://10.0.0.1/secret body')
+          },
+          approvalsTick: async () => {
+            ticked += 1
+            return counts
+          },
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 0.05,
+        maxWaitSeconds: limits,
+        log: (l) => lines.push(l),
+      })
+      await new Promise((r) => setTimeout(r, 120))
+      m.stop()
+      expect(ticked).toBeGreaterThanOrEqual(1)
+      expect(lines).toContainEqual({ event: 'maintenance_failed', error: 'TypeError' })
+      expect(JSON.stringify(lines)).not.toContain('secret')
+    })
+
+    it('logs a failed dead report by error name only', async () => {
+      const lines: Record<string, unknown>[] = []
+      const m = startMaintenance({
+        core: {
+          reconcile: async () => ({ marked: 0 }),
+          approvalsTick,
+          unmarkedDead: async (ids: string[]) => ids,
+          jobDead: async () => {
+            throw new Error('http://10.0.0.1/secret body')
+          },
+        } as unknown as CoreClient,
+        queue: {
+          watchdog: async () => ({ waiting: [], running: [] }),
+          failedJobIds: async (c: string) => (c === 'interactive' ? ['x'] : []),
+        } as unknown as Queue,
+        intervalSeconds: 0.05,
+        maxWaitSeconds: limits,
+        log: (l) => lines.push(l),
+      })
+      await new Promise((r) => setTimeout(r, 120))
+      m.stop()
+      expect(lines).toContainEqual({ event: 'dead_report_failed', job_id: 'x', error: 'Error' })
+      expect(JSON.stringify(lines)).not.toContain('secret')
+    })
+
+    it('clears busy even when the log callback throws', async () => {
+      let ticked = 0
+      const m = startMaintenance({
+        core: {
+          reconcile: async () => {
+            ticked += 1
+            return { marked: 0 }
+          },
+          approvalsTick,
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 0.05,
+        maxWaitSeconds: limits,
+        log: () => {
+          throw new Error('log sink down')
+        },
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      m.stop()
+      expect(ticked).toBeGreaterThanOrEqual(2)
+    })
+  })
 })

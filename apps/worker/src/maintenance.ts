@@ -29,58 +29,61 @@ export function startMaintenance(options: {
   const tick = async () => {
     if (busy) return
     busy = true
+    // Reset in an outer finally that wraps both duties: nothing a duty or a log callback throws leaves the tick
+    // stuck busy. Only error names are logged: a message could carry the core's address or a response body.
     try {
-      const swept = await options.core.reconcile()
-      // A dead-letter copy that never reached the core (it was down longer than the copy is retried) leaves
-      // the job failed in its queue with nothing listed: tell the core of every failed job. Repeating is safe.
-      for (const jobClass of JOB_CLASSES) {
-        const failed = await options.queue.failedJobIds(jobClass)
-        if (failed.length === 0) continue
-        // Only the ones the core has not marked yet: a job awaiting the owner stays failed in the queue and
-        // is not sent again on every tick.
-        for (const jobId of await options.core.unmarkedDead(failed)) {
-          try {
-            await options.core.jobDead(jobId)
-          } catch (error) {
-            options.log({
-              event: 'dead_report_failed',
-              job_id: jobId,
-              error: error instanceof Error ? error.message : String(error),
-            })
+      try {
+        const swept = await options.core.reconcile()
+        // A dead-letter copy that never reached the core (it was down longer than the copy is retried) leaves
+        // the job failed in its queue with nothing listed: tell the core of every failed job. Repeating is safe.
+        for (const jobClass of JOB_CLASSES) {
+          const failed = await options.queue.failedJobIds(jobClass)
+          if (failed.length === 0) continue
+          // Only the ones the core has not marked yet: a job awaiting the owner stays failed in the queue and
+          // is not sent again on every tick.
+          for (const jobId of await options.core.unmarkedDead(failed)) {
+            try {
+              await options.core.jobDead(jobId)
+            } catch (error) {
+              options.log({
+                event: 'dead_report_failed',
+                job_id: jobId,
+                error: error instanceof Error ? error.name : 'Error',
+              })
+            }
           }
         }
+        const seen = await options.queue.watchdog(new Date(), { maxWaitSeconds: options.maxWaitSeconds })
+        options.log({
+          event: 'maintenance',
+          marked_unknown: swept.marked,
+          waiting_too_long: seen.waiting.length,
+          running_too_long: seen.running.length,
+        })
+      } catch (error) {
+        options.log({
+          event: 'maintenance_failed',
+          error: error instanceof Error ? error.name : 'Error',
+        })
       }
-      const seen = await options.queue.watchdog(new Date(), { maxWaitSeconds: options.maxWaitSeconds })
-      options.log({
-        event: 'maintenance',
-        marked_unknown: swept.marked,
-        waiting_too_long: seen.waiting.length,
-        running_too_long: seen.running.length,
-      })
-    } catch (error) {
-      options.log({
-        event: 'maintenance_failed',
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-    // Its own duty: a failure above does not stop it, and a failure of it does not undo the above. Only the
-    // error name is logged: a failing call's message could carry the core's address or a response body.
-    try {
-      const done = await options.core.approvalsTick()
-      options.log({
-        event: 'approvals_tick',
-        reminded: done.reminded,
-        overdue: done.overdue,
-        escalated: done.escalated,
-        failed_brands: done.failedBrands,
-      })
-    } catch (error) {
-      options.log({ event: 'approvals_tick_failed', error: error instanceof Error ? error.name : 'Error' })
+      // Its own duty: a failure above does not stop it, and a failure of it does not undo the above.
+      try {
+        const done = await options.core.approvalsTick()
+        options.log({
+          event: 'approvals_tick',
+          reminded: done.reminded,
+          overdue: done.overdue,
+          escalated: done.escalated,
+          failed_brands: done.failedBrands,
+        })
+      } catch (error) {
+        options.log({ event: 'approvals_tick_failed', error: error instanceof Error ? error.name : 'Error' })
+      }
     } finally {
       busy = false
     }
   }
-  const timer = setInterval(() => void tick(), options.intervalSeconds * 1000)
+  const timer = setInterval(() => void tick().catch(() => undefined), options.intervalSeconds * 1000)
   timer.unref()
   return { stop: () => clearInterval(timer) }
 }

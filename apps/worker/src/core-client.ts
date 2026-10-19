@@ -53,6 +53,8 @@ export interface CoreClient {
     token: string,
     posted: { type: string; result: unknown },
   ): Promise<{ status: 'applied' | 'repeated' | 'held' }>
+  // The attempt stopped because its job is held: the core ends it, so a release starts a fresh one.
+  endAttempt(jobId: string, token: string, reason: 'held'): Promise<void>
   // Worker-level calls (no attempt token): the dead-letter watcher and the reconciliation timer (task 10).
   jobDead(jobId: string): Promise<void>
   reconcile(): Promise<{ marked: number }>
@@ -169,6 +171,8 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
       const reply = await call('POST', `/worker/jobs/${jobId}/result`, token, posted)
       return parseReply(replySchemas.postResult, reply, 'a result')
     },
+    endAttempt: (jobId, token, reason) =>
+      call('POST', `/worker/jobs/${jobId}/attempt/end`, token, { reason }),
     jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
     async unmarkedDead(jobIds) {
       if (jobIds.length === 0) return []

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { CoreError, type CoreClient } from '../src/core-client.ts'
-import { ModelRefusedError, type ModelClient, type ModelRequest } from '../src/model.ts'
+import { ModelRefusedError, ModelStopped, type ModelClient, type ModelRequest } from '../src/model.ts'
 import { runJob, type JobHandler } from '../src/runner.ts'
 
-function fakeCore(overrides: Partial<CoreClient> = {}): CoreClient & { posted: unknown[]; calls: string[] } {
+function fakeCore(
+  overrides: Partial<CoreClient> = {},
+): CoreClient & { posted: unknown[]; calls: string[]; ended: string[] } {
   const posted: unknown[] = []
   const calls: string[] = []
+  const ended: string[] = []
   const core: CoreClient = {
     async startAttempt() {
       return {
@@ -37,6 +40,9 @@ function fakeCore(overrides: Partial<CoreClient> = {}): CoreClient & { posted: u
       posted.push(p)
       return { status: 'applied' }
     },
+    async endAttempt(jobId, _t, reason) {
+      ended.push(`${jobId}:${reason}`)
+    },
     async jobDead() {},
     async unmarkedDead() {
       return []
@@ -49,7 +55,7 @@ function fakeCore(overrides: Partial<CoreClient> = {}): CoreClient & { posted: u
     },
     ...overrides,
   }
-  return Object.assign(core, { posted, calls })
+  return Object.assign(core, { posted, calls, ended })
 }
 
 const model: ModelClient & { sent: ModelRequest[] } = {
@@ -60,6 +66,7 @@ const model: ModelClient & { sent: ModelRequest[] } = {
       text: `reply to ${request.messages[0]!.content}`,
       messageId: 'msg',
       requestId: 'req',
+      stopReason: 'end_turn',
       usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
     }
   },
@@ -375,5 +382,111 @@ describe('running a job', () => {
     await expect(runJob(deps(core), { id: 'j7', jobClass: 'interactive' })).rejects.toThrow(
       /no handler for unknown.type/,
     )
+  })
+
+  it('ends the attempt once when it stops because the job is held, and not when it was cancelled', async () => {
+    for (const [outcome, expected] of [
+      ['held', ['jh:held']],
+      ['cancelled', []],
+    ] as const) {
+      const core = fakeCore({
+        async registerModelCall() {
+          return { outcome }
+        },
+      })
+      await runJob(deps(core), { id: 'jh', jobClass: 'interactive' })
+      expect(core.ended).toEqual(expected)
+    }
+  })
+
+  it('ends the attempt when a held job is found between steps', async () => {
+    const core = fakeCore({
+      async control() {
+        return { cancelRequested: false, held: true }
+      },
+    })
+    await runJob(deps(core), { id: 'jh', jobClass: 'interactive' })
+    expect(core.ended).toEqual(['jh:held'])
+  })
+
+  it('still stops quietly when ending a held attempt fails', async () => {
+    const core = fakeCore({
+      async control() {
+        return { cancelRequested: false, held: true }
+      },
+      async endAttempt() {
+        throw new CoreError(500, 'error', 'down')
+      },
+    })
+    await expect(runJob(deps(core), { id: 'jh2', jobClass: 'interactive' })).resolves.toBeUndefined()
+  })
+
+  it('throws ModelStopped before saving a checkpoint when the reply did not end its turn', async () => {
+    const stopped: ModelClient = {
+      async send() {
+        return {
+          text: '{"cut":',
+          messageId: 'm',
+          requestId: null,
+          stopReason: 'max_tokens',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        }
+      },
+    }
+    const core = fakeCore()
+    const error = await runJob(
+      { ...deps(core), model: stopped },
+      { id: 'js', jobClass: 'interactive' },
+    ).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ModelStopped)
+    expect((error as Error).name).toBe('ModelStopped')
+    expect(core.calls).toEqual(['register:one'])
+  })
+
+  it('saves the stop reason in the checkpoint', async () => {
+    const seen: unknown[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        seen.push(body.output)
+        return { costed: true }
+      },
+    })
+    await runJob(deps(core), { id: 'jo', jobClass: 'interactive' })
+    expect(seen[0]).toEqual({ text: 'reply to one', stopReason: 'end_turn' })
+  })
+
+  it('hashes a request with another output schema differently', async () => {
+    const hashes: string[] = []
+    const core = fakeCore({
+      async registerModelCall(_j, _t, input) {
+        hashes.push(input.requestHash)
+        return { outcome: 'use_checkpoint', output: { text: 'x' } }
+      },
+    })
+    const run = (outputSchema?: Record<string, unknown>) =>
+      runJob(
+        {
+          ...deps(core),
+          handlers: {
+            'test.echo': async (ctx) => {
+              await ctx.modelStep('s', {
+                model: 'm',
+                ...(outputSchema ? { outputSchema } : {}),
+                messages: [{ role: 'user', content: 'hi' }],
+                maxTokens: 10,
+              })
+              return { type: 'test.echo', result: null }
+            },
+          },
+        },
+        { id: 'jx', jobClass: 'interactive' },
+      )
+    await run()
+    await run({ type: 'object' })
+    await run({ type: 'object' })
+    await run({ type: 'array' })
+    expect(hashes[1]).toBe(hashes[2])
+    expect(hashes[0]).not.toBe(hashes[1])
+    expect(hashes[3]).not.toBe(hashes[1])
   })
 })

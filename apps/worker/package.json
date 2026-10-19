@@ -9,6 +9,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.124.0",
     "@mkt/queue": "*",
+    "@mkt/shared": "*",
     "zod": "4.5.4"
   },
   "devDependencies": {

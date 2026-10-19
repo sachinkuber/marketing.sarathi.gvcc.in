@@ -21,6 +21,7 @@ export function standInModel(options: StandInOptions): ModelClient {
         text: `reply:${step}`,
         messageId: `msg_${step}_${Math.random().toString(36).slice(2, 10)}`,
         requestId: null,
+        stopReason: 'end_turn',
         usage: { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0 },
       }
       // The provider has answered and been charged; the process dies before it can say so.
