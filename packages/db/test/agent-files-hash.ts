@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // SHA-256 over the sorted relative paths of every file under dir, each followed by a NUL and the file's bytes.
 export function agentFilesHash(dir: string): string {
@@ -23,4 +24,4 @@ export function agentFilesHash(dir: string): string {
   return hash.digest('hex')
 }
 
-export const SUMMARY_AGENT_DIR = new URL('../../../agents/summary', import.meta.url).pathname
+export const SUMMARY_AGENT_DIR = fileURLToPath(new URL('../../../agents/summary', import.meta.url))

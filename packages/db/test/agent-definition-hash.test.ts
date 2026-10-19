@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +12,14 @@ function dirWith(files: Record<string, string>): string {
   }
   return dir
 }
+
+describe('agent file bytes', () => {
+  it('are hashed raw, so a CRLF checkout differs and .gitattributes must pin them', () => {
+    expect(agentFilesHash(dirWith({ 'a.md': 'x\r\n' }))).not.toBe(agentFilesHash(dirWith({ 'a.md': 'x\n' })))
+    const attributes = readFileSync(new URL('../../../.gitattributes', import.meta.url), 'utf8')
+    expect(attributes.split('\n')).toContain('agents/** -text')
+  })
+})
 
 describe('agentFilesHash', () => {
   it('does not depend on creation order, and changes with content or path', () => {

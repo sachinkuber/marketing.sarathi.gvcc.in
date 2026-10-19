@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import pg from 'pg'
 import { runner } from 'node-pg-migrate'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -88,6 +90,13 @@ describe('summary agent definition', () => {
     )
     expect(r.rows).toHaveLength(1)
     expect(r.rows[0]).toMatchObject({ version: 1, model: 'claude-opus-5-5', effort: 'low' })
+    const definition = JSON.parse(readFileSync(join(SUMMARY_AGENT_DIR, 'definition.json'), 'utf8'))
+    expect(r.rows[0]).toMatchObject({
+      version: definition.version,
+      model: definition.model,
+      effort: definition.effort,
+    })
+    expect(definition.agent).toBe('summary')
     expect(r.rows[0].files_hash).toBe(agentFilesHash(SUMMARY_AGENT_DIR))
   })
 })

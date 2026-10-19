@@ -24,6 +24,10 @@ describe('summary result schema', () => {
     expect(summaryResultSchema.safeParse({ ...good, summary: 'a​b' }).success).toBe(false)
     expect(summaryResultSchema.safeParse({ ...good, keywords: ['a', 'b', 'c​'] }).success).toBe(false)
   })
+  it('refuses whitespace-only summary and keywords', () => {
+    expect(summaryResultSchema.safeParse({ ...good, summary: '   \n\t' }).success).toBe(false)
+    expect(summaryResultSchema.safeParse({ ...good, keywords: ['a', ' ', 'c'] }).success).toBe(false)
+  })
   it('refuses a summary over 600 or a keyword over 60 characters', () => {
     expect(summaryResultSchema.safeParse({ ...good, summary: 'x'.repeat(601) }).success).toBe(false)
     expect(summaryResultSchema.safeParse({ ...good, keywords: ['a', 'b', 'x'.repeat(61)] }).success).toBe(
@@ -44,6 +48,7 @@ describe('brief schema', () => {
     expect(briefSchema.safeParse({ brief: 'x'.repeat(2000) }).success).toBe(true)
     expect(briefSchema.safeParse({ brief: 'x'.repeat(2001) }).success).toBe(false)
     expect(briefSchema.safeParse({ brief: '' }).success).toBe(false)
+    expect(briefSchema.safeParse({ brief: '  \n ' }).success).toBe(false)
     expect(briefSchema.safeParse({ brief: 'a​b' }).success).toBe(false)
     expect(briefSchema.safeParse({ brief: 'ok', extra: 1 }).success).toBe(false)
   })
@@ -82,6 +87,16 @@ describe('placeholderCheck', () => {
     expect(at(400, 40)).toEqual({ passed: true, detail: { summaryLength: 400, longestKeyword: 40 } })
     expect(at(401, 40).passed).toBe(false)
     expect(at(400, 41).passed).toBe(false)
+  })
+})
+
+describe('placeholderCheck with bad items', () => {
+  it('fails, without throwing, when a list item is not a string', () => {
+    const result = placeholderCheck({
+      summary: 'ok',
+      body: [{ type: 'list', ordered: false, items: ['a', 7, null] }],
+    })
+    expect(result.passed).toBe(false)
   })
 })
 

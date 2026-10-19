@@ -10,8 +10,8 @@ const CHECK_KEYWORD_MAX = 40
 
 // Non-empty text without the invisible and control characters the payload refuses.
 const text = z.string().min(1)
-const visible = (value: string) => !DISALLOWED.test(value)
-const NOT_VISIBLE = 'contains an invisible or control character'
+const visible = (value: string) => !DISALLOWED.test(value) && value.trim() !== ''
+const NOT_VISIBLE = 'is blank or contains an invisible or control character'
 
 export const briefSchema = z.strictObject({
   brief: text.max(BRIEF_MAX).refine(visible, NOT_VISIBLE),
@@ -43,12 +43,16 @@ export function placeholderCheck(payload: Record<string, unknown>): {
   const summary = typeof payload['summary'] === 'string' ? payload['summary'] : ''
   const body = Array.isArray(payload['body']) ? (payload['body'] as Array<Record<string, unknown>>) : []
   const keywords = body.flatMap((block) =>
-    block['type'] === 'list' && Array.isArray(block['items']) ? (block['items'] as string[]) : [],
+    block['type'] === 'list' && Array.isArray(block['items']) ? (block['items'] as unknown[]) : [],
   )
   const summaryLength = summary.length
-  const longestKeyword = keywords.reduce((longest, keyword) => Math.max(longest, keyword.length), 0)
+  const allText = keywords.every((keyword) => typeof keyword === 'string')
+  const longestKeyword = keywords.reduce<number>(
+    (longest, keyword) => Math.max(longest, typeof keyword === 'string' ? keyword.length : 0),
+    0,
+  )
   return {
-    passed: summaryLength <= CHECK_SUMMARY_MAX && longestKeyword <= CHECK_KEYWORD_MAX,
+    passed: allText && summaryLength <= CHECK_SUMMARY_MAX && longestKeyword <= CHECK_KEYWORD_MAX,
     detail: { summaryLength, longestKeyword },
   }
 }
