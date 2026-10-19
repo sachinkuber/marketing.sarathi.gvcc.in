@@ -20,6 +20,19 @@ vi.mock('@mkt/db', async (importOriginal) => {
   }
 })
 
+// The result-handler map startServer builds, captured as it is passed to the summary registration.
+const registered = vi.hoisted(() => [] as Map<string, unknown>[])
+vi.mock('../src/agents/register.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/agents/register.ts')>()
+  return {
+    ...original,
+    registerSummaryHandlers: (...args: Parameters<typeof original.registerSummaryHandlers>) => {
+      registered.push(args[0])
+      return original.registerSummaryHandlers(...args)
+    },
+  }
+})
+
 describe('adapters', () => {
   it('refuses to send mail until delivery is configured', async () => {
     await expect(
@@ -58,6 +71,35 @@ describe('startServer', () => {
       await db.drop()
     }
     await expect(fetch(`${server.url}/health/live`)).rejects.toThrow()
+  })
+
+  it('registers the summary and check result handlers', async () => {
+    await requireDatabase()
+    const db = await createQueueTestDatabase()
+    registered.length = 0
+    const server = await startServer(
+      {
+        nodeEnv: 'test',
+        port: 0,
+        databaseUrl: db.urlFor('app'),
+        auditDatabaseUrl: db.urlFor('audit_writer'),
+        queueDatabaseUrl: db.urlFor('queue'),
+        authSecret: 'z'.repeat(48),
+        workerSecret: 'w'.repeat(48),
+        attemptTokenSecret: 'a'.repeat(48),
+        queueBacklogLimit: 2000,
+        publicOrigin: 'https://app.example.test',
+        logLevel: 'silent',
+      },
+      { logger: createLogger('silent'), mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
+    )
+    try {
+      expect(registered).toHaveLength(1)
+      expect([...registered[0]!.keys()].sort()).toEqual(['placeholder_check.v1', 'summary.v1'])
+    } finally {
+      await server.stop()
+      await db.drop()
+    }
   })
 
   it('logs an error on an idle pool connection instead of crashing the process', async () => {

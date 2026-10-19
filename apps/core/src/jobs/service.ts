@@ -599,6 +599,10 @@ export async function postResult(
   posted: PostedResult,
 ): Promise<ResultAnswer> {
   return withBrand(deps.pool, claims.brandId, async (client) => {
+    // Lock order, step 1 (approvals/requests.ts): the brand row, shared, before the job's row. A handler
+    // writes rows that reference the brand (a content item, the next job), which would ask for it after
+    // job_input and run are held, against a release that holds the brand row and asks for the job's row.
+    await client.query('select 1 from app.brand where id = $1 for share', [claims.brandId])
     await requireCurrentAttempt(client, deps, claims)
     const found = await client.query<{
       run_id: string

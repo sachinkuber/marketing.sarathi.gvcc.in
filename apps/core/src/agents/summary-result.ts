@@ -10,7 +10,9 @@ export const CHECK_RESULT_TYPE = 'placeholder_check.v1'
 // held): the reply is checked again here (the worker's check is not trusted), the item and its first version
 // are made in `draft`, the version moves to `in_checks`, and the check job is queued in the same run. A reply
 // that fails the contract makes no content at all.
-export function summaryResultHandler(deps: Pick<JobsDeps, 'audit' | 'queue' | 'backlogLimit'>): ResultHandler {
+export function summaryResultHandler(
+  deps: Pick<JobsDeps, 'audit' | 'queue' | 'backlogLimit'>,
+): ResultHandler {
   return async (client, ctx) => {
     const parsed = summaryResultSchema.safeParse(ctx.result)
     if (!parsed.success) {

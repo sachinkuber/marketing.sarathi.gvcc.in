@@ -548,7 +548,11 @@ describe('the summary run and the kill switch', () => {
   })
 
   const pSet = () =>
-    setSwitch(proof.appPool, { audit: pj.audit }, { brandId: pBrand, scope: 'brand', target: null, actor: pAdminId })
+    setSwitch(
+      proof.appPool,
+      { audit: pj.audit },
+      { brandId: pBrand, scope: 'brand', target: null, actor: pAdminId },
+    )
   const pRelease = async () => {
     const reply = await pAdmin.request('POST', `/api/v1/brands/${pBrand}/kill-switch/release`, {
       body: { scope: 'brand', code: totp(pSecret) },
@@ -562,7 +566,9 @@ describe('the summary run and the kill switch', () => {
     const { runId, jobId } = await startRun(pj, pBrand, pAdminId, BRIEF)
     const claims = await claim(proof, pj, jobId)
     expect((await pSet()).held).toBe(1)
-    expect(await postResult(pj, claims, { type: 'summary.v1', result: GOOD_RESULT })).toEqual({ status: 'held' })
+    expect(await postResult(pj, claims, { type: 'summary.v1', result: GOOD_RESULT })).toEqual({
+      status: 'held',
+    })
     expect(await counts(proof, pBrand)).toEqual({ ...before, jobs: before.jobs + 1 })
     expect(await checkJobOf(proof, runId)).toBeUndefined()
     expect(await runState(proof, runId)).toBe('running')
@@ -585,7 +591,10 @@ describe('the summary run and the kill switch', () => {
       await proof.db.admin.query('select outcome from app.job_input where job_id = $1', [jobId])
     ).rows[0].outcome as { versionId: string }
     expect(
-      await postResult(pj, checkClaims, { type: 'placeholder_check.v1', result: { versionId: outcome.versionId } }),
+      await postResult(pj, checkClaims, {
+        type: 'placeholder_check.v1',
+        result: { versionId: outcome.versionId },
+      }),
     ).toMatchObject({ status: 'applied', outcome: { passed: true } })
     expect(await runState(proof, runId)).toBe('succeeded')
     const after = await counts(proof, pBrand)

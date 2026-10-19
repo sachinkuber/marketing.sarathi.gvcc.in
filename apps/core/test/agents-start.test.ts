@@ -16,7 +16,8 @@ const others: Record<string, TestClient> = {}
 
 const route = () => `/api/v1/brands/${brand}/agents/summary/runs`
 const runCount = async (): Promise<number> =>
-  (await stack.db.admin.query('select count(*)::int as n from app.run where brand_id = $1', [brand])).rows[0].n
+  (await stack.db.admin.query('select count(*)::int as n from app.run where brand_id = $1', [brand])).rows[0]
+    .n
 
 beforeAll(async () => {
   stack = await createStack({ withQueue: true, realAudit: true })
@@ -107,8 +108,17 @@ describe('starting a summary run', () => {
         await jobs.audit.record(entry, tx)
       },
     }
+    const queued = () =>
+      stack.db.admin.query(`select count(*)::int as n from pgboss.job where name = 'job-interactive'`)
+    const entries = () =>
+      stack.db.admin.query(`select count(*)::int as n from audit.log where action = 'agent.run_started'`)
+    const [queueBefore, auditBefore] = [(await queued()).rows[0].n, (await entries()).rows[0].n]
     await expect(
-      startSummaryRun(jobs.pool, { ...jobs, audit: failing }, { brandId: brand, brief: BRIEF, actor: { userId: ownerId } }),
+      startSummaryRun(
+        jobs.pool,
+        { ...jobs, audit: failing },
+        { brandId: brand, brief: BRIEF, actor: { userId: ownerId } },
+      ),
     ).rejects.toThrow('audit down')
     const after = await stack.db.admin.query(
       `select (select count(*)::int from app.run where brand_id = $1) as runs,
@@ -117,11 +127,32 @@ describe('starting a summary run', () => {
       [brand],
     )
     expect(after.rows[0]).toEqual(before.rows[0])
+    expect((await queued()).rows[0].n).toBe(queueBefore)
+    expect((await entries()).rows[0].n).toBe(auditBefore)
+  })
+
+  it('answers 503 agent_unavailable when no summary definition is live, and writes nothing', async () => {
+    await stack.db.admin.query(`update app.agent_definition_version set live = false where agent = 'summary'`)
+    try {
+      const runs = await runCount()
+      const reply = await owner.request('POST', route(), { body: { brief: BRIEF } })
+      expect(reply.status).toBe(503)
+      expect(reply.json.error.code).toBe('agent_unavailable')
+      expect(await runCount()).toBe(runs)
+    } finally {
+      await stack.db.admin.query(
+        `update app.agent_definition_version set live = true where agent = 'summary'`,
+      )
+    }
   })
 
   it('refuses a brief the service itself finds invalid, whoever calls it', async () => {
     await expect(
-      startSummaryRun(jobs.pool, jobs, { brandId: brand, brief: 'x'.repeat(2001), actor: { userId: ownerId } }),
+      startSummaryRun(jobs.pool, jobs, {
+        brandId: brand,
+        brief: 'x'.repeat(2001),
+        actor: { userId: ownerId },
+      }),
     ).rejects.toMatchObject({ status: 400 })
   })
 })

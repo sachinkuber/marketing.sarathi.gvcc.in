@@ -177,10 +177,9 @@ export async function releaseSwitch(
         }
       }
     }
-    // The hook may apply held results, which take approval_request locks (a version reaching awaiting_approval)
-    // and write audit entries. The lock order is job_input, run, approval_request, audit chain (the approvals
-    // tick takes approval_request and then the chain), so this release's own entry, which takes the chain
-    // lock, is written last, after the hook.
+    // Lock order (approvals/requests.ts): brand row (taken above), job_input, run, content rows,
+    // approval_request, audit chain. The hook may apply held results, which reach approval_request and write
+    // their own audit entries; this release's entry takes the audit chain, so it is written last, after the hook.
     await deps.afterRelease?.(client, unheld)
     await deps.audit.record(
       {

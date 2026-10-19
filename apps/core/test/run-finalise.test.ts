@@ -25,17 +25,28 @@ const newRun = (): Promise<string> =>
   )
 const addJob = (runId: string): Promise<string> =>
   withBrand(stack.appPool, brand, (client) =>
-    createJob(client, jobs, brand, { runId, jobClass: 'interactive', input: {}, expectedResultType: 'test.echo' }),
+    createJob(client, jobs, brand, {
+      runId,
+      jobClass: 'interactive',
+      input: {},
+      expectedResultType: 'test.echo',
+    }),
   )
 const kill = async (jobId: string) => {
   await stack.db.admin.query(`update pgboss.job set state = 'failed' where id = $1`, [jobId])
   await markDead(jobs, jobId)
 }
 async function claim(jobId: string): Promise<AttemptClaims> {
-  await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [jobId])
+  await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+    jobId,
+  ])
   const started = await startAttempt(jobs, jobId, 'w1')
   if (started.finished || 'outcome' in started) throw new Error('unexpected')
-  const check = verifyAttemptToken(jobs.attemptTokenSecret, started.token, Math.floor(jobs.now().getTime() / 1000))
+  const check = verifyAttemptToken(
+    jobs.attemptTokenSecret,
+    started.token,
+    Math.floor(jobs.now().getTime() / 1000),
+  )
   if (!check.ok) throw new Error('token')
   return check.claims
 }
@@ -114,7 +125,9 @@ describe('finaliseRun', () => {
     const runId = await newRun()
     const j1 = await addJob(runId)
     const claims = await claim(j1)
-    await stack.db.admin.query(`update app.run set state = 'cancelled', finished_at = now() where id = $1`, [runId])
+    await stack.db.admin.query(`update app.run set state = 'cancelled', finished_at = now() where id = $1`, [
+      runId,
+    ])
     await finish(claims)
     expect((await state(runId)).state).toBe('cancelled')
   })

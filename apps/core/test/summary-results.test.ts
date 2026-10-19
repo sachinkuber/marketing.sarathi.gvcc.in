@@ -51,7 +51,7 @@ async function summarised(result: unknown = GOOD_RESULT) {
   const { runId, jobId } = await startRun(jobs, brand, ownerId, BRIEF)
   const claims = await claim(stack, jobs, jobId)
   const answer = await postResult(jobs, claims, { type: 'summary.v1', result })
-  return { runId, jobId, answer }
+  return { runId, jobId, answer, claims }
 }
 
 describe('the summary result handler', () => {
@@ -165,9 +165,10 @@ describe('the placeholder check handler', () => {
     const { outcome, answer } = await checkedWith(long)
     expect(answer).toMatchObject({ status: 'applied', outcome: { passed: false } })
     expect(await stateOf(outcome.versionId!)).toBe('check_failed')
-    const check = await stack.db.admin.query('select passed from app.check_result where content_version_id = $1', [
-      outcome.versionId,
-    ])
+    const check = await stack.db.admin.query(
+      'select passed from app.check_result where content_version_id = $1',
+      [outcome.versionId],
+    )
     expect(check.rows).toEqual([{ passed: false }])
     const requests = await stack.db.admin.query(
       'select 1 from app.approval_request where content_version_id = $1',
@@ -177,7 +178,7 @@ describe('the placeholder check handler', () => {
     expect(await notifications(outcome.versionId!)).toEqual([])
   })
 
-  it('the rule is the core\'s own: a 41-character keyword fails whatever the worker says', async () => {
+  it("the rule is the core's own: a 41-character keyword fails whatever the worker says", async () => {
     const { outcome, answer } = await checkedWith({ summary: 'fine', keywords: ['k'.repeat(41), 'y', 'z'] })
     expect(answer).toMatchObject({ outcome: { passed: false } })
     expect(await stateOf(outcome.versionId!)).toBe('check_failed')
@@ -203,9 +204,10 @@ describe('the placeholder check handler', () => {
     expect(answer).toMatchObject({ status: 'applied', outcome: { passed: true } })
     expect(await stateOf(outcome.versionId!)).toBe('superseded')
     expect(await stateOf(newer.versionId)).toBe('draft')
-    const check = await stack.db.admin.query('select passed from app.check_result where content_version_id = $1', [
-      outcome.versionId,
-    ])
+    const check = await stack.db.admin.query(
+      'select passed from app.check_result where content_version_id = $1',
+      [outcome.versionId],
+    )
     expect(check.rowCount).toBe(1)
     const requests = await stack.db.admin.query(
       'select 1 from app.approval_request where content_version_id = $1',
@@ -227,6 +229,54 @@ describe('the placeholder check handler', () => {
       postResult(jobs, claims, { type: 'placeholder_check.v1', result: { versionId: 'nope' } }),
     ).rejects.toMatchObject({ status: 422, code: 'result_invalid' })
     expect(await stateOf(bo.versionId!)).toBe('in_checks')
+  })
+})
+
+describe("repeats and the worker's word", () => {
+  it('a repeated post of either result type returns the first outcome and applies nothing twice', async () => {
+    const { answer, claims: sameClaims } = await summarised()
+    const outcome = (answer as { outcome: Record<string, string> }).outcome
+    const items = (await counts(stack, brand)).items
+    expect(await postResult(jobs, sameClaims, { type: 'summary.v1', result: GOOD_RESULT })).toEqual({
+      status: 'repeated',
+      outcome,
+    })
+    expect((await counts(stack, brand)).items).toBe(items)
+
+    const checkClaims = await claim(stack, jobs, outcome.checkJobId!)
+    const body = { type: 'placeholder_check.v1', result: { versionId: outcome.versionId } }
+    const first = await postResult(jobs, checkClaims, body)
+    const requests = (await counts(stack, brand)).requests
+    expect(await postResult(jobs, checkClaims, body)).toEqual({
+      status: 'repeated',
+      outcome: (first as { outcome: unknown }).outcome,
+    })
+    expect((await counts(stack, brand)).requests).toBe(requests)
+    const checks = await stack.db.admin.query(
+      'select 1 from app.check_result where content_version_id = $1',
+      [outcome.versionId],
+    )
+    expect(checks.rowCount).toBe(1)
+  })
+
+  it('a verdict sent by the worker is refused, and the core still fails a 401-character summary', async () => {
+    const first = await summarised({ summary: 'a'.repeat(401), keywords: ['x', 'y', 'z'] })
+    const outcome = (first.answer as { outcome: Record<string, string> }).outcome
+    const claims = await claim(stack, jobs, outcome.checkJobId!)
+    await expect(
+      postResult(jobs, claims, {
+        type: 'placeholder_check.v1',
+        result: { versionId: outcome.versionId, passed: true },
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'result_invalid' })
+    expect(await stateOf(outcome.versionId!)).toBe('in_checks')
+    expect(
+      await postResult(jobs, claims, {
+        type: 'placeholder_check.v1',
+        result: { versionId: outcome.versionId },
+      }),
+    ).toMatchObject({ outcome: { passed: false } })
+    expect(await stateOf(outcome.versionId!)).toBe('check_failed')
   })
 })
 
