@@ -8,6 +8,8 @@ export interface StandInOptions {
   crashBeforeReplyOn?: string
   crashAfterReplyOn?: string
   delayMs?: number
+  // What the model answers for a request, given the content of its last message (default `reply:<content>`).
+  replyFor?: (step: string) => string
 }
 
 export function standInModel(options: StandInOptions): ModelClient {
@@ -18,7 +20,7 @@ export function standInModel(options: StandInOptions): ModelClient {
       if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs))
       if (options.crashBeforeReplyOn === step) process.kill(process.pid, 'SIGKILL')
       const reply = {
-        text: `reply:${step}`,
+        text: options.replyFor ? options.replyFor(step) : `reply:${step}`,
         messageId: `msg_${step}_${Math.random().toString(36).slice(2, 10)}`,
         requestId: null,
         stopReason: 'end_turn',
