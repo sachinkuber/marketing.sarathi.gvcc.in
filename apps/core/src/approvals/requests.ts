@@ -3,6 +3,11 @@ import { enqueueNotification } from '../notify/notifications.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify/recipients.ts'
 
+// Lock order of the work engine, everywhere: job_input, run, approval_request, audit chain. A result handler that
+// moves a version to awaiting_approval (openRequest) holds job_input and run first; the tick below locks request
+// rows and only then writes audit entries; a kill-switch release writes its own entry after it has applied
+// held results (killswitch/service.ts). Take locks in that order and no pair waits in a circle.
+//
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 
 // A version has at most one request, ever (a full unique on the version), so opening twice changes nothing.

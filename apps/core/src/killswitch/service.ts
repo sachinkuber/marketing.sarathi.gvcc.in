@@ -177,6 +177,11 @@ export async function releaseSwitch(
         }
       }
     }
+    // The hook may apply held results, which take approval_request locks (a version reaching awaiting_approval)
+    // and write audit entries. The lock order is job_input, run, approval_request, audit chain (the approvals
+    // tick takes approval_request and then the chain), so this release's own entry, which takes the chain
+    // lock, is written last, after the hook.
+    await deps.afterRelease?.(client, unheld)
     await deps.audit.record(
       {
         action: 'killswitch.released',
@@ -188,7 +193,6 @@ export async function releaseSwitch(
       },
       client,
     )
-    await deps.afterRelease?.(client, unheld)
     return { released: true, unheldJobIds: unheld }
   })
 }

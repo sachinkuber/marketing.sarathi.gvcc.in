@@ -6,6 +6,7 @@ import type { Logger } from 'pino'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
+import { registerSummaryHandlers } from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
 
 export interface RunningServer {
@@ -28,6 +29,7 @@ export async function startServer(
   authPool.on('error', (error) =>
     deps.logger.error({ err: error, pool: 'auth' }, 'idle database client error'),
   )
+  registerSummaryHandlers(results, { audit: deps.audit, queue, backlogLimit: config.queueBacklogLimit })
   // trustProxy (AppDeps) is set at deployment (package 16) because the invite limiter keys on req.ip.
   const { app } = buildCore({
     config,

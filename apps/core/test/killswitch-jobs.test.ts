@@ -6,9 +6,12 @@ import { httpCoreClient } from '../../worker/src/core-client.ts'
 import { startWorker } from '../../worker/src/main.ts'
 import type { ModelClient } from '../../worker/src/model.ts'
 import type { JobHandler } from '../../worker/src/runner.ts'
+import { tick } from '../src/approvals/requests.ts'
+import { registerSummaryHandlers } from '../src/agents/register.ts'
 import { markDead, requeueJob } from '../src/jobs/dead.ts'
-import { createJob, createRun, readControl, type JobsDeps } from '../src/jobs/service.ts'
+import { createJob, createRun, postResult, readControl, type JobsDeps } from '../src/jobs/service.ts'
 import { setSwitch } from '../src/killswitch/service.ts'
+import { BRIEF, GOOD_RESULT, checkJobOf, claim, counts, runState, startRun } from './summary-support.ts'
 import {
   addBrand,
   addUser,
@@ -511,5 +514,108 @@ describe('release and the other paths of the work engine', () => {
       [jobId],
     )
     expect(calls.rows.map((r) => r.possible_duplicate)).toEqual([false, true])
+  }, 240_000)
+})
+
+// Milestone 6: the summary agent's results against the kill switch, on a stack with the real audit chain (the
+// release and the approvals tick both write to it) and no worker: the test plays the worker's calls itself.
+describe('the summary run and the kill switch', () => {
+  let proof: Stack
+  let pj: JobsDeps
+  let pBrand: string
+  let pAdminId: string
+  let pAdmin: TestClient
+  let pSecret: string
+
+  beforeAll(async () => {
+    proof = await createStack({ withQueue: true, realAudit: true })
+    if (!proof.jobs) throw new Error('withQueue')
+    pj = proof.jobs
+    registerSummaryHandlers(pj.results, pj)
+    pBrand = await addBrand(proof, 'ksj-sum')
+    pAdminId = await addUser(proof, {
+      email: 'ksjsum@example.test',
+      password: PASSWORD,
+      role: 'brand_admin',
+      brandId: pBrand,
+    })
+    const enrolled = await enrolledClient(proof, 'ksjsum@example.test', PASSWORD)
+    pAdmin = enrolled.client
+    pSecret = enrolled.secret
+  }, 120_000)
+  afterAll(async () => {
+    await proof?.close()
+  })
+
+  const pSet = () =>
+    setSwitch(proof.appPool, { audit: pj.audit }, { brandId: pBrand, scope: 'brand', target: null, actor: pAdminId })
+  const pRelease = async () => {
+    const reply = await pAdmin.request('POST', `/api/v1/brands/${pBrand}/kill-switch/release`, {
+      body: { scope: 'brand', code: totp(pSecret) },
+    })
+    if (reply.status !== 200) throw new Error(`release failed: ${reply.status} ${reply.text}`)
+    return reply.json as { released: boolean; unheld: number }
+  }
+
+  it('a result held by the switch makes no version, check job or notification; release applies it once and the check job runs', async () => {
+    const before = await counts(proof, pBrand)
+    const { runId, jobId } = await startRun(pj, pBrand, pAdminId, BRIEF)
+    const claims = await claim(proof, pj, jobId)
+    expect((await pSet()).held).toBe(1)
+    expect(await postResult(pj, claims, { type: 'summary.v1', result: GOOD_RESULT })).toEqual({ status: 'held' })
+    expect(await counts(proof, pBrand)).toEqual({ ...before, jobs: before.jobs + 1 })
+    expect(await checkJobOf(proof, runId)).toBeUndefined()
+    expect(await runState(proof, runId)).toBe('running')
+
+    expect(await pRelease()).toEqual({ released: true, unheld: 1 })
+    expect(await counts(proof, pBrand)).toEqual({
+      items: before.items + 1,
+      versions: before.versions + 1,
+      requests: before.requests,
+      notifications: before.notifications,
+      jobs: before.jobs + 2,
+    })
+    const checkJob = await checkJobOf(proof, runId)
+    expect(checkJob).toBeDefined()
+    expect(await runState(proof, runId)).toBe('running')
+
+    // The check job is free (the switch is released) and runs to its end.
+    const checkClaims = await claim(proof, pj, checkJob!)
+    const outcome = (
+      await proof.db.admin.query('select outcome from app.job_input where job_id = $1', [jobId])
+    ).rows[0].outcome as { versionId: string }
+    expect(
+      await postResult(pj, checkClaims, { type: 'placeholder_check.v1', result: { versionId: outcome.versionId } }),
+    ).toMatchObject({ status: 'applied', outcome: { passed: true } })
+    expect(await runState(proof, runId)).toBe('succeeded')
+    const after = await counts(proof, pBrand)
+    expect(after.requests).toBe(before.requests + 1)
+    expect(after.versions).toBe(before.versions + 1)
+    expect(await pRelease()).toEqual({ released: false, unheld: 0 })
+    expect((await counts(proof, pBrand)).versions).toBe(before.versions + 1)
+  }, 120_000)
+
+  it('a release racing the approvals tick never deadlocks (20 pairs, each under 5 seconds)', async () => {
+    const far = { now: () => new Date(Date.now() + 1000 * 24 * 3_600_000) }
+    for (let i = 0; i < 20; i += 1) {
+      const { runId, jobId } = await startRun(pj, pBrand, pAdminId, BRIEF)
+      const claims = await claim(proof, pj, jobId)
+      await pSet()
+      expect(await postResult(pj, claims, { type: 'summary.v1', result: GOOD_RESULT })).toEqual({
+        status: 'held',
+      })
+      const versions = (await counts(proof, pBrand)).versions
+      const started = Date.now()
+      const [released] = await Promise.all([
+        pRelease(),
+        tick(proof.appPool, { clock: far, audit: pj.audit }),
+        tick(proof.appPool, { clock: far, audit: pj.audit }),
+      ])
+      expect(Date.now() - started, `pair ${i}`).toBeLessThan(5000)
+      // This pair's summary job, and the check jobs the earlier pairs left waiting.
+      expect(released).toEqual({ released: true, unheld: i + 1 })
+      expect((await counts(proof, pBrand)).versions).toBe(versions + 1)
+      expect(await checkJobOf(proof, runId)).toBeDefined()
+    }
   }, 240_000)
 })

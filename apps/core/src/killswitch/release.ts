@@ -13,6 +13,12 @@ interface Freed {
   cancel_requested: boolean
 }
 
+// Lock order of the work engine, everywhere: job_input, run, approval_request, audit chain. A held result
+// applied here goes through applyResult (job_input already held, then run) and its handler (a version reaching
+// awaiting_approval takes approval_request locks, then writes audit entries). releaseSwitch therefore writes
+// its own 'killswitch.released' entry only after this hook has run, and the approvals tick (approvals/requests.ts)
+// takes approval_request before the chain, so no two of them wait on each other in a circle.
+//
 // What a kill-switch release does with the jobs it freed (spec 9.2, 9.4, 13), run by releaseSwitch inside the
 // release transaction as its afterRelease hook, so the flag is cleared and the jobs are dealt with together,
 // or neither.

@@ -16,6 +16,7 @@ import { registerKillSwitchRoutes } from './routes/killswitch.ts'
 import { releaseHeldJobs } from './killswitch/release.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
+import { registerAgentRoutes } from './routes/agents.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
 import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
@@ -101,6 +102,7 @@ export function createApi(
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs, deps.notify)
     registerJobRoutes(table, deps.jobs)
+    registerAgentRoutes(table, deps.jobs)
   }
 
   extra?.(table, { auth: deps.auth, pool: deps.pool })
