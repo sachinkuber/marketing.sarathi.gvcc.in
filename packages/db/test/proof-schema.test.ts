@@ -3,6 +3,7 @@ import { runner } from 'node-pg-migrate'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { requireDatabase } from '@mkt/test-support'
 import { migrate } from '../src/migrate.ts'
+import { agentFilesHash, SUMMARY_AGENT_DIR } from './agent-files-hash.ts'
 import { createTestDatabase, seedBrand, type TestDatabase } from '../src/testing.ts'
 
 const A = '11111111-1111-4111-8111-111111111111'
@@ -87,7 +88,7 @@ describe('summary agent definition', () => {
     )
     expect(r.rows).toHaveLength(1)
     expect(r.rows[0]).toMatchObject({ version: 1, model: 'claude-opus-5-5', effort: 'low' })
-    expect(r.rows[0].files_hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(r.rows[0].files_hash).toBe(agentFilesHash(SUMMARY_AGENT_DIR))
   })
 })
 

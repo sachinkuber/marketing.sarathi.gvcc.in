@@ -22,10 +22,10 @@ create table app.duty_run (
 );
 grant select, insert, update on app.duty_run to mkt_app;
 
--- 3. The summary agent's first definition. files_hash is a placeholder of 64 zeros: Task 2 of milestone 6
--- adds agents/summary/ and replaces it with the hash of those files.
+-- 3. The summary agent's first definition. files_hash is the hash of agents/summary/ (sorted relative paths, each
+-- followed by a NUL and the file's bytes); a test recomputes it.
 insert into app.agent_definition_version (agent, version, model, effort, files_hash, live, released_at)
-values ('summary', 1, 'claude-opus-5-5', 'low', repeat('0', 64), true, now());
+values ('summary', 1, 'claude-opus-5-5', 'low', '33040882f1e96a9e7cffb886467f0967ad0ec17204c29ad23087ae69629f7a88', true, now());
 
 -- 4. Follow-up M-7: awaiting_approval -> approved needs an approving decision for the version. Every edge of
 -- the transition table and the same-state no-op are kept as in 0014.
