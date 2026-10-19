@@ -8,6 +8,21 @@ export async function approversOf(client: PoolClient, brandId: string): Promise<
   return membersWith(client, brandId, 'approver')
 }
 
+// Everyone who can approve content in the brand (the holders of approve_content): its approvers and brand
+// admins, and, when the brand has neither, the platform owners. Never empty unless there is no platform owner
+// either; the caller decides what to do then.
+export async function approvalRecipientsOf(client: PoolClient, brandId: string): Promise<string[]> {
+  const { rows } = await client.query<{ user_id: string }>(
+    `select user_id from app.membership
+      where brand_id = $1 and role in ('approver'::app.membership_role, 'brand_admin'::app.membership_role)
+      order by created_at, user_id`,
+    [brandId],
+  )
+  if (rows.length > 0) return rows.map((r) => r.user_id)
+  const owners = await client.query<{ id: string }>('select app.platform_owner_ids() as id')
+  return owners.rows.map((r) => r.id)
+}
+
 export async function brandAdminsOf(client: PoolClient, brandId: string): Promise<string[]> {
   return membersWith(client, brandId, 'brand_admin')
 }

@@ -150,7 +150,8 @@ revoke select on app.job_attempt from mkt_definer;
 drop policy definer_read_notification on app.notification;
 revoke select on app.notification from mkt_definer;
 drop policy definer_alert on app.alert;
-revoke select, insert, update on app.alert from mkt_definer;
+-- Only what this migration granted: 0014 granted select, which platform_alerts() still needs.
+revoke insert, update on app.alert from mkt_definer;
 drop index app.notification_queued_idx;
 drop index app.alert_undelivered_idx;
 drop index app.alert_open_ref_unique;

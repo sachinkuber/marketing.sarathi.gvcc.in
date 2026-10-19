@@ -1,6 +1,6 @@
 import { withBrand } from '@mkt/db'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { tick } from '../src/approvals/requests.ts'
+import { openRequest, tick } from '../src/approvals/requests.ts'
 import { createVersion, moveState } from '../src/content/versions.ts'
 import { ManualClock } from '../src/notify/doubles.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
@@ -126,11 +126,10 @@ describe('reminders and escalation (test 20)', () => {
     }
     expect(sentAt).toEqual([24, 48, 72])
     expect(overdueAt).toBe(96)
-    expect(await notified(w.versionId, 'approval_reminder')).toEqual([
-      b.approverId,
-      b.approverId,
-      b.approverId,
-    ])
+    // Everyone who can approve is reminded: the approver and the brand admin, each time.
+    expect((await notified(w.versionId, 'approval_reminder')).sort()).toEqual(
+      [b.approverId, b.approverId, b.approverId, b.adminId, b.adminId, b.adminId].sort(),
+    )
     const row = await requestRow(w.requestId)
     expect(row.reminders_sent).toBe(3)
     expect(row.overdue).toBe(true)
@@ -172,10 +171,7 @@ describe('reminders and escalation (test 20)', () => {
     const owner = (
       await stack.db.admin.query(`select id from auth."user" where email = 'owner@example.test'`)
     ).rows[0].id as string
-    await stack.db.admin.query('delete from app.membership where brand_id = $1 and role = $2', [
-      b.brandId,
-      'approver',
-    ])
+    await stack.db.admin.query('delete from app.membership where brand_id = $1', [b.brandId])
     await stack.db.admin.query(
       `insert into app.membership (brand_id, user_id, role) values ($1, $2, 'approver')`,
       [b.brandId, owner],
@@ -194,6 +190,73 @@ describe('reminders and escalation (test 20)', () => {
     expect(await notified(w.versionId, 'approval_overdue')).toEqual([])
     expect(auditActions(w.versionId)).toContain('approval.overdue')
     expect(auditActions(w.versionId)).not.toContain('approval.escalated')
+  })
+})
+
+describe('who is told', () => {
+  it('tells the approvers and brand admins when a version reaches awaiting approval, once (spec 10.5)', async () => {
+    const b = await makeBrand()
+    const w = await waiting(b.brandId)
+    expect((await notified(w.versionId, 'approval_waiting')).sort()).toEqual([b.approverId, b.adminId].sort())
+    // Opening the request again (it is idempotent) tells no one a second time.
+    await withBrand(stack.appPool, b.brandId, async (client) => {
+      expect(await openRequest(client, { brandId: b.brandId, versionId: w.versionId })).toBe(false)
+    })
+    expect(await notified(w.versionId, 'approval_waiting')).toHaveLength(2)
+  })
+
+  it('reminds the brand admin of a brand that has no approver role member', async () => {
+    const b = await makeBrand()
+    await stack.db.admin.query('delete from app.membership where brand_id = $1 and role = $2', [
+      b.brandId,
+      'approver',
+    ])
+    const w = await waiting(b.brandId)
+    clock.advance(24 * H)
+    expect((await runTick()).reminded).toBe(1)
+    expect(await notified(w.versionId, 'approval_reminder')).toEqual([b.adminId])
+  })
+
+  it('falls back to the platform owners when the brand has no approver or admin, and tells them on arrival', async () => {
+    seq += 1
+    const brandId = await addBrand(stack, `req-${seq}`)
+    const owner = (
+      await stack.db.admin.query(`select id from auth."user" where email = 'owner@example.test'`)
+    ).rows[0].id as string
+    const w = await waiting(brandId)
+    expect(await notified(w.versionId, 'approval_waiting')).toEqual([owner])
+    clock.advance(24 * H)
+    expect((await runTick()).reminded).toBe(1)
+    expect(await notified(w.versionId, 'approval_reminder')).toEqual([owner])
+  })
+
+  it('does not count a reminder that would go to nobody, and logs it', async () => {
+    seq += 1
+    const brandId = await addBrand(stack, `req-${seq}`)
+    // No approver, no admin, and (for this test) no platform owner.
+    const saved = await stack.db.admin.query('select * from app.platform_owner')
+    await stack.db.admin.query('delete from app.platform_owner')
+    try {
+      const w = await waiting(brandId)
+      expect(await notified(w.versionId, 'approval_waiting')).toEqual([])
+      expect(auditActions(w.versionId)).toContain('approval.no_recipient')
+      clock.advance(24 * H)
+      const warned: unknown[] = []
+      const out = await tick(stack.appPool, {
+        ...deps(),
+        logger: { warn: (...a: unknown[]) => void warned.push(a), error: () => undefined },
+      } as Parameters<typeof tick>[1])
+      expect(out.reminded).toBe(0)
+      expect((await requestRow(w.requestId)).reminders_sent).toBe(0)
+      expect(warned).toHaveLength(1)
+    } finally {
+      for (const r of saved.rows) {
+        await stack.db.admin.query('insert into app.platform_owner (user_id, granted_at) values ($1, $2)', [
+          r.user_id,
+          r.granted_at,
+        ])
+      }
+    }
   })
 })
 
@@ -249,7 +312,7 @@ describe('idempotence', () => {
       totals.reminded += out.reminded
     }
     expect(totals.reminded).toBe(1)
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(1)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
   })
 
   it('does not double-send when two ticks overlap', async () => {
@@ -259,7 +322,7 @@ describe('idempotence', () => {
     const results = await Promise.all([runTick(), runTick(), runTick()])
     expect(results.reduce((n, r) => n + r.reminded, 0)).toBe(1)
     expect((await requestRow(w.requestId)).reminders_sent).toBe(1)
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(1)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
   })
 
   it('keeps reminders one gap apart after a long outage, not back to back', async () => {
@@ -273,7 +336,7 @@ describe('idempotence', () => {
     clock.advance(DAY - 60_000)
     expect((await runTick()).reminded).toBe(1)
     expect((await requestRow(w.requestId)).reminders_sent).toBe(2)
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(4)
   })
 })
 
@@ -302,7 +365,9 @@ describe('one failing brand', () => {
       await stack.db.admin.query('drop trigger test_fail on app.notification')
       await stack.db.admin.query('drop function app.test_fail_notification()')
     }
-    expect(await notified(wGood.versionId, 'approval_reminder')).toEqual([good.approverId])
+    expect((await notified(wGood.versionId, 'approval_reminder')).sort()).toEqual(
+      [good.approverId, good.adminId].sort(),
+    )
     expect(await notified(wBad.versionId, 'approval_reminder')).toEqual([])
     expect((await requestRow(wBad.requestId)).reminders_sent).toBe(0)
     expect(logged).toHaveLength(1)
@@ -334,7 +399,7 @@ describe('approval settings (test 23)', () => {
     // No third reminder: the request is overdue one gap after the second instead.
     expect(await runTick()).toEqual({ failedBrands: 0, reminded: 0, overdue: 1, escalated: 1 })
     expect((await requestRow(w.requestId)).reminders_sent).toBe(2)
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(4)
   })
 
   it('changing the timing moves the next reminder of an open request', async () => {
@@ -412,7 +477,7 @@ describe('worker route', () => {
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ failedBrands: 0, reminded: 1, overdue: 0, escalated: 0 })
-    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(1)
+    expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
     const anonymous = await fetch(`${stack.server.url}/api/v1/worker/approvals/tick`, { method: 'POST' })
     expect(anonymous.status).toBeGreaterThanOrEqual(401)
   })

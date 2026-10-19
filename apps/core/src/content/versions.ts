@@ -1,8 +1,10 @@
 import { prepareVersion } from '@mkt/canonical'
 import type { PoolClient } from '@mkt/db'
 import { PAYLOAD_SCHEMA } from '@mkt/shared'
-import { closeRequest, openRequest } from '../approvals/requests.ts'
+import { closeRequest, openRequest, WAITING_KIND } from '../approvals/requests.ts'
 import { AppError } from '../errors.ts'
+import { enqueueNotification } from '../notify/notifications.ts'
+import { approvalRecipientsOf } from '../notify/recipients.ts'
 import type { AuditSink } from '../ports.ts'
 import { OPEN_STATES, canMove, type VersionState } from './states.ts'
 
@@ -55,7 +57,35 @@ export async function moveState(
      values ($1, $2, $3, $4, $5, $6, $7)`,
     [row.brand_id, versionId, row.state, to, cause, actor.kind, actorId(actor)],
   )
-  if (to === 'awaiting_approval') await openRequest(client, { brandId: row.brand_id, versionId })
+  if (to === 'awaiting_approval') {
+    const opened = await openRequest(client, { brandId: row.brand_id, versionId })
+    // Spec 10.5: the approvers are told when a version reaches awaiting approval. Only the call that opened the
+    // request tells them, so a repeat sends nothing; the notification is in this transaction, like the state.
+    if (opened) {
+      const recipients = await approvalRecipientsOf(client, row.brand_id)
+      for (const userId of recipients) {
+        await enqueueNotification(client, {
+          brandId: row.brand_id,
+          userId,
+          kind: WAITING_KIND,
+          subject: { kind: 'content_version', id: versionId },
+        })
+      }
+      if (recipients.length === 0) {
+        await deps.audit.record(
+          {
+            action: 'approval.no_recipient',
+            actor: null,
+            subject: versionId,
+            brandId: row.brand_id,
+            outcome: 'failure',
+            detail: { kind: WAITING_KIND },
+          },
+          client,
+        )
+      }
+    }
+  }
   if (row.state === 'awaiting_approval') await closeRequest(client, versionId, cause)
   await deps.audit.record(
     {

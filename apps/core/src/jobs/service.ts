@@ -257,12 +257,43 @@ export async function requireCurrentAttempt(
 // it (brand scope, or agent scope naming the run's agent; channel scope covers no job). When a switch holds a
 // job whose flag is still false, the flag is set here in the same transaction, so the flag always tells the
 // truth and a release, which works from flagged jobs, finds it.
+//
+// Writing the flag is ordered against set and release: the brand row is taken FOR SHARE (they take it FOR
+// UPDATE), and the switch is read again once it is held. A release that was in flight has then committed, the
+// job is no longer covered, and nothing is written; otherwise a job could be flagged held after the release
+// had looked for flagged jobs, and be stranded with no switch and no queue row. A release locks only the inputs
+// of jobs already flagged, so waiting here, with this job's input row held, cannot deadlock with it.
 export async function readControl(
   client: PoolClient,
   jobId: string,
 ): Promise<{ cancelRequested: boolean; held: boolean }> {
-  const { rows } = await client.query<{ cancel_requested: boolean; held: boolean; covered: boolean }>(
-    `select c.cancel_requested, c.held,
+  let row = await readControlRow(client, jobId)
+  if (row && row.covered && !row.held) {
+    await client.query('select 1 from app.brand where id = $1 for share', [row.brand_id])
+    row = await readControlRow(client, jobId)
+    if (row && row.covered && !row.held) {
+      await client.query('update app.job_control set held = true, updated_at = now() where job_id = $1', [
+        jobId,
+      ])
+    }
+  }
+  return {
+    cancelRequested: row?.cancel_requested ?? false,
+    held: (row?.held ?? false) || (row?.covered ?? false),
+  }
+}
+
+async function readControlRow(
+  client: PoolClient,
+  jobId: string,
+): Promise<{ brand_id: string; cancel_requested: boolean; held: boolean; covered: boolean } | undefined> {
+  const { rows } = await client.query<{
+    brand_id: string
+    cancel_requested: boolean
+    held: boolean
+    covered: boolean
+  }>(
+    `select c.brand_id, c.cancel_requested, c.held,
             exists (select 1 from app.kill_switch k
                      where k.brand_id = c.brand_id and k.active
                        and (k.scope = 'brand' or (k.scope = 'agent' and k.target = r.agent))) as covered
@@ -272,16 +303,7 @@ export async function readControl(
       where c.job_id = $1`,
     [jobId],
   )
-  const row = rows[0]
-  if (row && row.covered && !row.held) {
-    await client.query('update app.job_control set held = true, updated_at = now() where job_id = $1', [
-      jobId,
-    ])
-  }
-  return {
-    cancelRequested: row?.cancel_requested ?? false,
-    held: (row?.held ?? false) || (row?.covered ?? false),
-  }
+  return rows[0]
 }
 
 export interface RegisterInput {

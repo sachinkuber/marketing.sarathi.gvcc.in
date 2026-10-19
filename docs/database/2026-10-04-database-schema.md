@@ -638,7 +638,7 @@ Built in migrations 0014 and 0015 (milestone 5). Row-level security is forced. A
 | last_attempt_at | timestamptz | Drives the backoff of 2^attempts minutes, at most 60 (0016) |
 | delivery_stalled, delivery_issue | boolean, text | Set after 10 attempts without delivery; the issue is a short name, never a message body (0016) |
 
-Built in migrations 0014 to 0016. A unique partial index `alert_open_ref_unique` allows one open alert per brand, kind and reference (0015). Writes go through definer functions (`raise_alert`, `mark_alert_delivery`, `undelivered_alerts`, `get_platform_alert`, `list_platform_alerts`, `ack_platform_alert`). A platform alert has a null brand and is read only through `platform_alerts()`.
+Built in migrations 0014 to 0016. A unique partial index `alert_open_ref_unique` allows one open alert per brand, kind and reference (0015). Writes of platform alerts and of delivery state go through definer functions (`raise_alert`, `mark_alert_delivery`, `ack_platform_alert`); the brand acknowledgement is a direct `update` under row-level security. A platform alert has a null brand and is read through definer functions only (`platform_alerts()`, `list_platform_alerts`, `get_platform_alert`, `undelivered_alerts`).
 
 ### 8.3 `app.trigger_nonce`
 
@@ -777,9 +777,9 @@ No run-time role can bypass row-level security, and none owns a table.
 | A content version never changes | Trigger refusing update and delete |
 | A version's hash matches its content | Trigger recomputing the hash on insert |
 | An approval names the real hash of its version | Trigger on insert |
-| A content version moves only along the allowed edges, starts as `draft`, and a same-state update changes nothing | Table `app.version_state_transition` (the 18 edges of architecture 8.2, plus draft, in_checks and approved to superseded) and a trigger that reads the session setting `app.version_state_transition` (0014) |
+| A content version moves only along the allowed edges, starts as `draft`, and a same-state update changes nothing | Table `app.version_state_transition` (the 18 edges of architecture 8.2, plus draft, in_checks and approved to superseded) and a trigger that reads that table (0014) |
 | A brand's jobs can be held or released only by that brand's own session | `app.hold_brand_jobs(brand, agent, hold)` refuses a brand other than the session's (0014) |
-| Only the newest queue id of a job may start it | `app.job_control.queue_id`, checked when an attempt starts (0014, milestone 5) |
+| Only the newest queue id of a job may start it, when the worker sends the id | `app.job_control.queue_id`, checked when an attempt starts (0014, milestone 5); the worker's `queueId` is optional, and a start without it is not checked |
 | The audit log is never changed | No update or delete rights, and a trigger |
 | One live definition per agent; one active attempt per job; one active kill switch per scope | Partial unique indexes |
 | A model call is costed once | Unique partial index `cost_ledger_one_per_call` on `model_call_id` in the cost ledger |

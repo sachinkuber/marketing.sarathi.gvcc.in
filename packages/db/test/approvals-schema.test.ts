@@ -391,4 +391,28 @@ describe('migration 0014 down and up', () => {
       await own.drop()
     }
   })
+
+  it('rolling back 0015 and the two after it leaves platform_alerts() working (0014 granted its select)', async () => {
+    const own = await createTestDatabase()
+    try {
+      const url = own.urlFor('migration')
+      const base = {
+        databaseUrl: url,
+        dir: new URL('../migrations', import.meta.url).pathname,
+        migrationsTable: 'pgmigrations',
+        migrationsSchema: 'public',
+        createSchema: false,
+        log: () => undefined,
+      }
+      await runner({ ...base, direction: 'down', count: 3 })
+      const gone = await own.admin.query(
+        "select to_regprocedure('app.raise_alert(uuid,smallint,text,jsonb)') as r",
+      )
+      expect(gone.rows[0].r).toBeNull()
+      // The function runs as mkt_definer: a revoked select would fail here with "permission denied".
+      await expect(own.admin.query('select * from app.platform_alerts()')).resolves.toBeDefined()
+    } finally {
+      await own.drop()
+    }
+  })
 })

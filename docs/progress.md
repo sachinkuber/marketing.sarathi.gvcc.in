@@ -187,7 +187,7 @@ Not proven yet, and why:
 
 - The daily export and verify jobs: they need the queue and worker (milestone 4). The functions they will call are written and tested.
 - The real write-once store outside the server: owner items A4 and A5. A port and an in-memory store stand in.
-- The severity 1 alert on a mismatch: alert delivery is package 11. `verify` takes an `onMismatch` callback; nothing is wired to it.
+- The severity 1 alert on a mismatch: alert delivery was built in milestone 5 (package 11), but nothing runs `verify` and the mismatch handler (`auditMismatchHandler`) is not wired to it, so this monitoring item is not live. `verify` takes an `onMismatch` callback.
 - The audit screen, and the logging of people's reads of the log (SEC-8, second half): the dashboard milestone.
 - The approval-hash trigger and the content-version creation service: package 10.
 - Retention of the log: owner item F2; the log has no delete at all.
@@ -294,7 +294,7 @@ The ten decisions in the plan ("Decisions proposed to the owner") were built as 
 
 ## Phase 1, milestone 5: Approvals
 
-Built 2026-10-17 to 2026-10-18. Branch `m5-approvals`, base `4604117` (main). Plan: `docs/plans/2026-10-17-m5-approvals.md`. Each task had its own review and fix rounds before the next began; a whole-branch review and one fix wave closed the milestone.
+Built 2026-10-17 to 2026-10-18. Branch `m5-approvals`, base `4604117` (main). Plan: `docs/plans/2026-10-17-m5-approvals.md`. Each task had its own review and fix rounds before the next began; a whole-branch review (3 Important, 8 Minor) was followed by one fix wave, recorded in the Findings below; the fixes were verified by the checks listed there, and the pull request is not merged by this note.
 
 | Package | State | Evidence |
 |---|---|---|
@@ -306,7 +306,7 @@ Built 2026-10-17 to 2026-10-18. Branch `m5-approvals`, base `4604117` (main). Pl
 | Acceptance test | State | Evidence |
 |---|---|---|
 | 18 | Proven | Editing after approval is refused or supersedes, and an approval of changed content is refused: `apps/core/test/approvals.test.ts`, `apps/core/test/content-versions.test.ts` |
-| 19 | Proven | An approval is bound to the hash it names; a wrong or stale hash is refused: `apps/core/test/approvals.test.ts` |
+| 19 | Proven | Approval, the state change and the outbox action are written together or not at all (failure injection): `apps/core/test/approvals.test.ts`. The hash binding itself is proven by tests 18 and the approval-hash trigger test |
 | 20 | Proven | Reminders on schedule: `apps/core/test/approval-requests.test.ts` |
 | 21 | Proven | Overdue and escalation; silence does not approve: `apps/core/test/approval-requests.test.ts` |
 | 22 | Proven at API level only | The overdue pop-up list and acknowledgement, once per session per request: `apps/core/test/overdue.test.ts`. The screens are package 15 (milestone 6) |
@@ -334,6 +334,7 @@ M4 tests (24 to 29, 32) still pass.
   12. (Task 7) The kill switch is enforced by a live check at job creation, attempt start, model-call registration and result posting, and persisted to `job_control.held`; set and release lock the brand row. Cost: brand-row contention between job creation and switch changes (rare).
   13. (Task 8) Release sends each freed job again under a new queue id and only the newest id may start it; the library's `retry()` raises the retry limit by one and keeps the retry count. Cost: core and worker must deploy together.
   14. (Task 8) Accepted and documented: releasing a switch while an attempt is mid-flight can cost one extra paid model call (flagged as a possible duplicate; the result is still applied once). The proper fix is for the worker to end its attempt when told `held`. Cost: one duplicate paid call per such release.
+  15. (Final review) Setting the kill switch holds waiting jobs (a flag) instead of cancelling them in the queue as spec 9.2 says. This is equivalent, and it is what lets release work: a held job is still in the queue, so a worker claims it, is told `held` and completes the row, and release re-sends it under a new queue id. Cost if wrong: none found.
 - Findings fixed in review (Important, one line each):
   - Task 1: `hold_brand_jobs` trusted its brand argument (a cross-brand hold was possible); now guarded to the session brand.
   - Task 2: `package-lock.json` lacked new dependencies (`npm ci` would fail); a concurrency test and a real-id cross-brand test were added.
@@ -349,7 +350,13 @@ M4 tests (24 to 29, 32) still pass.
   - A real `Mailer` and a real `AlertChannel` must be wired before alerts and notifications are delivered. Each must set its own transport timeout (the core's 10 s timeout only stops waiting).
   - The worker's maintenance timer now also drives the approvals tick (default every 300 s; the spec asks for 15 minutes; the tick is idempotent).
   - The proxy must let `POST /api/v1/worker/approvals/tick` through with the worker credential.
+- Final fix wave: I-1 (approvers, brand admins, or platform owners if there are none, are notified when a version reaches awaiting approval; once per request), I-2 (reminders go to the same set; an empty set is logged and not counted as sent), I-3 (`readControl` takes the brand row FOR SHARE and re-checks the switch before writing a derived hold), M-1 (the 0015 down revokes only insert and update), M-5, M-6 and the ruling above (15).
 - Follow-ups, one line each:
+  - M-2: a release that applies held results audits (`killswitch.released`, brand audit lock) before `afterRelease`; once package 13 handlers create versions they need `approval_request` row locks that a concurrent tick holds while waiting for the same audit lock, so a deadlock is possible. Audit after `afterRelease` and document the lock order (approval_request before audit).
+  - M-3: the notification work inside `POST /worker/reconcile` can pass the worker's 60 s request timeout with slow real adapters and skip the dead-job reports; give it its own worker route or check the budget per leg.
+  - M-4: notifications have no retry backoff and a `failed` one is never sent again; with the unconfigured mailer every reminder ends `failed`. Add backoff, and decide whether to reset `failed` notifications when the real adapter goes live.
+  - M-7: the database does not require an `approval` row for `awaiting_approval` to `approved` (`moveState` is exported); add that check to the transition trigger.
+  - The audit-mismatch alert handler is not wired: nothing runs `verifyAudit` (spec 16 monitoring item).
   - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
   - A real mail transport and the second alert channel (owner item A11); then prove test 38.
   - The nodemailer advisory: check and upgrade when the real transport is wired.

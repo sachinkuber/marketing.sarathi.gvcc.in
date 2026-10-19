@@ -7,7 +7,7 @@ import { startWorker } from '../../worker/src/main.ts'
 import type { ModelClient } from '../../worker/src/model.ts'
 import type { JobHandler } from '../../worker/src/runner.ts'
 import { markDead, requeueJob } from '../src/jobs/dead.ts'
-import { createJob, createRun, type JobsDeps } from '../src/jobs/service.ts'
+import { createJob, createRun, readControl, type JobsDeps } from '../src/jobs/service.ts'
 import { setSwitch } from '../src/killswitch/service.ts'
 import {
   addBrand,
@@ -451,6 +451,36 @@ describe('release and the other paths of the work engine', () => {
       expect(await releasing).toEqual({ released: true, unheld: 1 })
     } finally {
       other.release()
+    }
+    expect(await heldFlag(jobId)).toBe(false)
+  }, 60_000)
+
+  it('a derived hold is not written once a release that was in flight commits: the job is not stranded', async () => {
+    const b = await makeBrand()
+    const jobId = await newJob(b.brandId)
+    // The state a requeue under an active switch leaves: the switch covers the job, its flag is false.
+    await stack.db.admin.query(
+      `insert into app.kill_switch (brand_id, scope, active, set_by) values ($1, 'brand', true, $2)`,
+      [b.brandId, b.adminId],
+    )
+    expect(await heldFlag(jobId)).toBe(false)
+    // A release in flight: it holds the brand row, as set and release do, and has not yet committed.
+    const releasing = await stack.db.admin.connect()
+    try {
+      await releasing.query('begin')
+      await releasing.query('select 1 from app.brand where id = $1 for update', [b.brandId])
+      const reading = withBrand(stack.appPool, b.brandId, (client) => readControl(client, jobId))
+      const first = await Promise.race([reading.then(() => 'done'), sleep(1500).then(() => 'waiting')])
+      // The read must wait for the release, not write the flag under it.
+      expect(first).toBe('waiting')
+      await releasing.query(
+        'update app.kill_switch set active = false, released_by = $2, released_at = now() where brand_id = $1',
+        [b.brandId, b.adminId],
+      )
+      await releasing.query('commit')
+      expect((await reading).held).toBe(false)
+    } finally {
+      releasing.release()
     }
     expect(await heldFlag(jobId)).toBe(false)
   }, 60_000)

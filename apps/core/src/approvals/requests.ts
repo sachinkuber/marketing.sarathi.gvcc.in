@@ -1,20 +1,22 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { enqueueNotification } from '../notify/notifications.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
-import { approversOf, brandAdminsOf, platformOwnersOf } from '../notify/recipients.ts'
+import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify/recipients.ts'
 
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 
 // A version has at most one request, ever (a full unique on the version), so opening twice changes nothing.
+// Returns whether this call opened it.
 export async function openRequest(
   client: PoolClient,
   input: { brandId: string; versionId: string },
-): Promise<void> {
-  await client.query(
+): Promise<boolean> {
+  const opened = await client.query(
     `insert into app.approval_request (brand_id, content_version_id) values ($1, $2)
      on conflict (content_version_id) do nothing`,
     [input.brandId, input.versionId],
   )
+  return (opened.rowCount ?? 0) > 0
 }
 
 // Closing an absent or already-closed request does nothing. Returns whether a request was closed by this call.
@@ -37,6 +39,7 @@ export interface TickResult {
   escalated: number
 }
 
+export const WAITING_KIND = 'approval_waiting'
 export const REMINDER_KIND = 'approval_reminder'
 export const OVERDUE_KIND = 'approval_overdue'
 
@@ -92,7 +95,7 @@ export async function tick(
           [brandId, now],
         )
         if (open.rows.length === 0) return
-        const approvers = await approversOf(client, brandId)
+        const approvers = await approvalRecipientsOf(client, brandId)
         const admins = await brandAdminsOf(client, brandId)
         const subject = (row: OpenRow) => ({ kind: 'content_version', id: row.content_version_id })
         const tell = async (users: string[], kind: string, row: OpenRow) => {
@@ -107,6 +110,12 @@ export async function tick(
           )
         for (const row of open.rows) {
           if (row.reminder_due) {
+            if (approvers.length === 0) {
+              // Nobody can approve here (no approver, brand admin or platform owner): the reminder is not
+              // counted as sent, so it goes out as soon as there is someone to tell.
+              deps.logger?.warn({ brand: brandId, request: row.id }, 'approval reminder has no recipient')
+              continue
+            }
             await tell(approvers, REMINDER_KIND, row)
             await client.query(
               'update app.approval_request set reminders_sent = reminders_sent + 1, last_reminder_at = $2 where id = $1',
