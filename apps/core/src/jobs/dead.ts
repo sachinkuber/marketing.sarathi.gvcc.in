@@ -1,7 +1,7 @@
 import { withBrand, type PoolClient } from '@mkt/db'
 import { CLASS_SETTINGS, JOB_CLASSES, type JobClass } from '@mkt/queue'
 import { AppError } from '../errors.ts'
-import type { JobsDeps } from './service.ts'
+import { currentQueueId, type JobsDeps } from './service.ts'
 
 export interface DeadJob {
   jobId: string
@@ -65,7 +65,7 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
     if (job.deadAt && job.runState === 'failed') return
     // Nor is a job the queue is running again: a redelivered copy, or the reconciliation, arriving after an
     // owner's requeue must not fail the run or the live attempt. The queue's own record decides.
-    if ((await deps.queue.state(job.jobClass, jobId)) !== 'failed') return
+    if ((await deps.queue.state(job.jobClass, await currentQueueId(client, jobId))) !== 'failed') return
     await client.query(
       'update app.job_control set dead_at = coalesce(dead_at, now()), updated_at = now() where job_id = $1',
       [jobId],
@@ -131,21 +131,23 @@ async function requireDead(
   deps: JobsDeps,
   jobId: string,
   options: { allowCancelled?: boolean } = {},
-): Promise<{ jobClass: JobClass; runId: string; queueCancelled: boolean }> {
+): Promise<{ jobClass: JobClass; runId: string; queueId: string; queueCancelled: boolean }> {
   const job = await lockJob(client, jobId)
   if (!job.deadAt || job.finishedAt) {
     throw new AppError(409, 'job_not_dead', 'This job is not in the dead-letter list.')
   }
   // The queue must agree: retry and cancel act only on a failed job, so a job the queue no longer shows as
   // failed (a requeue or cancel whose database half rolled back) is refused, and the two cannot diverge.
-  const state = await deps.queue.state(job.jobClass, jobId)
+  // The job's current queue row: a release may have sent it again under a new id.
+  const queueId = await currentQueueId(client, jobId)
+  const state = await deps.queue.state(job.jobClass, queueId)
   // A cancel whose queue half succeeded and whose database half rolled back leaves the queue at cancelled:
   // the cancel (only) finishes the database half.
   const queueCancelled = options.allowCancelled === true && state === 'cancelled'
   if (state !== 'failed' && !queueCancelled) {
     throw new AppError(409, 'job_not_dead', 'The queue does not show this job as failed.')
   }
-  return { jobClass: job.jobClass, runId: job.runId, queueCancelled }
+  return { jobClass: job.jobClass, runId: job.runId, queueId, queueCancelled }
 }
 
 // The queue is asked first, the database second: a job the queue has retried and the database still lists
@@ -158,8 +160,15 @@ export async function requeueJob(
   actor: string,
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
-    const { jobClass, runId } = await requireDead(client, deps, jobId)
-    await deps.queue.requeue(jobClass, jobId)
+    const { jobClass, runId, queueId } = await requireDead(client, deps, jobId)
+    // A job that died while a kill switch held it keeps its held flag (a release skips dead jobs), and with
+    // it set the job would never start again. The flag is cleared here; the next start re-derives it from any
+    // switch still active (readControl), so a job requeued under an active switch is held again, and the
+    // switch's release then sends it.
+    await client.query('update app.job_control set held = false, updated_at = now() where job_id = $1', [
+      jobId,
+    ])
+    await deps.queue.requeue(jobClass, jobId, queueId)
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
     ])
@@ -186,10 +195,10 @@ export async function cancelJob(
   actor: string,
 ): Promise<void> {
   await withBrand(deps.pool, brandId, async (client) => {
-    const { jobClass, runId, queueCancelled } = await requireDead(client, deps, jobId, {
+    const { jobClass, runId, queueId, queueCancelled } = await requireDead(client, deps, jobId, {
       allowCancelled: true,
     })
-    if (!queueCancelled) await deps.queue.cancel(jobClass, jobId)
+    if (!queueCancelled) await deps.queue.cancel(jobClass, jobId, queueId)
     await client.query(
       'update app.job_control set cancel_requested = true, dead_at = null, updated_at = now() where job_id = $1',
       [jobId],

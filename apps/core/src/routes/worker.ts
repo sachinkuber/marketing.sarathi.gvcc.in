@@ -14,10 +14,14 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
+import { tick as approvalsTick } from '../approvals/requests.ts'
+import { runNotifyTick } from '../notify/tick.ts'
+import type { NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
-const startBody = z.strictObject({ workerId: z.string().min(1).max(200) })
+// queueId: the queue row the worker claimed (optional, so an older worker is still understood).
+const startBody = z.strictObject({ workerId: z.string().min(1).max(200), queueId: z.uuid().optional() })
 
 // jsonb and text columns reject U+0000; refusing it here is a 400 instead of a 500 after the provider call.
 const hasNul = (value: unknown): boolean => {
@@ -58,7 +62,7 @@ const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
 const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
-export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
+export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?: NotifyDeps): void {
   table.add({
     method: 'post',
     path: '/worker/jobs/:jobId/attempts',
@@ -71,7 +75,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
           params: z.infer<typeof jobParams>
           body: z.infer<typeof startBody>
         }>(res)
-        res.json(await startAttempt(deps, params.jobId, body.workerId))
+        res.json(await startAttempt(deps, params.jobId, body.workerId, body.queueId))
       },
     ],
   })
@@ -182,13 +186,33 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps): void {
     method: 'post',
     path: '/worker/reconcile',
     access: { kind: 'worker' },
-    summary: 'The worker timer marks model calls left started past their class expiry as unknown',
+    summary:
+      'The worker timer marks model calls left started past their class expiry as unknown, then raises and delivers alerts and notifications',
     handlers: [
       async (_req, res) => {
-        res.json({ marked: await sweepModelCalls(deps) })
+        const marked = await sweepModelCalls(deps)
+        // The timer's other work, after the sweep and never in its way: each stage isolated, one budget.
+        if (notify) await runNotifyTick(notify)
+        res.json({ marked })
       },
     ],
   })
+
+  // Reminders and escalation for open approval requests; the worker timer calls it. Counts only in the answer.
+  if (notify) {
+    table.add({
+      method: 'post',
+      path: '/worker/approvals/tick',
+      access: { kind: 'worker' },
+      summary:
+        'The worker timer sends due approval reminders and marks and escalates overdue requests; it never approves or changes a version',
+      handlers: [
+        async (_req, res) => {
+          res.json(await approvalsTick(notify.pool, notify))
+        },
+      ],
+    })
+  }
 
   table.add({
     method: 'post',

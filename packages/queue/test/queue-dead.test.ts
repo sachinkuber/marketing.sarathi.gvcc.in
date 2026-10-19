@@ -64,6 +64,44 @@ describe('the dead-letter watcher', () => {
     expect(await queue.state('interactive', id)).toBe('cancelled')
   }, 120_000)
 
+  // Recorded finding (pg-boss 12.30): retry() of a failed job does not reset retry_count; it raises
+  // retry_limit by one. A requeued job therefore gets exactly one more try before it is dead again.
+  it('requeue gives a dead job one more try only: retry_count is kept, the limit is raised by one', async () => {
+    const tries = new Map<string, number>()
+    await queue.work('publishing', { processes: 1 }, async (job) => {
+      tries.set(job.id, (tries.get(job.id) ?? 0) + 1)
+      throw new Error('boom')
+    })
+    const client = await app.connect()
+    const id = randomUUID()
+    try {
+      await client.query('begin')
+      await queue.send(client, { jobId: id, jobClass: 'publishing', scheduleKey: randomUUID() })
+      await client.query('commit')
+    } finally {
+      client.release()
+    }
+    const counts = async () =>
+      (
+        await db.admin.query<{ retry_count: number; retry_limit: number }>(
+          'select retry_count, retry_limit from pgboss.job where id = $1',
+          [id],
+        )
+      ).rows[0]!
+    await until(async () => (await queue.state('publishing', id)) === 'failed', 120_000)
+    const before = await counts()
+    const triesBefore = tries.get(id) ?? 0
+    expect(before.retry_count).toBe(before.retry_limit)
+
+    await queue.requeue('publishing', id)
+    await until(async () => (await queue.state('publishing', id)) !== 'retry', 60_000)
+    await until(async () => (await queue.state('publishing', id)) === 'failed', 60_000)
+    const after = await counts()
+    expect(after.retry_limit).toBe(before.retry_limit + 1)
+    expect(after.retry_count).toBe(before.retry_count + 1)
+    expect(tries.get(id)).toBe(triesBefore + 1)
+  }, 240_000)
+
   it('creates the dead-letter queues with retries sized for a core outage', async () => {
     const { rows } = await db.admin.query<{ retry_limit: number; retry_backoff: boolean }>(
       `select retry_limit, retry_backoff from pgboss.queue where name = 'dead-interactive'`,

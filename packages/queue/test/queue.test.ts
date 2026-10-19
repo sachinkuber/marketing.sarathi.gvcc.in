@@ -70,6 +70,31 @@ describe('the queue interface', () => {
     expect(seen).toContain(id)
   })
 
+  it('sends a job again under a new queue id; the handler gets the job id and the queue id', async () => {
+    const seen: { id: string; queueId: string }[] = []
+    await queue.work('production', { processes: 1 }, async (job) => {
+      seen.push({ id: job.id, queueId: job.queueId })
+    })
+    const jobId = await send('production')
+    await until(async () => (await queue.state('production', jobId)) === 'completed')
+    const queueId = randomUUID()
+    const client = await app.connect()
+    try {
+      await client.query('begin')
+      await queue.send(client, { jobId, queueId, jobClass: 'production', scheduleKey: randomUUID() })
+      await client.query('commit')
+    } finally {
+      client.release()
+    }
+    await until(async () => (await queue.state('production', queueId)) === 'completed')
+    expect(seen).toEqual([
+      { id: jobId, queueId: jobId },
+      { id: jobId, queueId },
+    ])
+    const { rows } = await db.admin.query('select data from pgboss.job where id = $1', [queueId])
+    expect(rows[0]?.data).toEqual({ jobId })
+  })
+
   it('refuses a send whose ID is already in the queue, so the caller can roll back', async () => {
     const id = await send('bulk')
     await expect(send('bulk', randomUUID(), id)).rejects.toThrow(/did not accept/)

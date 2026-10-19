@@ -187,7 +187,7 @@ Not proven yet, and why:
 
 - The daily export and verify jobs: they need the queue and worker (milestone 4). The functions they will call are written and tested.
 - The real write-once store outside the server: owner items A4 and A5. A port and an in-memory store stand in.
-- The severity 1 alert on a mismatch: alert delivery is package 11. `verify` takes an `onMismatch` callback; nothing is wired to it.
+- The severity 1 alert on a mismatch: alert delivery was built in milestone 5 (package 11), but nothing runs `verify` and the mismatch handler (`auditMismatchHandler`) is not wired to it, so this monitoring item is not live. `verify` takes an `onMismatch` callback.
 - The audit screen, and the logging of people's reads of the log (SEC-8, second half): the dashboard milestone.
 - The approval-hash trigger and the content-version creation service: package 10.
 - Retention of the log: owner item F2; the log has no delete at all.
@@ -291,3 +291,80 @@ The ten decisions in the plan ("Decisions proposed to the owner") were built as 
 - Verification: four consecutive `npm ci && npm run verify` runs on the development server were made. The first ended with exit 1: all 596 tests passed, but one unhandled connection error (`57P01`) was raised by the test "hands an error from its connections to onError" in `packages/queue/test/queue.test.ts`, which Vitest counts as a failure. Cause: the test terminated the library's LISTEN connection as `stop()` ran, and the library removes that connection's error listener before ending it. The test now terminates only the pooled connections (a test-only change). The three later runs (one before and two after the change) each passed every step: 85 test files and 596 tests passed, 1 skipped (the model check, which needs an API key), `check:pins`, lint, format check, typecheck and `npm run secrets` (no leaks; note that the server's copy of the repository has no `.git` synced, so the secret scan on the server covers its older history; the branch itself was scanned from the laptop's `git log main..HEAD -p`: no server address, no key, secret or password other than placeholders). Two test databases left over from earlier runs of 2026-10-13 (`mkt_t_%`) were dropped; after the runs the count is 0 and no worker or test process is left running on the server.
 - CI (pull request #6): runs 38523737007 (both attempts) and 38525961940 (diagnostics) failed on test 29 with one worker process (ruling 12). After the fix, run 38526866895 passed every step (85 test files passed, 1 skipped); the run for the final commit of this milestone is recorded on the pull request.
 - Pull request: #6, open, not merged.
+
+## Phase 1, milestone 5: Approvals
+
+Built 2026-10-17 to 2026-10-18. Branch `m5-approvals`, base `4604117` (main). Plan: `docs/plans/2026-10-17-m5-approvals.md`. Each task had its own review and fix rounds before the next began; a whole-branch review (3 Important, 8 Minor) was followed by one fix wave, recorded in the Findings below; the fixes were verified by the checks listed there, and the pull request is not merged by this note.
+
+| Package | State | Evidence |
+|---|---|---|
+| 10 Content versions and approvals | Done | Immutable content versions with a hash (cv1); an approval is bound to the hash and refused if the content changed; the allowed state moves are a table plus a trigger; approve, reject and comment routes; edit supersedes |
+| 11 Notifications and alerts | Done, delivery needs adapters | Notification and alert tables, per-recipient and per-channel delivery confirmation, backoff and a stall flag; the platform owner's alert list and acknowledgement. Production uses `UnconfiguredMailer` and `UnconfiguredAlertChannel`, so nothing is delivered until real adapters exist |
+| 12 Kill switch and shadow flag | Done | Switch by brand, agent or channel with a second factor; waiting jobs are held, running jobs stop at the next step, a held result is kept and applied once on release; shadow flag set by the platform owner |
+| 12a Reminders, escalation, approval settings | Done | Reminders at 24, 48 and 72 h, overdue at 96 h with escalation to the brand admins and platform owners; silence never approves; settings per brand; the overdue pop-up API; the worker's maintenance timer drives the tick |
+
+| Acceptance test | State | Evidence |
+|---|---|---|
+| 18 | Proven | Editing after approval is refused or supersedes, and an approval of changed content is refused: `apps/core/test/approvals.test.ts`, `apps/core/test/content-versions.test.ts` |
+| 19 | Proven | Approval, the state change and the outbox action are written together or not at all (failure injection): `apps/core/test/approvals.test.ts`. The hash binding itself is proven by tests 18 and the approval-hash trigger test |
+| 20 | Proven | Reminders on schedule: `apps/core/test/approval-requests.test.ts` |
+| 21 | Proven | Overdue and escalation; silence does not approve: `apps/core/test/approval-requests.test.ts` |
+| 22 | Proven at API level only | The overdue pop-up list and acknowledgement, once per session per request: `apps/core/test/overdue.test.ts`. The screens are package 15 (milestone 6) |
+| 23 | Proven | Approval settings: `apps/core/test/approval-requests.test.ts` |
+| 30 | Proven | The switch set while jobs wait holds them, and release re-sends them: `apps/core/test/killswitch-jobs.test.ts` |
+| 31 | Proven | The switch set while a job runs: no new version, job or notification: `apps/core/test/killswitch-jobs.test.ts` |
+| 38 | Not proven | Needs a real mail account and a second channel (owner item A11). The alert and notification logic is tested with doubles only |
+
+M4 tests (24 to 29, 32) still pass.
+
+## Findings
+
+- Rulings (made while building; each with its cost if wrong):
+  1. (Task 2) `openRequest` and `closeRequest` live in `apps/core/src/approvals/requests.ts` from Task 2 so Task 3 and Task 5 have no order dependency. Cost: Task 2 slightly larger.
+  2. (Task 4) The recipient lookup (`approversOf`, `brandAdminsOf`, `platformOwnersOf`) lives in `notify/recipients.ts`. Cost: none.
+  3. (Task 8) Test 31 registers its own result handler to prove no version, job or notification is made; the production registry stays empty until package 13. Cost: weaker evidence until milestone 6.
+  4. (Task 1) The allowed state moves are the 18 edges of architecture 8.2 plus draft, in_checks and approved to superseded (spec 10.5). Cost if wrong: a legal move fails loudly.
+  5. (Task 1) A same-state update is a no-op, not an error; a first state other than `draft` is refused. Cost: a pointless touch passes silently.
+  6. (Task 1) The `approval_request_one_open` index was dropped; the full unique index in 0003 is stricter. Cost: none.
+  7. (Task 3) Comments are kept only as the audit entry `approval.commented`; a rejection also writes an approval row (decision `rejected`). The outbox key is `md5('approval:'||id)::uuid`. Cost: comments are not queryable except through the audit log, and any "is approved" query must filter `decision = 'approved'`.
+  8. (Task 4) Production keeps the two unconfigured adapters; findings are alerted from `POST /worker/reconcile`. Cost: no alert is delivered until owner item A11 and a mail account exist.
+  9. (Task 5) Migration 0017 adds a definer function that lists brands with open requests; `escalated_to` stores the first target while all admins and owners are notified; reminders are not audited, only overdue and escalated. Cost: one id recorded where several were told.
+  10. (Task 6) The pop-up is due when an overdue open request has no acknowledgement from this person made since the session began; the acknowledgement time is stamped on the app host. Cost: clock skew of seconds between hosts could mis-time it; fix later by storing the session id on the acknowledgement.
+  11. (Task 7) The shadow-mode route is in `routes/killswitch.ts`, platform owner only, with no second factor (the spec limits step-up to the kill switch); the `channel` scope is stored and audited but holds nothing. Cost: a channel switch has no effect until package 13.
+  12. (Task 7) The kill switch is enforced by a live check at job creation, attempt start, model-call registration and result posting, and persisted to `job_control.held`; set and release lock the brand row. Cost: brand-row contention between job creation and switch changes (rare).
+  13. (Task 8) Release sends each freed job again under a new queue id and only the newest id may start it; the library's `retry()` raises the retry limit by one and keeps the retry count. Cost: core and worker must deploy together.
+  14. (Task 8) Accepted and documented: releasing a switch while an attempt is mid-flight can cost one extra paid model call (flagged as a possible duplicate; the result is still applied once). The proper fix is for the worker to end its attempt when told `held`. Cost: one duplicate paid call per such release.
+  15. (Final review) Setting the kill switch holds waiting jobs (a flag) instead of cancelling them in the queue as spec 9.2 says. This is equivalent, and it is what lets release work: a held job is still in the queue, so a worker claims it, is told `held` and completes the row, and release re-sends it under a new queue id. Cost if wrong: none found.
+- Findings fixed in review (Important, one line each):
+  - Task 1: `hold_brand_jobs` trusted its brand argument (a cross-brand hold was possible); now guarded to the session brand.
+  - Task 2: `package-lock.json` lacked new dependencies (`npm ci` would fail); a concurrency test and a real-id cross-brand test were added.
+  - Task 3: test 18 lacked the approve-then-edit case; a refusal-audit failure could mask the 409.
+  - Task 4: an alert retry re-mailed owners without bound; the reconcile stages shared one try/catch; added per-leg confirmation, backoff, a stall flag, isolated stages and a send timeout.
+  - Task 5: no isolation between brands in the tick; reminders ran back to back after an outage.
+  - Task 7: the kill switch did not reach jobs created after it was set or an attempt starting; set and release raced.
+  - Task 8: a requeued job stayed held; release and mark-dead could deadlock; handler errors were not audited.
+  - Task 9: none (minors only, below).
+- Deployment preconditions new in this milestone:
+  - Migrations 0014 to 0017, in order. No new secret.
+  - Deploy the core and the worker together: an old worker that claims a job under a new queue id gets a 404 and can get a healthy job marked dead.
+  - A real `Mailer` and a real `AlertChannel` must be wired before alerts and notifications are delivered. Each must set its own transport timeout (the core's 10 s timeout only stops waiting).
+  - The worker's maintenance timer now also drives the approvals tick (default every 300 s; the spec asks for 15 minutes; the tick is idempotent).
+  - The proxy must let `POST /api/v1/worker/approvals/tick` through with the worker credential.
+- Final fix wave: I-1 (approvers, brand admins, or platform owners if there are none, are notified when a version reaches awaiting approval; once per request), I-2 (reminders go to the same set; an empty set is logged and not counted as sent), I-3 (`readControl` takes the brand row FOR SHARE and re-checks the switch before writing a derived hold), M-1 (the 0015 down revokes only insert and update), M-5, M-6 and the ruling above (15).
+- Follow-ups, one line each:
+  - M-2: a release that applies held results audits (`killswitch.released`, brand audit lock) before `afterRelease`; once package 13 handlers create versions they need `approval_request` row locks that a concurrent tick holds while waiting for the same audit lock, so a deadlock is possible. Audit after `afterRelease` and document the lock order (approval_request before audit).
+  - M-3: the notification work inside `POST /worker/reconcile` can pass the worker's 60 s request timeout with slow real adapters and skip the dead-job reports; give it its own worker route or check the budget per leg.
+  - M-4: notifications have no retry backoff and a `failed` one is never sent again; with the unconfigured mailer every reminder ends `failed`. Add backoff, and decide whether to reset `failed` notifications when the real adapter goes live.
+  - M-7: the database does not require an `approval` row for `awaiting_approval` to `approved` (`moveState` is exported); add that check to the transition trigger.
+  - The audit-mismatch alert handler is not wired: nothing runs `verifyAudit` (spec 16 monitoring item).
+  - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
+  - A real mail transport and the second alert channel (owner item A11); then prove test 38.
+  - The nodemailer advisory: check and upgrade when the real transport is wired.
+  - The screens for approvals, the overdue pop-up and alerts: package 15.
+  - The worker should end its attempt on `held` so a mid-flight release costs no duplicate call (ruling 14).
+  - Task 9 minors: `maintenance.ts` still logs `error.message` in its first catch and in `dead_report_failed` (make name-only); `busy` is reset only in the second try's `finally`, so a throwing log callback in the first catch would leave it set.
+  - Task 8: depth can briefly double after a release (a waiting job has two queue rows until the stale one is turned away; the backlog limit is 2000).
+  - Task 1 to 7 minors: `closeRequest` has an unused reason argument; the approvals list is capped at 200 with no truncation signal; `JSON.parse` of the canonical payload could fail on a malformed row; `overBudget` is checked per alert, not per leg; overlapping reconcile ticks can send an alert leg twice; `mark_alert_delivery` and the read functions have no brand guard; a platform alert can be acknowledged without being resolved; duplicate pop-up acknowledgements insert duplicate rows; reminders resume after overdue if the count rises; `platformOwnersOf` runs outside the per-brand isolation. Details: the working ledger `.superpowers/sdd/2026-10-17-m5-approvals/progress.md` (not committed).
+  - Fix-wave minors: the I-3 test waits 1.5 s instead of polling `pg_locks`; the no-recipient warning repeats every tick for each due request; the submitter is also notified when they are an approver or admin.
+  - The `.docx` copy of the schema document was not regenerated (`mmdc` and `pandoc` are not installed); the Markdown is current.
+- M4 follow-ups closed by this milestone: release of held and cancelled jobs (package 12: new queue id, held result applied once); the `retry()` semantics question (it raises the limit by one and keeps the count).

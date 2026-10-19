@@ -44,6 +44,9 @@ function fakeCore(overrides: Partial<CoreClient> = {}): CoreClient & { posted: u
     async reconcile() {
       return { marked: 0 }
     },
+    async approvalsTick() {
+      return { reminded: 0, overdue: 0, escalated: 0, failedBrands: 0 }
+    },
     ...overrides,
   }
   return Object.assign(core, { posted, calls })

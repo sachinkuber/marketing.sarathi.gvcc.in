@@ -1,10 +1,11 @@
 import type { PoolClient } from '@mkt/db'
-import type { AuditEntry, AuditSink, MailMessage, Mailer } from './ports.ts'
+import type { AuditEntry, AuditSink, MailMessage, Mailer, SendReceipt } from './ports.ts'
 
 export class MemoryMailer implements Mailer {
   readonly sent: MailMessage[] = []
-  async send(message: MailMessage): Promise<void> {
+  async send(message: MailMessage): Promise<SendReceipt> {
     this.sent.push(message)
+    return { providerId: `memory-${this.sent.length}` }
   }
 }
 
@@ -12,7 +13,7 @@ export class MemoryMailer implements Mailer {
 export class ThrowingMailer implements Mailer {
   readonly sent: MailMessage[] = []
   attempts = 0
-  async send(message: MailMessage): Promise<void> {
+  async send(message: MailMessage): Promise<SendReceipt> {
     void message // the message is refused unread
     this.attempts += 1
     throw new Error('mail transport is down')

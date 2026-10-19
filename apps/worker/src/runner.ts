@@ -56,10 +56,16 @@ function requestHash(request: ModelRequest): string {
   return createHash('sha256').update(JSON.stringify(ordered)).digest('hex')
 }
 
-export async function runJob(deps: RunnerDeps, job: { id: string; jobClass: JobClass }): Promise<void> {
-  const started = await deps.core.startAttempt(job.id, deps.workerId)
+export async function runJob(
+  deps: RunnerDeps,
+  job: { id: string; jobClass: JobClass; queueId?: string },
+): Promise<void> {
+  const started = await deps.core.startAttempt(job.id, deps.workerId, job.queueId)
   // Finished already (the core accepted the result and the worker died before completing the queue row).
   if (started.finished) return
+  // Held (by a kill switch or a hold), or a queue copy a release has replaced: no attempt was made; stop and
+  // post nothing.
+  if ('outcome' in started) return
   const handler = deps.handlers[started.expectedResultType]
   if (!handler) throw new Error(`no handler for ${started.expectedResultType}`)
 

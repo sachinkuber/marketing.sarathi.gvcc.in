@@ -4,20 +4,29 @@ import { CLASS_SETTINGS, JOB_CLASSES, perProcessCap, type JobClass } from './cla
 import { executeSqlOn, QUEUE_SCHEMA } from './install.ts'
 
 export type SqlClient = { query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }> }
+// `id` is the job's own id (the data the row carries); `queueId` is the queue row's id. They are the same for
+// a job's first send; a kill-switch release sends a held job again under a new queue id (the row the library
+// completed while the job was held cannot be sent or retried again), and the core accepts only the newest.
 export interface QueueJob {
   id: string
+  queueId: string
   jobClass: JobClass
 }
 export type JobState = 'created' | 'retry' | 'active' | 'completed' | 'cancelled' | 'failed'
 
 export interface Queue {
-  send(client: SqlClient, input: { jobId: string; jobClass: JobClass; scheduleKey: string }): Promise<void>
+  // `queueId` defaults to the job id; a release passes a new one.
+  send(
+    client: SqlClient,
+    input: { jobId: string; jobClass: JobClass; scheduleKey: string; queueId?: string },
+  ): Promise<void>
   work(
     jobClass: JobClass,
     options: { processes: number },
     handler: (job: QueueJob) => Promise<void>,
   ): Promise<void>
-  state(jobClass: JobClass, jobId: string): Promise<JobState | null>
+  // By queue id (the job id unless a release sent the job again).
+  state(jobClass: JobClass, queueId: string): Promise<JobState | null>
   depth(jobClass: JobClass): Promise<number>
   deadJobs(jobClass: JobClass): Promise<string[]>
   // The watcher for a class's dead-letter queue: the handler is given the job ID of each job the library has
@@ -25,10 +34,12 @@ export interface Queue {
   // Jobs the library has failed for good in a class's main queue, newest first, at most `limit` (so a new
   // failure is always inside the window): the reconciliation that
   // covers a dead-letter copy that never reached the core.
+  // Job ids (from the row's data), not queue ids.
   failedJobIds(jobClass: JobClass, limit?: number): Promise<string[]>
   onDead(jobClass: JobClass, handler: (jobId: string) => Promise<void>): Promise<void>
-  requeue(jobClass: JobClass, jobId: string): Promise<void>
-  cancel(jobClass: JobClass, jobId: string): Promise<void>
+  // The queue row is `queueId` (default: the job id); the dead-letter copies are found by job id.
+  requeue(jobClass: JobClass, jobId: string, queueId?: string): Promise<void>
+  cancel(jobClass: JobClass, jobId: string, queueId?: string): Promise<void>
   watchdog(
     now: Date,
     limits: { maxWaitSeconds: Record<JobClass, number> },
@@ -102,13 +113,13 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
   }
 
   return {
-    async send(client, { jobId, jobClass, scheduleKey }) {
+    async send(client, { jobId, jobClass, scheduleKey, queueId = jobId }) {
       // A job is a job ID (in the data, so a dead-letter copy can be traced back), a class (the queue) and a
       // scheduling key (the group). Nothing else: no client content, no business input (spec 9.1).
       const id = await boss.send(
         CLASS_SETTINGS[jobClass].queue,
         { jobId },
-        { id: jobId, group: { id: scheduleKey }, db: executeSqlOn(client) },
+        { id: queueId, group: { id: scheduleKey }, db: executeSqlOn(client) },
       )
       // The library answers null for a duplicate ID (or a missing queue) instead of throwing. A job row
       // without a queue row would never run, so the caller's transaction must roll back.
@@ -133,7 +144,10 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
         },
         async ([job]) => {
           try {
-            if (job) await handler({ id: job.id, jobClass })
+            if (job) {
+              const jobId = (job.data as { jobId?: string } | null)?.jobId ?? job.id
+              await handler({ id: jobId, queueId: job.id, jobClass })
+            }
           } finally {
             wakeSlots(s.queue)
           }
@@ -141,8 +155,8 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
       )
     },
 
-    async state(jobClass, jobId) {
-      const job = await boss.getJobById(CLASS_SETTINGS[jobClass].queue, jobId)
+    async state(jobClass, queueId) {
+      const job = await boss.getJobById(CLASS_SETTINGS[jobClass].queue, queueId)
       return (job?.state as JobState | undefined) ?? null
     },
 
@@ -162,9 +176,11 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
       return rows.map((r) => r.id)
     },
 
-    async requeue(jobClass, jobId) {
+    async requeue(jobClass, jobId, queueId = jobId) {
       const s = CLASS_SETTINGS[jobClass]
-      await boss.retry(s.queue, jobId)
+      // pg-boss 12.30: retry keeps retry_count and raises retry_limit by one, so a requeued job gets exactly
+      // one more try before it is dead again (packages/queue/test/queue-dead.test.ts).
+      await boss.retry(s.queue, queueId)
       // The dead-letter copy has done its job: take it off the list.
       const { rows } = await reader.query<{ id: string }>(
         `select id from ${QUEUE_SCHEMA}.job where name = $1 and data->>'jobId' = $2 and state = 'created'`,
@@ -175,7 +191,8 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
 
     async failedJobIds(jobClass, limit = 500) {
       const { rows } = await reader.query<{ id: string }>(
-        `select id from ${QUEUE_SCHEMA}.job where name = $1 and state = 'failed' order by completed_on desc limit $2`,
+        `select coalesce(data->>'jobId', id::text) as id from ${QUEUE_SCHEMA}.job
+          where name = $1 and state = 'failed' order by completed_on desc limit $2`,
         [CLASS_SETTINGS[jobClass].queue, limit],
       )
       return rows.map((r) => r.id)
@@ -191,16 +208,16 @@ export async function openQueue(queueUrl: string, options: OpenOptions = {}): Pr
       })
     },
 
-    async cancel(jobClass, jobId) {
+    async cancel(jobClass, jobId, queueId = jobId) {
       const s = CLASS_SETTINGS[jobClass]
-      await boss.cancel(s.queue, jobId)
+      await boss.cancel(s.queue, queueId)
       // The library cancels only jobs that have not finished. A dead job is "failed", which it leaves alone,
       // so a cancel of a dead job ends it here (a failed job is never picked up again, but "cancelled" is
       // what it is). Only a failed job is touched.
       await reader.query(
         `update ${QUEUE_SCHEMA}.job set state = 'cancelled', completed_on = now()
           where name = $1 and id = $2 and state = 'failed'`,
-        [s.queue, jobId],
+        [s.queue, queueId],
       )
       // Its dead-letter copy, if the watcher has not completed it yet, has nothing left to report.
       const { rows } = await reader.query<{ id: string }>(

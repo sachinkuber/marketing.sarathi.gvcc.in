@@ -14,6 +14,7 @@ describe('content and approval tables', () => {
     const result = await db.admin.query("select tablename from pg_tables where schemaname = 'app' order by 1")
     expect(result.rows.map((r) => r.tablename)).toEqual([
       'agent_definition_version',
+      'alert',
       'approval',
       'approval_invalidation',
       'approval_request',
@@ -35,10 +36,12 @@ describe('content and approval tables', () => {
       'membership',
       'model_call',
       'model_price',
+      'notification',
       'outbox_action',
       'platform_owner',
       'popup_ack',
       'run',
+      'version_state_transition',
     ])
   })
 

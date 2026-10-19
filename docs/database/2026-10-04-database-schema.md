@@ -619,6 +619,8 @@ The functions need rights the roles do not otherwise have, so the definer role h
 | provider_id | text | The provider's message ID, set on send |
 | created_at, sent_at, delivered_at | timestamptz | |
 
+Built in migrations 0014 and 0015 (milestone 5). Row-level security is forced. A queued row is found through the partial index `notification_queued_idx`. A notification is sent at least once: the send happens inside the transaction that holds the row lock, so a crash after the send can send it again. The real mail adapter must set its own transport timeout.
+
 ### 8.2 `app.alert`
 
 | Column | Type | Rules |
@@ -631,6 +633,12 @@ The functions need rights the roles do not otherwise have, so the definer role h
 | raised_at | timestamptz | Not null |
 | acknowledged_by, acknowledged_at | uuid, timestamptz | |
 | resolved_at | timestamptz | |
+| mailed_to | uuid[] | Not null, default empty. Owners already mailed, so a retry does not mail them again (0016). |
+| channel_confirmed_at | timestamptz | When the second channel confirmed delivery (0016) |
+| last_attempt_at | timestamptz | Drives the backoff of 2^attempts minutes, at most 60 (0016) |
+| delivery_stalled, delivery_issue | boolean, text | Set after 10 attempts without delivery; the issue is a short name, never a message body (0016) |
+
+Built in migrations 0014 to 0016. A unique partial index `alert_open_ref_unique` allows one open alert per brand, kind and reference (0015). Writes of platform alerts and of delivery state go through definer functions (`raise_alert`, `mark_alert_delivery`, `ack_platform_alert`); the brand acknowledgement is a direct `update` under row-level security. A platform alert has a null brand and is read through definer functions only (`platform_alerts()`, `list_platform_alerts`, `get_platform_alert`, `undelivered_alerts`).
 
 ### 8.3 `app.trigger_nonce`
 
@@ -769,6 +777,9 @@ No run-time role can bypass row-level security, and none owns a table.
 | A content version never changes | Trigger refusing update and delete |
 | A version's hash matches its content | Trigger recomputing the hash on insert |
 | An approval names the real hash of its version | Trigger on insert |
+| A content version moves only along the allowed edges, starts as `draft`, and a same-state update changes nothing | Table `app.version_state_transition` (the 18 edges of architecture 8.2, plus draft, in_checks and approved to superseded) and a trigger that reads that table (0014) |
+| A brand's jobs can be held or released only by that brand's own session | `app.hold_brand_jobs(brand, agent, hold)` refuses a brand other than the session's (0014) |
+| Only the newest queue id of a job may start it, when the worker sends the id | `app.job_control.queue_id`, checked when an attempt starts (0014, milestone 5); the worker's `queueId` is optional, and a start without it is not checked |
 | The audit log is never changed | No update or delete rights, and a trigger |
 | One live definition per agent; one active attempt per job; one active kill switch per scope | Partial unique indexes |
 | A model call is costed once | Unique partial index `cost_ledger_one_per_call` on `model_call_id` in the cost ledger |
@@ -809,6 +820,10 @@ These are small additions or changes made while specifying columns. **The owner 
 | 9 | `app.fx_rate` is added | Needed to record each cost in both currencies |
 | 10 | `app.job_input` gains `expected_result_type`, `result_type`, `outcome`, `held_result`, `finished_at`; `app.job_control` gains `dead_at` (milestone 4, plan decision 4) | A result is checked against the type the job expects, a held result is kept, and a dead job is told apart from a failed one |
 | 11 | `app.model_price` is added (milestone 4, plan decision 5) | A model's price is data the owner confirms, not a figure in the code |
+| 12 | `app.job_control` gains `queue_id` (milestone 5, plan decision on release) | A released job is sent again under a new queue id, because the queue library ignores a send of a completed id |
+| 13 | `app.alert` gains delivery columns and `app.notification` gains a queued-rows index (milestone 5, migrations 0015 and 0016) | Delivery must be confirmed per recipient and per channel, with backoff and a stall flag, not only attempted |
+| 14 | `app.version_state_transition` is added (milestone 5, migration 0014) | The allowed moves of a content version are data the database enforces |
+| 15 | `app.brands_with_open_requests()` is added (milestone 5, migration 0017) | The reminder tick has no brand context and needs the list of brands with open approval requests |
 
 ## 13. Decisions and open points
 

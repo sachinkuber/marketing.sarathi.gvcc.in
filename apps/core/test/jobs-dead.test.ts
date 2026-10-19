@@ -46,7 +46,7 @@ async function finishAttempt(jobId: string): Promise<void> {
     jobId,
   ])
   const started = await startAttempt(jobs, jobId, 'w1')
-  if (started.finished) throw new Error('unexpected')
+  if (started.finished || 'outcome' in started) throw new Error('unexpected')
   const check = verifyAttemptToken(
     jobs.attemptTokenSecret,
     started.token,
@@ -136,7 +136,7 @@ describe('dead jobs', () => {
       jobId,
     ])
     const started = await startAttempt(jobs, jobId, 'w1')
-    if (started.finished) throw new Error('unexpected')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
     expect((await listDead(jobs, brandA)).map((j) => j.jobId)).not.toContain(jobId)
     // The requeue's database half never ran, so the run was still failed: the attempt starting revives it,
     // and the result then ends it as succeeded.
@@ -164,7 +164,7 @@ describe('dead jobs', () => {
       j2,
     ])
     const started = await startAttempt(jobs, j2, 'w1')
-    if (started.finished) throw new Error('unexpected')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
     expect(await runState(runId)).toBe('failed')
     // Requeueing J1 while J2 is only started: nothing else is dead, so the run runs again.
     await requeueJob(jobs, brandA, j1, ACTOR)
@@ -244,7 +244,7 @@ describe('reconciliation', () => {
       jobId,
     ])
     const started = await startAttempt(jobs, jobId, 'w1')
-    if (started.finished) throw new Error('unexpected')
+    if (started.finished || 'outcome' in started) throw new Error('unexpected')
     await withBrand(stack.appPool, brandA, (c) =>
       c.query(
         `insert into app.model_call (brand_id, run_id, job_id, attempt_id, step, request_hash, model, started_at)

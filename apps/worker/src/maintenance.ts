@@ -15,6 +15,8 @@ export const DEFAULT_MAX_WAIT_SECONDS: Record<JobClass, number> = {
 }
 
 // Until n8n's scheduled trigger exists (milestone 6): sweep model calls, and report what the watchdog sees.
+// The approvals tick rides this timer too, until that trigger exists; spec 10.6 asks for a 15-minute check,
+// and with the default 300 s interval it runs at least that often (it is idempotent and time-driven).
 export function startMaintenance(options: {
   core: CoreClient
   queue: Queue
@@ -60,6 +62,20 @@ export function startMaintenance(options: {
         event: 'maintenance_failed',
         error: error instanceof Error ? error.message : String(error),
       })
+    }
+    // Its own duty: a failure above does not stop it, and a failure of it does not undo the above. Only the
+    // error name is logged: a failing call's message could carry the core's address or a response body.
+    try {
+      const done = await options.core.approvalsTick()
+      options.log({
+        event: 'approvals_tick',
+        reminded: done.reminded,
+        overdue: done.overdue,
+        escalated: done.escalated,
+        failed_brands: done.failedBrands,
+      })
+    } catch (error) {
+      options.log({ event: 'approvals_tick_failed', error: error instanceof Error ? error.name : 'Error' })
     } finally {
       busy = false
     }

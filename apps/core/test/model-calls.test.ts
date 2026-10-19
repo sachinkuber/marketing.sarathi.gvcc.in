@@ -39,7 +39,7 @@ async function startedJob(): Promise<{ jobId: string; claims: AttemptClaims; tok
     jobId,
   ])
   const started = await startAttempt(jobs, jobId, 'w1')
-  if (started.finished) throw new Error('unexpected')
+  if (started.finished || 'outcome' in started) throw new Error('unexpected')
   const check = verifyAttemptToken(
     jobs.attemptTokenSecret,
     started.token,
@@ -51,7 +51,7 @@ async function startedJob(): Promise<{ jobId: string; claims: AttemptClaims; tok
 
 async function reattempt(jobId: string): Promise<AttemptClaims> {
   const started = await startAttempt(jobs, jobId, 'w2')
-  if (started.finished) throw new Error('unexpected')
+  if (started.finished || 'outcome' in started) throw new Error('unexpected')
   const check = verifyAttemptToken(
     jobs.attemptTokenSecret,
     started.token,
