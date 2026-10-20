@@ -3,10 +3,15 @@ import {
   agentsReply,
   auditReply,
   auditVerifyReply,
+  brandReply,
+  brandsReply,
   homeReply,
   modelCallReviewReply,
+  overdueAllReply,
+  overdueReply,
   runDetailReply,
   runsReply,
+  sessionReply,
   statusReply,
 } from '../../dashboard/src/api/schemas.ts'
 import {
@@ -91,6 +96,20 @@ describe('the dashboard schemas accept the core’s replies', () => {
       const reply = await c[who].request('POST', path, { body: {} })
       expect(reply.status).toBe(200)
       auditVerifyReply.parse(reply.json)
+    }
+  })
+
+  it('session, brands, one brand, and the overdue reads (the shell’s own reads)', async () => {
+    for (const who of ['admin', 'owner', 'approver', 'viewer'] as const) {
+      sessionReply.parse(await get(who, '/api/v1/session'))
+    }
+    brandsReply.parse(await get('admin', '/api/v1/brands'))
+    const ownerBrands = brandsReply.parse(await get('owner', '/api/v1/brands'))
+    expect(ownerBrands.brands.map((b) => b.id)).toContain(c.brandId)
+    brandReply.parse(await get('viewer', api(c.brandId, '')))
+    overdueReply.parse(await get('approver', api(c.brandId, '/approvals/overdue')))
+    for (const who of ['admin', 'owner', 'approver', 'viewer'] as const) {
+      overdueAllReply.parse(await get(who, '/api/v1/overdue'))
     }
   })
 

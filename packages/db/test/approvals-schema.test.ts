@@ -383,8 +383,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all six come off.
-      await runner({ ...base, direction: 'down', count: 6 })
+      // 0020, 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all seven come off.
+      await runner({ ...base, direction: 'down', count: 7 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )
@@ -412,7 +412,7 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      await runner({ ...base, direction: 'down', count: 5 })
+      await runner({ ...base, direction: 'down', count: 6 })
       const gone = await own.admin.query(
         "select to_regprocedure('app.raise_alert(uuid,smallint,text,jsonb)') as r",
       )
