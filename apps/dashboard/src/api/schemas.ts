@@ -191,3 +191,66 @@ export const auditVerifyReply = z.strictObject({
   ),
   lastExport: z.strictObject({ throughSeq: z.number().int().positive(), exportedAt: iso }).nullable(),
 })
+
+// --- session, brands, overdue approvals (Task 11) -------------------------------------------------------------
+
+// A membership role as the core reports it. A platform owner has no membership role; `platformOwner` says so.
+export const membershipRole = z.enum(['brand_admin', 'approver', 'sales_contact', 'viewer'])
+
+export const sessionReply = z.strictObject({
+  user: z.strictObject({ id: z.string(), email: z.string(), name: z.string() }),
+  twoFactorEnabled: z.boolean(),
+  needsSecondFactor: z.boolean(),
+  enrolmentRequired: z.boolean(),
+  platformOwner: z.boolean(),
+  memberships: z.array(z.strictObject({ brandId: z.string(), role: membershipRole })),
+  csrfToken: z.string().min(1),
+})
+
+export const brandSummary = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  status: z.string(),
+  role: z.string(),
+})
+
+export const brandsReply = z.strictObject({ brands: z.array(brandSummary) })
+
+export const brandReply = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  status: z.string(),
+  shadowMode: z.boolean(),
+  role: z.string(),
+})
+
+export const overdueItem = z.strictObject({
+  contentItemId: z.string(),
+  versionId: z.string(),
+  title: z.string().optional(),
+  overdueSince: iso,
+  requestedAt: iso,
+})
+
+export const overdueReply = z.strictObject({
+  items: z.array(overdueItem),
+  count: z.number().int().nonnegative(),
+  popup: z.strictObject({ due: z.boolean() }),
+})
+
+export const overdueAckReply = z.strictObject({
+  choice: z.enum(['review_now', 'later']),
+  acknowledged: z.number().int().nonnegative(),
+})
+
+// --- sign-in and invites --------------------------------------------------------------------------------------
+
+export const inviteLookupReply = z.strictObject({
+  email: z.string(),
+  role: membershipRole,
+  brandName: z.string(),
+})
+
+export const inviteAcceptReply = z.strictObject({ userId: z.string() })

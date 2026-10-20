@@ -1,0 +1,58 @@
+/* Design tokens, copied from docs/mockups/assets/app.css. The font is the system stack: nothing is requested
+   from an outside font host. */
+:root {
+  --ground: #f2f3f4;
+  --surface: #ffffff;
+  --ink: #12171c;
+  --ink-2: #48535d;
+  --ink-3: #6b7680;
+  --line: #d9dee2;
+  --line-2: #e8ebee;
+  --rail: #1d242a;
+  --rail-ink: #c9d1d8;
+  --rail-ink-dim: #8c97a1;
+  --primary: #1f4fb4;
+  --primary-dark: #173c8a;
+  --primary-bg: #e8eefb;
+  --ok: #1e7a4f;
+  --ok-bg: #e3f3ea;
+  --warn: #8f5600;
+  --warn-bg: #fff1d6;
+  --danger: #b3261e;
+  --danger-bg: #fde8e6;
+  --muted-bg: #eceff1;
+  --radius-s: 5px;
+  --radius-m: 9px;
+  --radius-l: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --font: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* The same tokens as Tailwind theme values, so utilities such as bg-primary and text-ink work. */
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-rail: var(--rail);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-dark);
+  --color-primary-bg: var(--primary-bg);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --radius-s: var(--radius-s);
+  --radius-m: var(--radius-m);
+  --radius-l: var(--radius-l);
+  --font-sans: var(--font);
+}

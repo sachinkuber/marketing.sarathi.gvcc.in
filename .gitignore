@@ -6,3 +6,6 @@ dist/
 coverage/
 .superpowers/
 !.env.example
+.next/
+next-env.d.ts
+*.tsbuildinfo
