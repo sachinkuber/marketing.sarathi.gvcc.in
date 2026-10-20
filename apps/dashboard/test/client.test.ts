@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { ApiError, api, safeNext, setCsrfToken, signInAddress } from '../src/api/client'
+import { ApiError, api, authCall, safeNext, setCsrfToken, signInAddress } from '../src/api/client'
 
 interface Call {
   url: string
@@ -140,5 +140,67 @@ describe('the API client', () => {
       vi.fn(async () => Promise.reject(new TypeError('offline'))),
     )
     await expect(api(ok, 'GET', '/things')).rejects.toMatchObject({ status: 0, code: 'network' })
+  })
+})
+
+describe('the sign-in library calls', () => {
+  const loose = z.looseObject({})
+
+  it('fetch the request token first when none is cached and a session is live', async () => {
+    replies.push({ status: 200, body: session }, { status: 200, body: { ok: true } })
+    await authCall(loose, 'POST', '/two-factor/enable', { password: 'x' })
+    expect(calls[0]?.url).toBe('/api/v1/session')
+    expect(calls[1]?.url).toBe('/api/auth/two-factor/enable')
+    expect(calls[1]?.headers['x-csrf-token']).toBe('tok-123')
+  })
+
+  it('send no token, and do not redirect, when there is no session yet', async () => {
+    replies.push(
+      { status: 401, body: { error: { code: 'not_signed_in', message: 'Sign in' } } },
+      { status: 200, body: {} },
+    )
+    await authCall(loose, 'POST', '/sign-in/email', { email: 'a', password: 'b' })
+    expect(calls[1]?.headers['x-csrf-token']).toBeUndefined()
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('use a cached token without asking again', async () => {
+    setCsrfToken('cached')
+    replies.push({ status: 200, body: {} })
+    await authCall(loose, 'POST', '/sign-out', {})
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.headers['x-csrf-token']).toBe('cached')
+  })
+
+  it('fetch a fresh token once when the cached one is refused', async () => {
+    setCsrfToken('stale')
+    replies.push(
+      { status: 403, body: { error: { code: 'bad_csrf_token', message: 'no' } } },
+      { status: 200, body: session },
+      { status: 200, body: {} },
+    )
+    await authCall(loose, 'POST', '/two-factor/enable', { password: 'x' })
+    expect(calls[2]?.headers['x-csrf-token']).toBe('tok-123')
+  })
+
+  it('keep the library’s own error code', async () => {
+    setCsrfToken('t')
+    replies.push({ status: 400, body: { code: 'INVALID_PASSWORD', message: 'Invalid password' } })
+    await expect(authCall(loose, 'POST', '/two-factor/enable', {})).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_PASSWORD',
+    })
+  })
+})
+
+describe('safeNext returns a normalised same-site path', () => {
+  it('refuses paths that normalise to another host or carry odd separators', () => {
+    for (const bad of ['/..//evil', '/%2f/evil'.replace('%2f', '\t'), '/a/../..//evil', '/.//evil']) {
+      expect(safeNext(bad)).toBe('/')
+    }
+  })
+  it('keeps an encoded slash as plain data and collapses dot segments', () => {
+    expect(safeNext('/%2f/evil')).toBe('/%2f/evil')
+    expect(safeNext('/b/1/../2/inbox?x=1#h')).toBe('/b/2/inbox?x=1#h')
   })
 })

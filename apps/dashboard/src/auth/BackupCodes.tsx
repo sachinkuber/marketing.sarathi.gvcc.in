@@ -12,7 +12,7 @@ export function BackupCodes({ codes, onContinue }: { codes: string[]; onContinue
         <b>These are shown only once.</b> Each code works one time if you lose your phone. Store them
         somewhere safe, such as a password manager.
       </div>
-      <div className="codes" aria-label="Backup codes">
+      <div className="codes" role="group" aria-label="Backup codes">
         {codes.map((code) => (
           <span key={code}>{code}</span>
         ))}
@@ -27,7 +27,7 @@ export function BackupCodes({ codes, onContinue }: { codes: string[]; onContinue
         Continue
       </button>
       <p className="muted small">
-        Continue turns on once the box is ticked. If you leave now, your next sign-in returns here.
+        Continue turns on once the box is ticked. If you leave now, these codes cannot be shown again.
       </p>
     </section>
   )

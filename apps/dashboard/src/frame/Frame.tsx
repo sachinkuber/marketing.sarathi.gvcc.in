@@ -1,36 +1,36 @@
 'use client'
 import { usePathname, useRouter } from 'next/navigation'
-import { z } from 'zod'
-import { api } from '../api/client'
+import { useEffect, useState } from 'react'
+import type { z } from 'zod'
 import { signOut } from '../api/auth'
+import { api } from '../api/client'
 import { brandReply, brandsReply, statusReply } from '../api/schemas'
-import { loadSession, roleIn } from '../api/session'
+import { roleIn } from '../api/session'
 import { useLoad } from '../api/use-load'
+import { switcherBrands } from './gating'
 import { LoadError } from './LoadError'
-import { OverdueWatcher, useOverdue } from './OverdueWatcher'
 import { SideMenu } from './SideMenu'
+import { useShell } from './shell-context'
 import { StatusBanner } from './StatusBanner'
 import { TopBar } from './TopBar'
-import { useEffect, useState } from 'react'
 
-const frameData = async (brandId: string) => {
-  const session = await loadSession()
+const frameData = async (brandId: string, platformOwner: boolean) => {
   const [brand, status, brands] = await Promise.all([
     api(brandReply, 'GET', `/brands/${brandId}`),
     api(statusReply, 'GET', `/brands/${brandId}/status`),
-    session.platformOwner ? api(brandsReply, 'GET', '/brands') : Promise.resolve(null),
+    platformOwner ? api(brandsReply, 'GET', '/brands') : Promise.resolve(null),
   ])
-  return { session, brand, status, brands: brands?.brands ?? null }
+  return { brand, status, brands: brands?.brands ?? null }
 }
 
-// The frame around every brand screen: top bar, side menu, status banner and the overdue pop-up.
+// The frame around every screen of one brand: top bar, side menu and status banner. The session and the
+// overdue pop-up belong to the shell around it, so they are the same on every screen.
 export function Frame({ brandId, children }: { brandId: string; children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const loaded = useLoad(() => frameData(brandId), brandId)
+  const { session, overdue } = useShell()
+  const loaded = useLoad(() => frameData(brandId, session.platformOwner), brandId)
   const [status, setStatus] = useState<z.infer<typeof statusReply> | null>(null)
-  const canApprove = loaded.state === 'ready' && loaded.data.status.canApprove
-  const { overdue, reload } = useOverdue(brandId, canApprove)
 
   // The banner follows the kill switch and shadow mode while a person stays on a screen.
   useEffect(() => {
@@ -50,7 +50,7 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
       </div>
     )
   }
-  const { session, brand, brands } = loaded.data
+  const { brand, brands } = loaded.data
   const live = status ?? loaded.data.status
   const role = roleIn(session, brandId)
   if (!role) {
@@ -62,6 +62,7 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
       </div>
     )
   }
+  const overdueCount = overdue?.brands.find((b) => b.brandId === brandId)?.count ?? 0
   return (
     <div className="app">
       <SideMenu brandId={brandId} role={role} current={pathname} />
@@ -70,9 +71,9 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
           brandId={brandId}
           brandName={brand.name}
           userName={session.user.name}
-          brands={brands}
+          brands={switcherBrands(session, brands)}
           canStop={live.canStop}
-          onSwitch={(target) => router.push(target ? `/b/${target}` : '/')}
+          onSwitch={(target) => router.push(target ? `/b/${target}` : '/brands')}
           onSignOut={() =>
             void signOut().then(
               () => router.push('/sign-in'),
@@ -80,15 +81,9 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
             )
           }
         />
-        <StatusBanner
-          brandId={brandId}
-          brandName={brand.name}
-          status={live}
-          overdueCount={overdue?.count ?? 0}
-        />
+        <StatusBanner brandId={brandId} brandName={brand.name} status={live} overdueCount={overdueCount} />
         {children}
       </div>
-      <OverdueWatcher brandId={brandId} overdue={overdue} reload={reload} />
     </div>
   )
 }

@@ -37,10 +37,13 @@ export function safeNext(raw: string | null | undefined): string {
   try {
     const parsed = new URL(raw, 'http://same-origin.invalid')
     if (parsed.origin !== 'http://same-origin.invalid') return '/'
+    // The path as a browser will resolve it ("/a/../..//x" becomes "//x"): it must still be a single-slash path.
+    const normal = `${parsed.pathname}${parsed.search}${parsed.hash}`
+    if (!normal.startsWith('/') || normal.startsWith('//')) return '/'
+    return normal
   } catch {
     return '/'
   }
-  return raw
 }
 
 const AUTH_PAGES = ['/sign-in', '/enrol', '/recover', '/reset-password', '/invite', '/accept-invite']
@@ -153,15 +156,32 @@ export async function api<T>(schema: z.ZodType<T>, method: string, path: string,
   return parsed.data
 }
 
-// The library's own routes under /api/auth (sign-in, second factor, recovery). A signed-in person's write
-// carries the request token like any other; before sign-in there is none to send.
+// The request token for a call to the sign-in library: the cached one, else the one for the live session. With
+// no session there is no token to send (and no redirect: the call itself is how a person gets a session).
+async function tokenIfSession(): Promise<string | null> {
+  if (csrfToken) return csrfToken
+  const reply = await send('GET', `${API}/session`, undefined, null)
+  const parsed = sessionReply.safeParse(reply.json)
+  if (reply.status === 200 && parsed.success) csrfToken = parsed.data.csrfToken
+  return csrfToken
+}
+
+// The library's own routes under /api/auth (sign-in, second factor, recovery, sign-out). The core asks for the
+// request token on every write that comes with a session, these included, so the token is fetched the same way
+// `api` does it, and fetched again once if it is refused.
 export async function authCall<T>(
   schema: z.ZodType<T>,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const reply = await send(method.toUpperCase(), `/api/auth${path}`, body ?? {}, csrfToken)
+  const verb = method.toUpperCase()
+  const url = `/api/auth${path}`
+  let reply = await send(verb, url, body ?? {}, verb === 'GET' ? null : await tokenIfSession())
+  if (verb !== 'GET' && reply.status === 403 && errorOf(reply.json).code === 'bad_csrf_token') {
+    csrfToken = null
+    reply = await send(verb, url, body ?? {}, await tokenIfSession())
+  }
   if (reply.status < 200 || reply.status >= 300) {
     const { code, message } = errorOf(reply.json)
     throw new ApiError(reply.status, code, message)

@@ -10,11 +10,12 @@ function waited(since: string, now: number): string {
   return `overdue for ${Math.floor(hours / 24)} days`
 }
 
-// Opens over any screen while an overdue item has not been answered. It has no close control: the only
-// ways out are the two choices. Escape, the backdrop and the back button are handled by the watcher.
+// Opens over any screen while an overdue item has not been answered. It has no close control and the backdrop
+// does nothing: the only ways out are the two choices. Keys, focus and history are handled by the watcher.
 export function OverduePopup(props: {
   open: boolean
   items: OverdueItem[]
+  brandName?: string
   busy: boolean
   error: string | null
   now: number
@@ -24,11 +25,12 @@ export function OverduePopup(props: {
   const n = props.items.length
   return (
     <div className="scrim open" id="overdue-popup">
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="od-h">
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="od-h" tabIndex={-1}>
         <div className="mh">
           <h2 id="od-h">
             {n} {n === 1 ? 'item' : 'items'} overdue for approval
           </h2>
+          {props.brandName ? <p className="strong small">{props.brandName}</p> : null}
           <p className="muted small">
             Reminders were sent and the items were escalated. Nothing is approved or published until someone
             decides.

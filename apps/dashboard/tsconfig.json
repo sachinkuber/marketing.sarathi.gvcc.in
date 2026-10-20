@@ -19,6 +19,8 @@
   },
   "include": [
     "next-env.d.ts",
+    "next.config.ts",
+    "api-routing.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     "test/**/*.ts",

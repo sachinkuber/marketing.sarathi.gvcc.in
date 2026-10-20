@@ -1525,3 +1525,18 @@ html.modal-open body {
     margin-left: 0;
   }
 }
+
+/* ---------- utility classes used instead of style attributes (the production CSP forbids them) ---------- */
+.center {
+  text-align: center;
+}
+.bullets {
+  list-style: disc;
+  padding-left: 20px;
+}
+.kv-narrow {
+  grid-template-columns: 90px 1fr;
+}
+.mt-2 {
+  margin-top: 8px;
+}

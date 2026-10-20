@@ -51,7 +51,7 @@ export function SignInForm(props: {
         <button className="btn primary block" type="submit" disabled={props.busy}>
           Sign in
         </button>
-        <Link className="small" href="/recover" style={{ textAlign: 'center' }}>
+        <Link className="small center" href="/recover">
           Forgot password
         </Link>
       </form>

@@ -43,7 +43,7 @@ export function InviteForm(props: {
         <h1>Join {state.invite.brandName}</h1>
         <p className="muted">You have been invited to the marketing platform for {state.invite.brandName}.</p>
       </div>
-      <dl className="kv" style={{ gridTemplateColumns: '90px 1fr' }}>
+      <dl className="kv kv-narrow">
         <dt>Brand</dt>
         <dd>{state.invite.brandName}</dd>
         <dt>Your role</dt>
@@ -100,7 +100,7 @@ export function InviteForm(props: {
         </div>
         <div className="small">
           <b>Password rules</b>
-          <ul style={{ listStyle: 'disc', paddingLeft: 20 }}>
+          <ul className="bullets">
             <li>At least 12 characters</li>
             <li>Not a password that appears in known leaks</li>
             <li>Not your email address or name</li>

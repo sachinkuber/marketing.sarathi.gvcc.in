@@ -4,6 +4,31 @@ import type { statusReply } from '../api/schemas'
 
 export type Status = z.infer<typeof statusReply>
 
+// What the kill switch holds, in words that match its scope: the whole brand, or only some channels and agents.
+function killMessage(brandName: string, scopes: Status['killSwitch']['scopes']): React.ReactNode {
+  if (scopes.length === 0 || scopes.some((s) => s.scope === 'brand')) {
+    return (
+      <>
+        <b>Kill switch is on for {brandName}.</b> Waiting work is held and nothing is being sent.
+      </>
+    )
+  }
+  const channels = scopes.filter((s) => s.scope === 'channel').map((s) => s.target ?? 'a channel')
+  const agents = scopes.filter((s) => s.scope === 'agent').map((s) => s.target ?? 'an agent')
+  const parts = [
+    channels.length > 0 ? `${channels.length === 1 ? 'channel' : 'channels'} ${channels.join(', ')}` : null,
+    agents.length > 0 ? `${agents.length === 1 ? 'agent' : 'agents'} ${agents.join(', ')}` : null,
+  ].filter((part) => part !== null)
+  return (
+    <>
+      <b>
+        Kill switch is on for {parts.join(' and ')} in {brandName}.
+      </b>{' '}
+      Work for those is held. Other work continues.
+    </>
+  )
+}
+
 // The coloured bars across the top of every brand screen: kill switch (red), shadow mode and overdue
 // approvals (amber). "Later" on the pop-up never removes the overdue bar; only a decision does.
 export function StatusBanner(props: {
@@ -17,7 +42,7 @@ export function StatusBanner(props: {
   if (status?.killSwitch.active) {
     bars.push(
       <div className="banner danger" role="alert" key="kill">
-        <b>Kill switch is on for {brandName}.</b> Waiting work is held and nothing is being sent.
+        <span>{killMessage(brandName, status.killSwitch.scopes)}</span>
         <Link href={`/b/${brandId}/settings/safety`}>Review and release</Link>
       </div>,
     )

@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  // The dashboard's components are .tsx and use the automatic JSX runtime (its own tsconfig says "preserve"
-  // for Next, which compiles them in the build).
+  // The dashboard's components are .tsx and use the automatic JSX runtime, as Next.js does (its tsconfig says
+  // react-jsx; Vite 8 compiles with oxc, not esbuild).
   oxc: { jsx: { runtime: 'automatic' } },
   test: {
     include: [

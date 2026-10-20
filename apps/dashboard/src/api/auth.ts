@@ -54,8 +54,20 @@ export function signInMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 429) return 'Too many attempts. The account is locked for a while; try again later.'
     if (error.status === 0) return 'The platform could not be reached. Try again.'
+    if (error.status === 401 || error.status === 400) return 'The email or password is not right.'
+    return 'Sign-in could not be completed. Reload the page and try again.'
   }
-  return 'The email or password is not right.'
+  return 'Sign-in could not be completed. Reload the page and try again.'
+}
+
+// Setting up the second factor: the password is blamed only when the library says it is wrong.
+export function enrolMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) return 'Too many attempts. Try again later.'
+    if (error.status === 0) return 'The platform could not be reached. Try again.'
+    if (error.code === 'INVALID_PASSWORD') return 'That password is not right.'
+  }
+  return 'The second factor could not be set up. Reload the page and try again.'
 }
 
 export function codeMessage(error: unknown): string {

@@ -1,5 +1,5 @@
 'use client'
-import { Empty } from '../../../frame/Empty'
+import { Empty } from '../../../../frame/Empty'
 
 // Replaced by the Home screen in the next task.
 export default function BrandHome() {

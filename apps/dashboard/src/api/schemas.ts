@@ -254,3 +254,18 @@ export const inviteLookupReply = z.strictObject({
 })
 
 export const inviteAcceptReply = z.strictObject({ userId: z.string() })
+
+// GET /overdue: per brand the caller may approve in, what is overdue and whether the pop-up is due.
+export const overdueAllReply = z.strictObject({
+  brands: z.array(
+    z.strictObject({
+      brandId: z.string(),
+      brandName: z.string(),
+      count: z.number().int().positive(),
+      popupDue: z.boolean(),
+      firstRequestId: z.string(),
+      firstItemId: z.string(),
+      items: z.array(overdueItem),
+    }),
+  ),
+})

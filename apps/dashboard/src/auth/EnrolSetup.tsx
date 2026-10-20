@@ -22,8 +22,12 @@ export function EnrolSetup(props: {
         phone that has the app.
       </p>
       <div className="field">
-        <span className="lab">Setup key</span>
-        <code className="setupkey">{props.secret}</code>
+        <span className="lab" id="setupkey-label">
+          Setup key
+        </span>
+        <code className="setupkey" aria-labelledby="setupkey-label">
+          {props.secret}
+        </code>
       </div>
       <a className="small" href={props.totpUri}>
         Open in your authenticator app

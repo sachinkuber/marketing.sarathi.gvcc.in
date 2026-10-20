@@ -15,7 +15,7 @@ export function RecoverForm(props: {
       <>
         <h1>Check your email</h1>
         <p>If an account exists for that address, a recovery link is on its way.</p>
-        <ul className="stack" style={{ listStyle: 'disc', paddingLeft: 20 }}>
+        <ul className="stack bullets">
           <li>The link works once and for 30 minutes.</li>
           <li>Using it ends all your sessions, on every device.</li>
           <li>You still need your second factor to sign in afterwards.</li>
@@ -55,7 +55,7 @@ export function RecoverForm(props: {
         <button className="btn primary block" type="submit" disabled={props.busy}>
           Send recovery email
         </button>
-        <Link className="small" href="/sign-in" style={{ textAlign: 'center' }}>
+        <Link className="small center" href="/sign-in">
           Back to sign in
         </Link>
       </form>

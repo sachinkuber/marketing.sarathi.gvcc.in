@@ -136,7 +136,14 @@ describe('the side menu', () => {
   const labels = (role: Parameters<typeof menuFor>[0]) => menuFor(role).map((item) => item.label)
 
   it('lists exactly what each role may use (app-flow 6)', () => {
-    expect(labels('owner')).toEqual(['Home', 'Approval inbox', 'Agents', 'Alerts and incidents', 'Settings'])
+    expect(labels('owner')).toEqual([
+      'Home',
+      'All brands',
+      'Approval inbox',
+      'Agents',
+      'Alerts and incidents',
+      'Settings',
+    ])
     expect(labels('brand_admin')).toEqual([
       'Home',
       'Approval inbox',

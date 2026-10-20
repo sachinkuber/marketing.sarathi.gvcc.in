@@ -19,6 +19,7 @@ const MENU: Entry[] = [
     path: (b) => `/b/${b}`,
     roles: ['owner', 'brand_admin', 'approver', 'sales_contact', 'viewer'],
   },
+  { id: 'brands', label: 'All brands', path: () => '/brands', roles: ['owner'] },
   { id: 'inbox', label: 'Approval inbox', path: (b) => `/b/${b}/inbox`, roles: [...ADMIN, 'approver'] },
   { id: 'agents', label: 'Agents', path: (b) => `/b/${b}/agents`, roles: ADMIN },
   { id: 'alerts', label: 'Alerts and incidents', path: () => '/alerts', roles: ADMIN },

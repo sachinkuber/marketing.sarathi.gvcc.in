@@ -10,7 +10,7 @@ export function LoadError(props: { what: string; error: ApiError | Error | null;
     <div className="callout danger" role="alert">
       <b>Could not load {props.what}.</b>
       {detail}
-      <div style={{ marginTop: 8 }}>
+      <div className="mt-2">
         <button className="btn sm" type="button" onClick={props.onRetry}>
           Try again
         </button>

@@ -1,7 +1,7 @@
 'use client'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { codeMessage, enableTwoFactor, verifyTotp } from '../../../api/auth'
+import { codeMessage, enableTwoFactor, enrolMessage, verifyTotp } from '../../../api/auth'
 import { ApiError } from '../../../api/client'
 import { AuthShell, ErrorLine } from '../../../auth/AuthShell'
 import { BackupCodes } from '../../../auth/BackupCodes'
@@ -28,7 +28,7 @@ export default function EnrolPage() {
       setStep({ kind: 'scan', ...made })
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.push('/sign-in')
-      setError('That password is not right.')
+      setError(enrolMessage(e))
     } finally {
       setBusy(false)
     }
