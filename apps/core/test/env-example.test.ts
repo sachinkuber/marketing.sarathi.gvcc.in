@@ -19,14 +19,12 @@ describe('.env.example', () => {
   })
 
   it('lists the keys the worker requires, live', () => {
-    for (const key of [
-      'CORE_URL',
-      'WORKER_SECRET',
-      'QUEUE_DATABASE_URL',
-      'ANTHROPIC_API_KEY',
-      'TRIGGER_SECRET',
-    ]) {
+    for (const key of ['CORE_URL', 'WORKER_SECRET', 'QUEUE_DATABASE_URL', 'ANTHROPIC_API_KEY']) {
       expect(lines.some((line) => line.startsWith(`${key}=`))).toBe(true)
     }
+  })
+
+  it('lists the trigger secret the core requires, live', () => {
+    expect(lines.some((line) => line.startsWith('TRIGGER_SECRET='))).toBe(true)
   })
 })

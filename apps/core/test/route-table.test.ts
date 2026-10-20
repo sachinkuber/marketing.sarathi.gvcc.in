@@ -22,7 +22,12 @@ describe('RouteTable', () => {
     expect(() => add('/jobs/ping', { kind: 'trigger' })).toThrow(/under \/triggers/)
     expect(() => add('/triggers/ping', { kind: 'permission', permission: 'manage_users' })).toThrow()
     expect(() => add('/triggers/ping', { kind: 'public' })).toThrow(/only a trigger route/)
-    expect(() => add('/Triggers/ping', { kind: 'public' })).not.toThrow()
+    // Express matches paths case-insensitively, so any other spelling of the segment is refused.
+    expect(() => add('/Triggers/ping', { kind: 'public' })).toThrow(/lowercase/)
+    expect(() => add('/TRIGGERS/ping', { kind: 'trigger' })).toThrow(/lowercase/)
+    expect(() => add('/Worker/x', { kind: 'enrolled' })).toThrow(/lowercase/)
+    expect(() => add('/Worker/x', { kind: 'worker' })).toThrow(/lowercase/)
+    expect(() => add('/WORKER/jobs', { kind: 'attempt' })).toThrow(/lowercase/)
     expect(() => add('/triggers/ping', { kind: 'trigger' })).not.toThrow()
   })
 

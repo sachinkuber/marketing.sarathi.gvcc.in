@@ -1,11 +1,16 @@
 import { randomBytes } from 'node:crypto'
+import { request as httpRequest } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { sign, signingText } from '../src/triggers/signature.ts'
 import { TRIGGER_SECRET, createStack, type Stack } from './support.ts'
 
+// The service's clock is fixed, so every window boundary is tested exactly and nothing depends on timing.
+const FIXED_SECONDS = 1_900_000_000
+
 let stack: Stack
 beforeAll(async () => {
-  stack = await createStack({ realAudit: true })
+  stack = await createStack({ realAudit: true, clock: { now: () => new Date(FIXED_SECONDS * 1000) } })
 })
 afterAll(async () => {
   await stack?.close()
@@ -32,7 +37,7 @@ function signedRequest(
   const method = options.method ?? 'POST'
   const path = options.path ?? PATH
   const body = options.body ?? BODY
-  const timestamp = String(options.timestamp ?? Math.floor(Date.now() / 1000))
+  const timestamp = String(options.timestamp ?? FIXED_SECONDS)
   const nonce = options.nonce ?? randomBytes(32).toString('hex')
   const signature = sign(secret, signingText(method, path, timestamp, nonce, Buffer.from(body)))
   return {
@@ -118,10 +123,13 @@ describe('test 33: a signed trigger', () => {
   it('refuses a changed path, a changed method, and a timestamp or nonce changed after signing', async () => {
     await expectRefused({ ...signedRequest(TRIGGER_SECRET), path: `${PATH}/` }, 'bad_signature')
     stack.logs.length = 0
-    // The signature covers the method: there is no PUT route, and the answer is still 401, not 404.
+    // There is no PUT route, so the request never reaches the signature check: the router's fail-safe answers
+    // not_signed_in. That the signature covers the method is proved by the unit test, not here.
     const put = signedRequest(TRIGGER_SECRET)
     const res = await send({ ...put, method: 'PUT' })
     expect(res.status).toBe(401)
+    expect((await res.json()).error.code).toBe('not_signed_in')
+    expect(refusals()).toHaveLength(0)
     stack.logs.length = 0
     const ts = signedRequest(TRIGGER_SECRET)
     await expectRefused(
@@ -143,13 +151,14 @@ describe('test 33: a signed trigger', () => {
     await expectRefused(signedRequest(TRIGGER_SECRET, { path: `${PATH}?` }), 'query_string')
   })
 
-  it('refuses a timestamp 301 seconds old or ahead, and accepts 299 seconds old', async () => {
-    const now = Math.floor(Date.now() / 1000)
-    await expectRefused(signedRequest(TRIGGER_SECRET, { timestamp: now - 301 }), 'stale')
+  it('refuses a timestamp 301 seconds old or ahead, and accepts exactly 300 either way', async () => {
+    await expectRefused(signedRequest(TRIGGER_SECRET, { timestamp: FIXED_SECONDS - 301 }), 'stale')
     stack.logs.length = 0
-    await expectRefused(signedRequest(TRIGGER_SECRET, { timestamp: now + 301 }), 'stale')
-    stack.logs.length = 0
-    expect((await send(signedRequest(TRIGGER_SECRET, { timestamp: now - 299 }))).status).toBe(200)
+    await expectRefused(signedRequest(TRIGGER_SECRET, { timestamp: FIXED_SECONDS + 301 }), 'stale')
+    for (const offset of [-300, 300]) {
+      const res = await send(signedRequest(TRIGGER_SECRET, { timestamp: FIXED_SECONDS + offset }))
+      expect(res.status).toBe(200)
+    }
   })
 
   it('refuses the same nonce twice: the second answer is replayed', async () => {
@@ -213,23 +222,73 @@ describe('test 33: a signed trigger', () => {
 })
 
 describe('test 34: nonce clean-up and the stale check before the replay check', () => {
-  it('removes a nonce older than ten minutes on the next accepted request; its old replay is stale', async () => {
+  const insertNonce = async (nonce: string, age: string) =>
+    stack.db.admin.query(
+      `insert into app.trigger_nonce (nonce, received_at) values (decode($1, 'hex'), now() - interval '${age}')`,
+      [nonce],
+    )
+  const present = async (nonce: string) =>
+    (await stack.db.admin.query("select 1 from app.trigger_nonce where nonce = decode($1, 'hex')", [nonce]))
+      .rowCount === 1
+
+  it('removes a nonce older than the retention on the next accepted request; its old replay is stale', async () => {
     const old = randomBytes(32).toString('hex')
-    await stack.db.admin.query(
-      "insert into app.trigger_nonce (nonce, received_at) values (decode($1, 'hex'), now() - interval '11 minutes')",
-      [old],
-    )
-    const oldRequest = signedRequest(TRIGGER_SECRET, {
-      nonce: old,
-      timestamp: Math.floor(Date.now() / 1000) - 11 * 60,
-    })
+    await insertNonce(old, '12 minutes')
+    const oldRequest = signedRequest(TRIGGER_SECRET, { nonce: old, timestamp: FIXED_SECONDS - 12 * 60 })
     expect((await send(signedRequest(TRIGGER_SECRET))).status).toBe(200)
-    const left = await stack.db.admin.query(
-      "select 1 from app.trigger_nonce where nonce = decode($1, 'hex')",
-      [old],
-    )
-    expect(left.rowCount).toBe(0)
+    expect(await present(old)).toBe(false)
     stack.logs.length = 0
     await expectRefused(oldRequest, 'stale')
+  })
+
+  it('keeps a nonce that is ten and a half minutes old: retention is eleven minutes, not ten', async () => {
+    const recent = randomBytes(32).toString('hex')
+    await insertNonce(recent, '10 minutes 30 seconds')
+    expect((await send(signedRequest(TRIGGER_SECRET))).status).toBe(200)
+    expect(await present(recent)).toBe(true)
+  })
+})
+
+describe('the bytes as received', () => {
+  const rawPost = (headers: Record<string, string>, body: Buffer) =>
+    new Promise<{ status: number; json: { error?: { code: string } } }>((resolve, reject) => {
+      const req = httpRequest(
+        stack.server.url + PATH,
+        { method: 'POST', headers: { ...headers, 'content-length': String(body.length) } },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              json: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+            }),
+          )
+        },
+      )
+      req.on('error', reject)
+      req.end(body)
+    })
+  const signedHeaders = (body: Buffer) => {
+    const r = signedRequest(TRIGGER_SECRET)
+    const timestamp = r.headers['x-mkt-timestamp'] as string
+    const nonce = r.headers['x-mkt-nonce'] as string
+    return {
+      'x-mkt-timestamp': timestamp,
+      'x-mkt-nonce': nonce,
+      'x-mkt-signature': sign(TRIGGER_SECRET, signingText('POST', PATH, timestamp, nonce, body)),
+    }
+  }
+
+  it('signs over the bytes actually sent when the request has no Content-Type', async () => {
+    const body = Buffer.from(BODY)
+    const res = await rawPost(signedHeaders(body), body)
+    expect(res.status).toBe(200)
+  })
+
+  it('does not decompress a gzip body: it is refused, not read inflated', async () => {
+    const body = gzipSync(Buffer.from(BODY))
+    const res = await rawPost({ ...signedHeaders(body), 'content-encoding': 'gzip' }, body)
+    expect(res.status).toBe(415)
   })
 })

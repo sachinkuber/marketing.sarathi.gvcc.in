@@ -63,6 +63,23 @@ describe('request guard', () => {
     expect(elsewhere.status).toBe(403)
   })
 
+  it('does not lift the checks for a cross-site request, another case or another prefix', async () => {
+    const url = await start(null)
+    const signature = { 'x-mkt-signature': 'x' }
+    const cross = await fetch(`${url}/api/v1/triggers/x`, {
+      method: 'POST',
+      headers: { ...signature, 'sec-fetch-site': 'cross-site' },
+      body: '{}',
+    })
+    expect(cross.status).toBe(403)
+    expect((await cross.json()).error.code).toBe('cross_site_request')
+    for (const path of ['/api/v1/Triggers/x', '/api/v1/triggersx']) {
+      const res = await fetch(url + path, { method: 'POST', headers: signature, body: '{}' })
+      expect(res.status).toBe(403)
+      expect((await res.json()).error.code).toBe('bad_origin')
+    }
+  })
+
   it('refuses a write that carries no Origin header', async () => {
     const url = await start(null)
     const res = await write(url, { 'content-type': 'application/json' })

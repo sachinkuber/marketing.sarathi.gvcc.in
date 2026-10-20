@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { checkSignature, sign, signingText } from '../src/triggers/signature.ts'
+import { KEEP_SECONDS } from '../src/triggers/nonce.ts'
+import { WINDOW_SECONDS, checkSignature, sign, signingText } from '../src/triggers/signature.ts'
 
 const SECRET = 'throwaway-trigger-secret-for-tests-only'
 const NOW = 1_800_000_000
@@ -124,5 +125,13 @@ describe('checkSignature', () => {
       ok: false,
       reason: 'bad_nonce',
     })
+  })
+})
+
+describe('nonce retention', () => {
+  it('outlasts the longest time a signed request stays acceptable, with a margin of a minute', () => {
+    // A request is acceptable for 2 x the window (ts up to a window ahead, then a window behind), plus the
+    // second lost to flooring the clock; the extra 60 s covers latency and clock skew.
+    expect(KEEP_SECONDS).toBeGreaterThanOrEqual(2 * WINDOW_SECONDS + 60)
   })
 })

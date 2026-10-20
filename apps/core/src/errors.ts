@@ -38,6 +38,10 @@ export function errorHandler(logger: Logger): ErrorRequestHandler {
       send(res, 400, 'invalid_json', 'The request body is not valid JSON.')
       return
     }
+    if (type === 'encoding.unsupported') {
+      send(res, 415, 'unsupported_encoding', 'The request body encoding is not supported.')
+      return
+    }
     if (type === 'entity.too.large') {
       send(res, 413, 'payload_too_large', 'The request body is too large.')
       return

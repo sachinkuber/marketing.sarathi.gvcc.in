@@ -65,6 +65,12 @@ export class RouteTable {
       if (segment.toLowerCase() === 'brands' && segment !== 'brands') {
         throw new Error(`${where}: the brands segment must be spelled in lowercase`)
       }
+      // The same for the machine prefixes: /Triggers/... would serve /triggers/... and the guard's exemptions.
+      for (const prefix of ['triggers', 'worker']) {
+        if (segment.toLowerCase() === prefix && segment !== prefix) {
+          throw new Error(`${where}: the ${prefix} segment must be spelled in lowercase`)
+        }
+      }
     }
     // Only literal segments and plain :name parameters. path-to-regexp (Express 5) also reads {optional},
     // *wildcard, (regex), ? and escapes, any of which can match a brand URL without the rules here seeing it.
