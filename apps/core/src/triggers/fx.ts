@@ -8,7 +8,8 @@ export interface FxRate {
 }
 
 export interface FxSource {
-  fetchUsdInr(date: string): Promise<FxRate>
+  // `signal` aborts the request: the caller's budget for the whole duty.
+  fetchUsdInr(date: string, signal?: AbortSignal): Promise<FxRate>
 }
 
 // Hard-coded: the address never comes from a request, a setting or the document.
@@ -16,7 +17,7 @@ export const ECB_URL = 'https://www.ecb.europa.eu/stats/eurofxref/eurofxref-dail
 export const FX_TIMEOUT_MS = 10_000
 const MAX_DOCUMENT_CHARS = 200_000
 
-export type FxFailure = 'timeout' | 'fetch_failed' | 'http_status' | 'bad_document'
+export type FxFailure = 'timeout' | 'aborted' | 'fetch_failed' | 'http_status' | 'bad_document'
 
 // The message of a failure never carries the response or the address: the code says what went wrong.
 function failure(code: FxFailure): Error {
@@ -63,8 +64,9 @@ export function parseEcb(text: string): { rateDate: string; rateMicros: bigint }
 
 export function ecbFxSource(fetchFn: typeof fetch = fetch, timeoutMs: number = FX_TIMEOUT_MS): FxSource {
   return {
-    async fetchUsdInr(): Promise<FxRate> {
-      const signal = AbortSignal.timeout(timeoutMs)
+    async fetchUsdInr(_date?: string, outer?: AbortSignal): Promise<FxRate> {
+      const own = AbortSignal.timeout(timeoutMs)
+      const signal = outer ? AbortSignal.any([own, outer]) : own
       let text: string
       try {
         const res = await fetchFn(ECB_URL, {
@@ -76,7 +78,7 @@ export function ecbFxSource(fetchFn: typeof fetch = fetch, timeoutMs: number = F
         text = await res.text()
       } catch (error) {
         if ((error as { code?: unknown }).code === 'http_status') throw error
-        throw failure(signal.aborted ? 'timeout' : 'fetch_failed')
+        throw failure(outer?.aborted ? 'aborted' : own.aborted ? 'timeout' : 'fetch_failed')
       }
       if (text.length > MAX_DOCUMENT_CHARS) throw failure('bad_document')
       return { ...parseEcb(text), source: 'ecb' }
@@ -89,14 +91,25 @@ export class StandInFxSource implements FxSource {
   calls = 0
   failures = 0
   message = 'stand-in rate source down'
+  // When true a call never answers on its own; it rejects only when its signal aborts (a hung source).
+  hang = false
+  aborted = false
   constructor(private readonly rateMicros: bigint) {}
 
   failNext(times: number): void {
     this.failures = times
   }
 
-  async fetchUsdInr(date: string): Promise<FxRate> {
+  async fetchUsdInr(date: string, signal?: AbortSignal): Promise<FxRate> {
     this.calls += 1
+    if (this.hang) {
+      return new Promise<FxRate>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          this.aborted = true
+          reject(new Error('aborted'))
+        })
+      })
+    }
     if (this.failures > 0) {
       this.failures -= 1
       throw new Error(this.message)

@@ -34,7 +34,13 @@ export interface CoreDeps {
   // Unset: the system clock.
   clock?: Clock
   // What the daily duties need beyond the application pool; unset, POST /triggers/daily is not declared.
-  daily?: { ownerViewPool: Pool; auditWriterPool: Pool; store: ExportStore | null; fx: FxSource }
+  daily?: {
+    ownerViewPool: Pool
+    auditWriterPool: Pool
+    store: ExportStore | null
+    fx: FxSource
+    dutyBudgetMs?: number
+  }
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']

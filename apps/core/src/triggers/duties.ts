@@ -20,6 +20,8 @@ export interface DailyDeps {
   fx: FxSource
   notify: NotifyDeps
   clock: Clock
+  // How long one duty may run; default DUTY_BUDGET_MS. A test seam.
+  dutyBudgetMs?: number
 }
 
 // One duty may take this long; after it the duty is recorded failed and the next one starts.
@@ -30,16 +32,21 @@ export const RUNNING_STALE_MS = 15 * 60_000
 
 const ORDER: Duty[] = ['audit_export', 'audit_verify', 'fx_rate', 'nonce_cleanup']
 
-async function withBudget<T>(work: Promise<T>): Promise<T> {
+// Runs one duty under the budget. At the budget the duty's AbortSignal fires and the duty is recorded failed.
+// Only the exchange-rate fetch honours the signal (its request is cancelled). The other duties (export,
+// verify, nonce clean-up) are idempotent but not cancellable: one that overruns may finish in the background,
+// and a retry running it again beside it is safe.
+async function withBudget<T>(budgetMs: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
   let timer: NodeJS.Timeout | undefined
   const limit = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(Object.assign(new Error('duty timed out'), { name: 'DutyTimeout' })),
-      DUTY_BUDGET_MS,
-    )
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(Object.assign(new Error('duty timed out'), { name: 'DutyTimeout' }))
+    }, budgetMs)
   })
   try {
-    return await Promise.race([work, limit])
+    return await Promise.race([work(controller.signal), limit])
   } finally {
     clearTimeout(timer)
   }
@@ -86,7 +93,9 @@ async function finish(
   )
 }
 
-type Work = () => Promise<{ state: 'done' | 'not_configured'; detail: Record<string, unknown> }>
+type Work = (
+  signal: AbortSignal,
+) => Promise<{ state: 'done' | 'not_configured'; detail: Record<string, unknown> }>
 
 function workOf(deps: DailyDeps, duty: Duty, today: string): Work {
   switch (duty) {
@@ -123,8 +132,8 @@ function workOf(deps: DailyDeps, duty: Duty, today: string): Work {
         }
       }
     case 'fx_rate':
-      return async () => {
-        const rate = await deps.fx.fetchUsdInr(today)
+      return async (signal) => {
+        const rate = await deps.fx.fetchUsdInr(today, signal)
         await deps.ownerViewPool.query('select app.record_fx_rate($1::date, $2::bigint, $3)', [
           rate.rateDate,
           rate.rateMicros.toString(),
@@ -147,15 +156,21 @@ export async function runDailyDuties(deps: DailyDeps, today: string): Promise<Re
       continue
     }
     try {
-      const done = await withBudget(workOf(deps, duty, today)())
+      const done = await withBudget(deps.dutyBudgetMs ?? DUTY_BUDGET_MS, workOf(deps, duty, today))
       await finish(deps, duty, today, done.state, done.detail)
       outcome[duty] = done.state
     } catch (error) {
       // The name only: a message can hold an address, a response body or a key.
       const name = errorName(error)
       deps.notify.logger?.error({ err: name, duty }, 'daily duty failed')
-      await finish(deps, duty, today, 'failed', { error: name })
       outcome[duty] = 'failed'
+      try {
+        await finish(deps, duty, today, 'failed', { error: name })
+      } catch (recordError) {
+        // The database is not answering: say so by name and go on. The duty stays 'running' until it is stale
+        // and the outcome is still 'failed', so the call answers 502 and n8n retries.
+        deps.notify.logger?.error({ err: errorName(recordError), duty }, 'daily duty failure not recorded')
+      }
     }
   }
   return outcome

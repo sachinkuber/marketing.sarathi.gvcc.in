@@ -46,6 +46,8 @@ afterAll(async () => {
 beforeEach(async () => {
   logged = []
   fx.failures = 0
+  fx.hang = false
+  fx.aborted = false
   fx.calls = 0
   store.tamper = false
   const sink = (...args: unknown[]) => void logged.push(JSON.stringify(args))
@@ -215,6 +217,49 @@ describe('runDailyDuties', () => {
   })
 })
 
+describe('the per-duty budget, failure recording and concurrency', () => {
+  it('records a duty that hangs past its budget as failed, cancels its request, and runs the later duties', async () => {
+    fx.hang = true
+    const out = await runDailyDuties({ ...deps, dutyBudgetMs: 50 }, TODAY)
+    expect(out).toEqual({ ...allOutcomes('done'), fx_rate: 'failed' })
+    expect(fx.aborted).toBe(true)
+    const row = (await dutyRows()).find((r) => r.duty === 'fx_rate')
+    expect(row?.state).toBe('failed')
+    expect(row?.detail).toEqual({ error: 'DutyTimeout' })
+    expect((await dutyRows()).find((r) => r.duty === 'nonce_cleanup')?.state).toBe('done')
+  })
+
+  it('still answers when failing to record the failure, by name, with the outcome failed', async () => {
+    fx.failNext(1)
+    const flaky = new Proxy(stack.appPool, {
+      get(target, prop) {
+        if (prop === 'query') {
+          return (sql: unknown, ...rest: unknown[]) =>
+            typeof sql === 'string' && sql.includes('set state = $3')
+              ? Promise.reject(new Error('db down secret-detail'))
+              : (target.query as (...a: unknown[]) => unknown)(sql, ...rest)
+        }
+        const value = Reflect.get(target, prop) as unknown
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
+    const out = await runDailyDuties({ ...deps, appPool: flaky }, TODAY)
+    expect(out.fx_rate).toBe('failed')
+    expect(out.nonce_cleanup).toBe('failed')
+    expect(out.n8n_heartbeat).toBe('done')
+    expect(logged.join('')).toContain('not recorded')
+    expect(logged.join('')).not.toContain('secret-detail')
+    expect((await dutyRows()).find((r) => r.duty === 'fx_rate')?.state).toBe('running')
+  })
+
+  it('runs each duty exactly once when two calls arrive together', async () => {
+    const [a, b] = await Promise.all([runDailyDuties(deps, TODAY), runDailyDuties(deps, TODAY)])
+    for (const duty of DUTIES) expect([a[duty], b[duty]].sort()).toEqual(['done', 'skipped'])
+    expect(fx.calls).toBe(1)
+    expect(await dutyRows()).toHaveLength(DUTIES.length)
+  })
+})
+
 // The caller n8n is.
 const PATH = '/api/v1/triggers/daily'
 const post = (body: string, path = PATH) => {
@@ -263,5 +308,35 @@ describe('POST /triggers/daily', () => {
     const res = await fetch(stack.server.url + PATH, { method: 'POST', body: BODY })
     expect([401, 403]).toContain(res.status)
     expect(await dutyRows()).toHaveLength(0)
+  })
+})
+
+describe('POST /triggers/daily with a duty that hangs', () => {
+  it('answers 502 once the budget is spent, with the hung duty failed and the others done', async () => {
+    const hung = new StandInFxSource(83_354_976n)
+    hung.hang = true
+    const small = await createStack({
+      clock: { now: () => new Date(FIXED_SECONDS * 1000) },
+      daily: { fx: hung, store: new MemoryExportStore(), dutyBudgetMs: 50 },
+    })
+    try {
+      const nonce = randomBytes(32).toString('hex')
+      const ts = String(FIXED_SECONDS)
+      const res = await fetch(small.server.url + PATH, {
+        method: 'POST',
+        body: BODY,
+        headers: {
+          'content-type': 'application/json',
+          'x-mkt-timestamp': ts,
+          'x-mkt-nonce': nonce,
+          'x-mkt-signature': sign(TRIGGER_SECRET, signingText('POST', PATH, ts, nonce, Buffer.from(BODY))),
+        },
+      })
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ duties: { ...allOutcomes('done'), fx_rate: 'failed' } })
+      expect(hung.aborted).toBe(true)
+    } finally {
+      await small.close()
+    }
   })
 })

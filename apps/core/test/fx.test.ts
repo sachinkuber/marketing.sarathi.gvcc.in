@@ -115,6 +115,24 @@ describe('ecbFxSource', () => {
   })
 })
 
+describe('ecbFxSource cancellation', () => {
+  it('cancels the request when the caller aborts, with the code aborted', async () => {
+    let seenAbort = false
+    const hang = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          seenAbort = true
+          reject(new Error('aborted'))
+        })
+      })) as unknown as typeof fetch
+    const controller = new AbortController()
+    const pending = codeOf(ecbFxSource(hang).fetchUsdInr('2026-10-20', controller.signal))
+    controller.abort()
+    expect(await pending).toBe('FxSourceError:aborted')
+    expect(seenAbort).toBe(true)
+  })
+})
+
 describe('StandInFxSource', () => {
   it('answers a fixed rate, and can be told to fail', async () => {
     const fx = new StandInFxSource(83_000_000n)
