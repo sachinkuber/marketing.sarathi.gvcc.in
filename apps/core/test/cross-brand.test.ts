@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { MemoryExportStore } from '../src/audit/store.ts'
+import { StandInFxSource } from '../src/triggers/fx.ts'
+import { seedRun } from '@mkt/db/testing'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
 const PASSWORD = 'correct horse battery'
@@ -15,10 +18,15 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   const items = new Map<string, string>()
   // Likewise a real alert in each brand, for the acknowledgement route.
   const alerts = new Map<string, string>()
+  // And a real run in each brand, for the run detail route.
+  const runs = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
-    stack = await createStack({ withQueue: true })
+    stack = await createStack({
+      withQueue: true,
+      daily: { fx: new StandInFxSource(83_000_000n), store: new MemoryExportStore() },
+    })
     brandA = await addBrand(stack, 'brand-a')
     brandB = await addBrand(stack, 'brand-b')
     await addUser(stack, {
@@ -39,6 +47,10 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         [brand],
       )
       alerts.set(brand, alert.rows[0].id as string)
+      const def = await stack.db.admin.query(
+        "select id from app.agent_definition_version where agent = 'summary' and live",
+      )
+      runs.set(brand, await seedRun(stack.db, brand, def.rows[0].id as string))
     }
   })
   afterAll(async () => stack?.close())
@@ -48,12 +60,20 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       .replace(':brandId', brand)
       .replace(':itemId', items.get(brand) ?? SOME_USER)
       .replace(':alertId', alerts.get(brand) ?? SOME_USER)
+      .replace(':runId', runs.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
     const scoped = stack.core.routes.list().filter((r) => r.path.includes(':brandId'))
     expect(scoped.length).toBeGreaterThanOrEqual(5)
     expect(scoped.some((r) => r.path === '/brands/:brandId/jobs/dead')).toBe(true)
+    for (const read of ['home', 'status', 'agents', 'runs', 'runs/:runId', 'model-calls/review', 'audit']) {
+      expect(
+        scoped.some((r) => r.method === 'get' && r.path === `/brands/:brandId/${read}`),
+        read,
+      ).toBe(true)
+    }
+    expect(scoped.some((r) => r.method === 'post' && r.path === '/brands/:brandId/audit/verify')).toBe(true)
   })
 
   it('answers 404 to a member of brand A for every route when the path names brand B', async () => {

@@ -16,8 +16,11 @@ import { registerKillSwitchRoutes } from './routes/killswitch.ts'
 import { releaseHeldJobs } from './killswitch/release.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
-import { registerAgentRoutes } from './routes/agents.ts'
+import { registerAgentReadRoutes, registerAgentRoutes } from './routes/agents.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
+import { registerAuditRoutes, type OwnerView } from './routes/audit.ts'
+import { registerHomeRoutes } from './routes/home.ts'
+import { registerStatusRoutes } from './routes/status.ts'
 import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
 import type { JobsDeps } from './jobs/service.ts'
@@ -42,6 +45,11 @@ export interface ApiDeps {
   triggers?: TriggerDeps
   // The daily duties behind POST /triggers/daily; unset, that route is not declared.
   daily?: DailyTrigger
+  // The owner-view pool and the export store: the audit screens and the run detail read the log through them.
+  // Unset, the routes that read the audit log are not declared.
+  ownerView?: OwnerView
+  // The service's clock, for "this month" and the time of a verify. Unset: the system clock.
+  now?: () => Date
 }
 
 export interface ApiContext {
@@ -104,6 +112,15 @@ export function createApi(
   })
   registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerOverdueRoutes(table, { pool: deps.pool, audit: deps.audit })
+  const now = deps.now ?? (() => new Date())
+  registerStatusRoutes(table, { pool: deps.pool })
+  registerHomeRoutes(table, { pool: deps.pool, now })
+  registerAgentReadRoutes(table, {
+    pool: deps.pool,
+    now,
+    audit: deps.ownerView ? { ownerView: deps.ownerView, sink: deps.audit } : undefined,
+  })
+  if (deps.ownerView) registerAuditRoutes(table, { ownerView: deps.ownerView, audit: deps.audit, now })
 
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs, deps.notify)

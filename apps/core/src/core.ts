@@ -111,6 +111,8 @@ export function buildCore(deps: CoreDeps): {
         now: () => clock.now(),
         logger: deps.logger,
       },
+      ownerView: daily ? { pool: daily.ownerViewPool, store: daily.store } : undefined,
+      now: () => clock.now(),
       daily: daily
         ? {
             now: () => clock.now(),
