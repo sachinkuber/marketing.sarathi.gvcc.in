@@ -27,4 +27,14 @@ describe('.env.example', () => {
   it('lists the trigger secret the core requires, live', () => {
     expect(lines.some((line) => line.startsWith('TRIGGER_SECRET='))).toBe(true)
   })
+
+  it('has exactly one live OWNER_VIEW_DATABASE_URL line, for the owner-view role', () => {
+    const live = lines.filter((line) => /^\s*OWNER_VIEW_DATABASE_URL=/.test(line))
+    expect(live).toHaveLength(1)
+    expect(live[0]).toMatch(/^OWNER_VIEW_DATABASE_URL=postgres:\/\/mkt_owner_view:/)
+  })
+
+  it('says the heartbeat is not expected until the workflow is live', () => {
+    expect(lines).toContain('N8N_HEARTBEAT_EXPECTED=false')
+  })
 })

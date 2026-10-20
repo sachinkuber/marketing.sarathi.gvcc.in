@@ -643,3 +643,52 @@ describe('notify tick', () => {
     expect(logged.join('\n')).toContain('SendTimeout')
   })
 })
+
+describe('the n8n heartbeat watch', () => {
+  const setHeartbeat = async (ageHours: number | null) => {
+    await stack.db.admin.query('delete from app.duty_run')
+    if (ageHours === null) return
+    const at = new Date(clock.now().getTime() - ageHours * 3_600_000)
+    await stack.db.admin.query(
+      "insert into app.duty_run (duty, run_date, state, started_at, finished_at) values ('n8n_heartbeat', $1, 'done', $2, $2)",
+      [at.toISOString().slice(0, 10), at],
+    )
+  }
+  const missing = () => alertRows("kind = 'n8n_heartbeat_missing'")
+
+  it('raises nothing when the heartbeat is not expected, even with none on record', async () => {
+    await setHeartbeat(null)
+    expect(await alertOnOperationalFindings(stack.appPool, deps)).toBe(0)
+    expect(await missing()).toHaveLength(0)
+  })
+
+  it('raises one severity 2 platform alert when it is expected and 27 hours old, and not a second', async () => {
+    deps.heartbeatExpected = true
+    await setHeartbeat(27)
+    expect(await alertOnOperationalFindings(stack.appPool, deps)).toBe(1)
+    expect(await alertOnOperationalFindings(stack.appPool, deps)).toBe(0)
+    const rows = await missing()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ severity: 2, brand_id: null })
+  })
+
+  it('raises one when it is expected and none was ever recorded', async () => {
+    deps.heartbeatExpected = true
+    await setHeartbeat(null)
+    await alertOnOperationalFindings(stack.appPool, deps)
+    expect(await missing()).toHaveLength(1)
+  })
+
+  it('raises nothing for a heartbeat 25 hours old; a fresh one resolves nothing and opens nothing new', async () => {
+    deps.heartbeatExpected = true
+    await setHeartbeat(25)
+    expect(await alertOnOperationalFindings(stack.appPool, deps)).toBe(0)
+    await setHeartbeat(27)
+    await alertOnOperationalFindings(stack.appPool, deps)
+    await setHeartbeat(1)
+    expect(await alertOnOperationalFindings(stack.appPool, deps)).toBe(0)
+    const rows = await missing()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].resolved_at).toBeNull()
+  })
+})

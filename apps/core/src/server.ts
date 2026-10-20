@@ -8,6 +8,7 @@ import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerSummaryHandlers } from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
+import { ecbFxSource } from './triggers/fx.ts'
 
 export interface RunningServer {
   url: string
@@ -23,12 +24,22 @@ export async function startServer(
   const results: ResultHandlers = new Map()
   const appPool = createPool(config.databaseUrl)
   const authPool = createPool(config.databaseUrl, { searchPath: 'auth' })
+  // The owner-view role reads the audit log and records the exchange rate; the audit-writer role records the
+  // export. Both serve the daily duties only.
+  const ownerViewPool = createPool(config.ownerViewDatabaseUrl)
+  const auditWriterPool = createPool(config.auditDatabaseUrl)
   // An idle client dropping (for example when the database restarts) emits 'error' on the pool;
   // with no listener that would crash the process. createPool leaves this to the caller.
   appPool.on('error', (error) => deps.logger.error({ err: error, pool: 'app' }, 'idle database client error'))
   authPool.on('error', (error) =>
     deps.logger.error({ err: error, pool: 'auth' }, 'idle database client error'),
   )
+  for (const [name, pool] of [
+    ['owner_view', ownerViewPool],
+    ['audit_writer', auditWriterPool],
+  ] as const) {
+    pool.on('error', (error) => deps.logger.error({ err: error, pool: name }, 'idle database client error'))
+  }
   registerSummaryHandlers(results, { audit: deps.audit, queue, backlogLimit: config.queueBacklogLimit })
   // trustProxy (AppDeps) is set at deployment (package 16) because the invite limiter keys on req.ip.
   const { app } = buildCore({
@@ -36,6 +47,8 @@ export async function startServer(
     logger: deps.logger,
     appPool,
     authPool,
+    // No write-once export store exists yet (owner items A4 and A5): the export reports not_configured.
+    daily: { ownerViewPool, auditWriterPool, store: null, fx: ecbFxSource() },
     mailer: deps.mailer,
     audit: deps.audit,
     jobs: {
@@ -58,7 +71,13 @@ export async function startServer(
       )
     })
   } catch (error) {
-    await Promise.allSettled([appPool.end(), authPool.end(), queue.stop()])
+    await Promise.allSettled([
+      appPool.end(),
+      authPool.end(),
+      ownerViewPool.end(),
+      auditWriterPool.end(),
+      queue.stop(),
+    ])
     throw error
   }
   const { port } = server.address() as AddressInfo
@@ -71,6 +90,8 @@ export async function startServer(
     })
     await appPool.end()
     await authPool.end()
+    await ownerViewPool.end()
+    await auditWriterPool.end()
     await queue.stop()
   }
   return {

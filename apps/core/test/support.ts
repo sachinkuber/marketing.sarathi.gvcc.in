@@ -19,6 +19,8 @@ import type { AuditSink, MailMessage } from '../src/ports.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
 import type { AlertChannel, Clock } from '../src/notify/ports.ts'
 import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
+import type { ExportStore } from '../src/audit/store.ts'
+import type { FxSource } from '../src/triggers/fx.ts'
 
 export interface TestServer {
   url: string
@@ -52,6 +54,8 @@ export interface Stack {
   audit: MemoryAudit
   // The pool behind the database audit sink; null unless the stack was built with realAudit.
   auditPool: Pool | null
+  // The owner-view pool behind the daily duties; null unless the stack was built with `daily`.
+  ownerViewPool: Pool | null
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   // The work engine's dependencies; null unless the stack was built with withQueue.
@@ -82,6 +86,8 @@ export async function createStack(
     // The second alert channel and the clock the core's delivery uses (default: always failing, system).
     alertChannel?: AlertChannel
     clock?: Clock
+    // Declare the daily trigger route, with this exchange-rate source and export store (null: none configured).
+    daily?: { fx: FxSource; store: ExportStore | null }
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
@@ -90,8 +96,9 @@ export async function createStack(
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = options.mailer ?? new MemoryMailer()
   const audit = options.audit ?? new MemoryAudit()
-  const auditPool = options.realAudit ? createPool(db.urlFor('audit_writer')) : null
-  const sink: AuditSink = auditPool ? new DbAudit(auditPool) : audit
+  const auditPool = options.realAudit || options.daily ? createPool(db.urlFor('audit_writer')) : null
+  const ownerViewPool = options.daily ? createPool(db.urlFor('owner_view')) : null
+  const sink: AuditSink = options.realAudit && auditPool ? new DbAudit(auditPool) : audit
   const logs: string[] = []
   const limiter = new AttemptLimiter({
     maxFailures: LOCK_MAX_FAILURES,
@@ -104,6 +111,7 @@ export async function createStack(
     port: 0,
     databaseUrl: db.urlFor('app'),
     auditDatabaseUrl: db.urlFor('audit_writer'),
+    ownerViewDatabaseUrl: db.urlFor('owner_view'),
     queueDatabaseUrl: db.urlFor('queue'),
     authSecret: 'test-secret-'.padEnd(48, 'x'),
     workerSecret: 'worker-secret-'.padEnd(48, 'w'),
@@ -111,6 +119,7 @@ export async function createStack(
     triggerSecret: TRIGGER_SECRET,
     queueBacklogLimit: options.backlogLimit ?? 2000,
     publicOrigin: ORIGIN,
+    n8nHeartbeatExpected: false,
     logLevel: 'silent',
   }
   const queue = options.withQueue ? await openQueue(db.urlFor('queue')) : null
@@ -136,6 +145,10 @@ export async function createStack(
     jobs: jobs ?? undefined,
     alertChannel: options.alertChannel,
     clock: options.clock,
+    daily:
+      options.daily && ownerViewPool && auditPool
+        ? { ownerViewPool, auditWriterPool: auditPool, store: options.daily.store, fx: options.daily.fx }
+        : undefined,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
     extraRoutes: options.extraRoutes,
@@ -148,6 +161,7 @@ export async function createStack(
     mailer,
     audit,
     auditPool,
+    ownerViewPool,
     limiter,
     core,
     jobs,
@@ -160,6 +174,7 @@ export async function createStack(
       await appPool.end()
       await authPool.end()
       await auditPool?.end()
+      await ownerViewPool?.end()
       await db.drop()
     },
   }

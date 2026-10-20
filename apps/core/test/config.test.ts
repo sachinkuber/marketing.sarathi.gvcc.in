@@ -5,6 +5,7 @@ const base = {
   DATABASE_URL: 'postgres://app:pw@127.0.0.1:5432/mkt',
   AUDIT_DATABASE_URL: 'postgres://audit:pw@127.0.0.1:5432/mkt',
   QUEUE_DATABASE_URL: 'postgres://queue:pw@127.0.0.1:5432/mkt',
+  OWNER_VIEW_DATABASE_URL: 'postgres://owner:pw@127.0.0.1:5432/mkt',
   AUTH_SECRET: 'a'.repeat(32),
   WORKER_SECRET: 'w'.repeat(32),
   ATTEMPT_TOKEN_SECRET: 't'.repeat(32),
@@ -25,6 +26,8 @@ describe('loadConfig', () => {
       triggerSecret: base.TRIGGER_SECRET,
       attemptTokenSecret: base.ATTEMPT_TOKEN_SECRET,
       queueBacklogLimit: 2000,
+      ownerViewDatabaseUrl: base.OWNER_VIEW_DATABASE_URL,
+      n8nHeartbeatExpected: false,
     })
   })
 
@@ -65,6 +68,23 @@ describe('loadConfig', () => {
     expect(() => loadConfig(missing)).toThrow('Invalid configuration: TRIGGER_SECRET')
     expect(() => loadConfig({ ...base, TRIGGER_SECRET: 'short' })).toThrow(
       'Invalid configuration: TRIGGER_SECRET',
+    )
+  })
+
+  it('requires the owner-view database url, naming only the variable', () => {
+    const missing: Record<string, string> = { ...base }
+    delete missing.OWNER_VIEW_DATABASE_URL
+    expect(() => loadConfig(missing)).toThrow('Invalid configuration: OWNER_VIEW_DATABASE_URL')
+    expect(() => loadConfig({ ...base, OWNER_VIEW_DATABASE_URL: 'nope' })).toThrow(
+      'Invalid configuration: OWNER_VIEW_DATABASE_URL',
+    )
+  })
+
+  it('reads the heartbeat expectation as a strict boolean, false by default', () => {
+    expect(loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'true' }).n8nHeartbeatExpected).toBe(true)
+    expect(loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'false' }).n8nHeartbeatExpected).toBe(false)
+    expect(() => loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'yes' })).toThrow(
+      'Invalid configuration: N8N_HEARTBEAT_EXPECTED',
     )
   })
 

@@ -52,6 +52,7 @@ describe('startServer', () => {
         port: 0,
         databaseUrl: db.urlFor('app'),
         auditDatabaseUrl: db.urlFor('audit_writer'),
+        ownerViewDatabaseUrl: db.urlFor('owner_view'),
         queueDatabaseUrl: db.urlFor('queue'),
         authSecret: 'z'.repeat(48),
         workerSecret: 'w'.repeat(48),
@@ -59,6 +60,7 @@ describe('startServer', () => {
         triggerSecret: 't'.repeat(48),
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
+        n8nHeartbeatExpected: false,
         logLevel: 'silent',
       },
       { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
@@ -84,6 +86,7 @@ describe('startServer', () => {
         port: 0,
         databaseUrl: db.urlFor('app'),
         auditDatabaseUrl: db.urlFor('audit_writer'),
+        ownerViewDatabaseUrl: db.urlFor('owner_view'),
         queueDatabaseUrl: db.urlFor('queue'),
         authSecret: 'z'.repeat(48),
         workerSecret: 'w'.repeat(48),
@@ -91,6 +94,7 @@ describe('startServer', () => {
         triggerSecret: 't'.repeat(48),
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
+        n8nHeartbeatExpected: false,
         logLevel: 'silent',
       },
       { logger: createLogger('silent'), mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
@@ -116,6 +120,7 @@ describe('startServer', () => {
         port: 0,
         databaseUrl: db.urlFor('app'),
         auditDatabaseUrl: db.urlFor('audit_writer'),
+        ownerViewDatabaseUrl: db.urlFor('owner_view'),
         queueDatabaseUrl: db.urlFor('queue'),
         authSecret: 'z'.repeat(48),
         workerSecret: 'w'.repeat(48),
@@ -123,12 +128,13 @@ describe('startServer', () => {
         triggerSecret: 't'.repeat(48),
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
+        n8nHeartbeatExpected: false,
         logLevel: 'info',
       },
       { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
     )
     try {
-      expect(created).toHaveLength(2)
+      expect(created).toHaveLength(4)
       for (const pool of created) {
         // With no listener, emit('error') would throw and take the process down.
         expect(() => pool.emit('error', new Error('connection terminated unexpectedly'))).not.toThrow()
@@ -146,6 +152,7 @@ describe('startServer', () => {
     port,
     databaseUrl,
     auditDatabaseUrl: databaseUrl,
+    ownerViewDatabaseUrl: databaseUrl,
     queueDatabaseUrl: queueUrl,
     authSecret: 'z'.repeat(48),
     workerSecret: 'w'.repeat(48),
@@ -153,10 +160,11 @@ describe('startServer', () => {
     triggerSecret: 't'.repeat(48),
     queueBacklogLimit: 2000,
     publicOrigin: 'https://app.example.test',
+    n8nHeartbeatExpected: false,
     logLevel: 'silent' as const,
   })
 
-  it('rejects when the port is taken, and closes both pools', async () => {
+  it('rejects when the port is taken, and closes every pool', async () => {
     await requireDatabase()
     const db = await createQueueTestDatabase()
     const logger = createLogger('silent')
@@ -168,7 +176,7 @@ describe('startServer', () => {
       const second = startServer(configFor(db.urlFor('app'), db.urlFor('queue'), port), deps)
       const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('never settled')), 3000))
       await expect(Promise.race([second, timeout])).rejects.toMatchObject({ code: 'EADDRINUSE' })
-      expect(created).toHaveLength(2)
+      expect(created).toHaveLength(4)
       for (const pool of created) expect((pool as unknown as { ended: boolean }).ended).toBe(true)
     } finally {
       await first.stop()

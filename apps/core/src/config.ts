@@ -8,12 +8,18 @@ const schema = z.object({
   DATABASE_URL: z.url(),
   AUDIT_DATABASE_URL: z.url(),
   QUEUE_DATABASE_URL: z.url(),
+  OWNER_VIEW_DATABASE_URL: z.url(),
   AUTH_SECRET: z.string().min(32),
   WORKER_SECRET: z.string().min(32),
   ATTEMPT_TOKEN_SECRET: z.string().min(32),
   TRIGGER_SECRET: z.string().min(32),
   QUEUE_BACKLOG_LIMIT: z.coerce.number().int().positive().default(2000),
   PUBLIC_ORIGIN: z.url(),
+  // No missing-heartbeat alert until the daily n8n workflow is live.
+  N8N_HEARTBEAT_EXPECTED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
 })
 
@@ -23,12 +29,14 @@ export interface Config {
   databaseUrl: string
   auditDatabaseUrl: string
   queueDatabaseUrl: string
+  ownerViewDatabaseUrl: string
   authSecret: string
   workerSecret: string
   attemptTokenSecret: string
   triggerSecret: string
   queueBacklogLimit: number
   publicOrigin: string
+  n8nHeartbeatExpected: boolean
   logLevel: (typeof LEVELS)[number]
 }
 
@@ -56,12 +64,14 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     databaseUrl: value.DATABASE_URL,
     auditDatabaseUrl: value.AUDIT_DATABASE_URL,
     queueDatabaseUrl: value.QUEUE_DATABASE_URL,
+    ownerViewDatabaseUrl: value.OWNER_VIEW_DATABASE_URL,
     authSecret: value.AUTH_SECRET,
     workerSecret: value.WORKER_SECRET,
     attemptTokenSecret: value.ATTEMPT_TOKEN_SECRET,
     triggerSecret: value.TRIGGER_SECRET,
     queueBacklogLimit: value.QUEUE_BACKLOG_LIMIT,
     publicOrigin: new URL(value.PUBLIC_ORIGIN).origin,
+    n8nHeartbeatExpected: value.N8N_HEARTBEAT_EXPECTED,
     logLevel: value.LOG_LEVEL,
   }
 }

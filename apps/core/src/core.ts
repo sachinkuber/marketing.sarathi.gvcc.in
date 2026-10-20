@@ -16,6 +16,9 @@ import { UnconfiguredAlertChannel } from './adapters.ts'
 import { systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import type { JobsDeps } from './jobs/service.ts'
+import type { ExportStore } from './audit/store.ts'
+import { runDailyDuties } from './triggers/duties.ts'
+import type { FxSource } from './triggers/fx.ts'
 
 export interface CoreDeps {
   config: Config
@@ -30,6 +33,8 @@ export interface CoreDeps {
   alertChannel?: AlertChannel
   // Unset: the system clock.
   clock?: Clock
+  // What the daily duties need beyond the application pool; unset, POST /triggers/daily is not declared.
+  daily?: { ownerViewPool: Pool; auditWriterPool: Pool; store: ExportStore | null; fx: FxSource }
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
   authLogger?: BetterAuthOptions['logger']
@@ -78,7 +83,10 @@ export function buildCore(deps: CoreDeps): {
     clock: deps.clock ?? systemClock,
     audit: deps.audit,
     logger: deps.logger,
+    heartbeatExpected: config.n8nHeartbeatExpected,
   }
+  const clock = deps.clock ?? systemClock
+  const { daily } = deps
   const { router: api, table: routes } = createApi(
     {
       auth,
@@ -94,9 +102,15 @@ export function buildCore(deps: CoreDeps): {
       triggers: {
         secret: config.triggerSecret,
         pool: deps.appPool,
-        now: () => (deps.clock ?? systemClock).now(),
+        now: () => clock.now(),
         logger: deps.logger,
       },
+      daily: daily
+        ? {
+            now: () => clock.now(),
+            run: (today) => runDailyDuties({ ...daily, appPool: deps.appPool, notify, clock }, today),
+          }
+        : undefined,
     },
     deps.extraRoutes,
   )

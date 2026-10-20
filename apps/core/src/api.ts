@@ -22,7 +22,7 @@ import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
 import type { JobsDeps } from './jobs/service.ts'
 import type { TriggerDeps } from './access/trigger-auth.ts'
-import { registerTriggerRoutes } from './routes/triggers.ts'
+import { registerTriggerRoutes, type DailyTrigger } from './routes/triggers.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -40,6 +40,8 @@ export interface ApiDeps {
   notify?: NotifyDeps
   // Signed calls from n8n; unset, no trigger route is declared.
   triggers?: TriggerDeps
+  // The daily duties behind POST /triggers/daily; unset, that route is not declared.
+  daily?: DailyTrigger
 }
 
 export interface ApiContext {
@@ -109,7 +111,7 @@ export function createApi(
     registerAgentRoutes(table, deps.jobs)
   }
 
-  if (deps.triggers) registerTriggerRoutes(table, { audit: deps.audit })
+  if (deps.triggers) registerTriggerRoutes(table, { audit: deps.audit, daily: deps.daily })
 
   extra?.(table, { auth: deps.auth, pool: deps.pool })
   return {
