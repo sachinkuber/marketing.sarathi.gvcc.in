@@ -41,6 +41,8 @@ export async function startTestServer(app: Express): Promise<TestServer> {
 }
 
 export const ORIGIN = 'https://app.example.test'
+// A throwaway value for the tests; no real deployment uses it.
+export const TRIGGER_SECRET = 'trigger-secret-'.padEnd(48, 't')
 
 export interface Stack {
   db: TestDatabase
@@ -106,6 +108,7 @@ export async function createStack(
     authSecret: 'test-secret-'.padEnd(48, 'x'),
     workerSecret: 'worker-secret-'.padEnd(48, 'w'),
     attemptTokenSecret: 'attempt-secret-'.padEnd(48, 'a'),
+    triggerSecret: TRIGGER_SECRET,
     queueBacklogLimit: options.backlogLimit ?? 2000,
     publicOrigin: ORIGIN,
     logLevel: 'silent',

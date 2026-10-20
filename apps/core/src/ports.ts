@@ -20,6 +20,8 @@ export interface Mailer {
 export interface AuditEntry {
   action: string
   actor: string | null
+  // Who the entry names when it is not a person: unset means a person if `actor` is set, else the system.
+  actorKind?: 'agent' | 'system' | 'n8n'
   subject?: string | null
   brandId?: string | null
   outcome: 'success' | 'failure'

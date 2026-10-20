@@ -21,6 +21,8 @@ import { registerJobRoutes } from './routes/jobs.ts'
 import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
 import type { JobsDeps } from './jobs/service.ts'
+import type { TriggerDeps } from './access/trigger-auth.ts'
+import { registerTriggerRoutes } from './routes/triggers.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -36,6 +38,8 @@ export interface ApiDeps {
   jobs?: JobsDeps
   // Notification and alert delivery; the reconciliation timer route runs it.
   notify?: NotifyDeps
+  // Signed calls from n8n; unset, no trigger route is declared.
+  triggers?: TriggerDeps
 }
 
 export interface ApiContext {
@@ -105,6 +109,11 @@ export function createApi(
     registerAgentRoutes(table, deps.jobs)
   }
 
+  if (deps.triggers) registerTriggerRoutes(table, { audit: deps.audit })
+
   extra?.(table, { auth: deps.auth, pool: deps.pool })
-  return { router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs }), table }
+  return {
+    router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs, triggers: deps.triggers }),
+    table,
+  }
 }

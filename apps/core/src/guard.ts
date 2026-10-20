@@ -38,6 +38,15 @@ export function requestGuard(options: GuardOptions): RequestHandler {
       next()
       return
     }
+    // A trigger from n8n carries no cookie and no Origin either; its signature is checked by its own handler,
+    // which refuses the request unless it is right. Same reasoning as the worker above.
+    if (
+      req.originalUrl.startsWith('/api/v1/triggers/') &&
+      typeof req.headers['x-mkt-signature'] === 'string'
+    ) {
+      next()
+      return
+    }
     const origin = req.headers.origin
     if (typeof origin !== 'string' || !allowed.has(origin)) {
       throw new AppError(403, 'bad_origin', 'This request did not come from this application.')

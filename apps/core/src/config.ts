@@ -11,6 +11,7 @@ const schema = z.object({
   AUTH_SECRET: z.string().min(32),
   WORKER_SECRET: z.string().min(32),
   ATTEMPT_TOKEN_SECRET: z.string().min(32),
+  TRIGGER_SECRET: z.string().min(32),
   QUEUE_BACKLOG_LIMIT: z.coerce.number().int().positive().default(2000),
   PUBLIC_ORIGIN: z.url(),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
@@ -25,6 +26,7 @@ export interface Config {
   authSecret: string
   workerSecret: string
   attemptTokenSecret: string
+  triggerSecret: string
   queueBacklogLimit: number
   publicOrigin: string
   logLevel: (typeof LEVELS)[number]
@@ -43,12 +45,9 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new Error(`Invalid configuration: ${names.join(', ')}`)
   }
   const value = parsed.data
-  // Three secrets, three purposes: one leaking must not open the others.
-  if (
-    value.WORKER_SECRET === value.ATTEMPT_TOKEN_SECRET ||
-    value.WORKER_SECRET === value.AUTH_SECRET ||
-    value.ATTEMPT_TOKEN_SECRET === value.AUTH_SECRET
-  ) {
+  // Four secrets, four purposes: one leaking must not open the others.
+  const secrets = [value.AUTH_SECRET, value.WORKER_SECRET, value.ATTEMPT_TOKEN_SECRET, value.TRIGGER_SECRET]
+  if (new Set(secrets).size !== secrets.length) {
     throw new Error('Invalid configuration: secrets must differ')
   }
   return {
@@ -60,6 +59,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     authSecret: value.AUTH_SECRET,
     workerSecret: value.WORKER_SECRET,
     attemptTokenSecret: value.ATTEMPT_TOKEN_SECRET,
+    triggerSecret: value.TRIGGER_SECRET,
     queueBacklogLimit: value.QUEUE_BACKLOG_LIMIT,
     publicOrigin: new URL(value.PUBLIC_ORIGIN).origin,
     logLevel: value.LOG_LEVEL,

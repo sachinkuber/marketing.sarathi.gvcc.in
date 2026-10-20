@@ -8,6 +8,7 @@ const base = {
   AUTH_SECRET: 'a'.repeat(32),
   WORKER_SECRET: 'w'.repeat(32),
   ATTEMPT_TOKEN_SECRET: 't'.repeat(32),
+  TRIGGER_SECRET: 'g'.repeat(32),
   PUBLIC_ORIGIN: 'https://app.example.test',
 }
 
@@ -21,6 +22,7 @@ describe('loadConfig', () => {
       publicOrigin: 'https://app.example.test',
       queueDatabaseUrl: base.QUEUE_DATABASE_URL,
       workerSecret: base.WORKER_SECRET,
+      triggerSecret: base.TRIGGER_SECRET,
       attemptTokenSecret: base.ATTEMPT_TOKEN_SECRET,
       queueBacklogLimit: 2000,
     })
@@ -36,6 +38,9 @@ describe('loadConfig', () => {
       { ...base, WORKER_SECRET: same, ATTEMPT_TOKEN_SECRET: same },
       { ...base, WORKER_SECRET: base.AUTH_SECRET },
       { ...base, ATTEMPT_TOKEN_SECRET: base.AUTH_SECRET },
+      { ...base, TRIGGER_SECRET: base.AUTH_SECRET },
+      { ...base, TRIGGER_SECRET: base.WORKER_SECRET },
+      { ...base, TRIGGER_SECRET: base.ATTEMPT_TOKEN_SECRET },
     ]) {
       expect(() => loadConfig(env)).toThrow('Invalid configuration: secrets must differ')
       expect(() => loadConfig(env)).not.toThrow(same)
@@ -52,6 +57,15 @@ describe('loadConfig', () => {
       message = (error as Error).message
     }
     expect(message).toBe('Invalid configuration: WORKER_SECRET')
+  })
+
+  it('requires a trigger secret of at least 32 characters, naming only the variable', () => {
+    const missing: Record<string, string> = { ...base }
+    delete missing.TRIGGER_SECRET
+    expect(() => loadConfig(missing)).toThrow('Invalid configuration: TRIGGER_SECRET')
+    expect(() => loadConfig({ ...base, TRIGGER_SECRET: 'short' })).toThrow(
+      'Invalid configuration: TRIGGER_SECRET',
+    )
   })
 
   it('reduces the public origin to scheme, host and port', () => {

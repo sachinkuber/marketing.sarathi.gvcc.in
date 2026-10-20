@@ -18,6 +18,9 @@ async function start(sessionId: string | null) {
   api.get('/read', (_req, res) => {
     res.json({ ok: true })
   })
+  api.post('/triggers/x', (_req, res) => {
+    res.json({ ok: true })
+  })
   api.post('/write', (_req, res) => {
     res.json({ ok: true })
   })
@@ -39,6 +42,25 @@ describe('request guard', () => {
   it('lets a read through with no origin and no token', async () => {
     const url = await start('session-1')
     expect((await fetch(`${url}/api/v1/read`)).status).toBe(200)
+  })
+
+  it('refuses a trigger path with no signature header and no origin, and lets a signed one reach its handler', async () => {
+    const url = await start(null)
+    const bare = await fetch(`${url}/api/v1/triggers/x`, { method: 'POST', body: '{}' })
+    expect(bare.status).toBe(403)
+    expect((await bare.json()).error.code).toBe('bad_origin')
+    const signed = await fetch(`${url}/api/v1/triggers/x`, {
+      method: 'POST',
+      headers: { 'x-mkt-signature': 'x' },
+      body: '{}',
+    })
+    expect(signed.status).toBe(200)
+    const elsewhere = await fetch(`${url}/api/v1/write`, {
+      method: 'POST',
+      headers: { 'x-mkt-signature': 'x' },
+      body: '{}',
+    })
+    expect(elsewhere.status).toBe(403)
   })
 
   it('refuses a write that carries no Origin header', async () => {

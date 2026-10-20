@@ -91,6 +91,12 @@ export function buildCore(deps: CoreDeps): {
       onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
       jobs: deps.jobs,
       notify,
+      triggers: {
+        secret: config.triggerSecret,
+        pool: deps.appPool,
+        now: () => (deps.clock ?? systemClock).now(),
+        logger: deps.logger,
+      },
     },
     deps.extraRoutes,
   )

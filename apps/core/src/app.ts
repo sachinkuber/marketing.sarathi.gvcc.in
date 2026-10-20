@@ -56,7 +56,10 @@ export function createApp(deps: AppDeps): Express {
   // worker credential and attempt token are checked. The match is exact: POST, case-sensitive, uuid segments,
   // no trailing segment, so no other path or method gets the larger limit and nothing large is read before auth.
   const smallJson = express.json({ limit: '100kb', strict: true })
+  // Signed triggers are read as raw bytes (the signature covers them exactly as received) and capped at 16 kB.
+  app.use('/api/v1/triggers', express.raw({ type: '*/*', limit: '16kb' }))
   app.use((req, res, next) => {
+    if (req.originalUrl.startsWith('/api/v1/triggers/')) return next()
     if (req.method === 'POST' && CHECKPOINT_PATH.test(req.originalUrl.split('?')[0] ?? '')) return next()
     return smallJson(req, res, next)
   })

@@ -19,7 +19,13 @@ describe('.env.example', () => {
   })
 
   it('lists the keys the worker requires, live', () => {
-    for (const key of ['CORE_URL', 'WORKER_SECRET', 'QUEUE_DATABASE_URL', 'ANTHROPIC_API_KEY']) {
+    for (const key of [
+      'CORE_URL',
+      'WORKER_SECRET',
+      'QUEUE_DATABASE_URL',
+      'ANTHROPIC_API_KEY',
+      'TRIGGER_SECRET',
+    ]) {
       expect(lines.some((line) => line.startsWith(`${key}=`))).toBe(true)
     }
   })
