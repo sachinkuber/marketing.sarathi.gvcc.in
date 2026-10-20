@@ -21,10 +21,15 @@ export interface TransportTimeouts {
 
 // A send that failed. The message is the name of the underlying error and nothing else: the real one can
 // hold the recipient, the server's reply or the connection URL with its credentials. There is no `cause`.
+// The one thing kept besides the name is the error's code (EAUTH, ECONNECTION, ETIMEDOUT...), and only when it
+// is a short token of A-Z, 0-9 and _; the code lets an operator tell a bad login from a dead server. errorName
+// puts it next to the name in every log line.
 export class MailSendFailed extends Error {
-  constructor(reason: string) {
+  readonly code: string
+  constructor(reason: string, code?: unknown) {
     super(reason)
     this.name = 'MailSendFailed'
+    this.code = typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : 'UNKNOWN'
   }
 }
 
@@ -62,7 +67,7 @@ export function smtpMailer(options: SmtpMailerOptions): Mailer {
         })
         messageId = info.messageId
       } catch (error) {
-        throw new MailSendFailed(errorName(error))
+        throw new MailSendFailed(errorName(error), (error as { code?: unknown } | null)?.code)
       }
       if (!messageId) throw new MailSendFailed('NoMessageId')
       return { providerId: messageId }

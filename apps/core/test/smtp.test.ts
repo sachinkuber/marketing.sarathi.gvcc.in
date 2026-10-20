@@ -31,17 +31,26 @@ describe('smtpMailer', () => {
     expect(seen[0]).toMatchObject({ from: FROM, to: TO, subject: 'Hello', text: 'Body text' })
   })
 
-  it('produces a real message with the headers and body when sent through the stream transport', async () => {
+  it('writes the headers and body of the message it sends through the stream transport', async () => {
+    let raw = ''
     const real = streamTransport()
-    const mailer = smtpMailer({ url: URL_WITH_SECRET, from: FROM, makeTransport: () => real })
-    const info = (await real.sendMail({ from: FROM, to: TO, subject: 'S', text: 'T' })) as unknown as {
-      message: Buffer
-    }
-    const raw = info.message.toString()
+    const mailer = smtpMailer({
+      url: URL_WITH_SECRET,
+      from: FROM,
+      makeTransport: () => ({
+        sendMail: async (options) => {
+          const info = (await real.sendMail(options)) as unknown as { message: Buffer; messageId: string }
+          raw = info.message.toString()
+          return info
+        },
+      }),
+    })
+    const receipt = await mailer.send({ to: TO, subject: 'S', text: 'T' })
+    expect(receipt.providerId).toBeTruthy()
     expect(raw).toContain('From: Marketing Sarathi <noreply@example.test>')
     expect(raw).toContain(`To: ${TO}`)
     expect(raw).toContain('Subject: S')
-    expect((await mailer.send({ to: TO, subject: 'S', text: 'T' })).providerId).toBeTruthy()
+    expect(raw).toContain('T')
   })
 
   it('creates one transport per process, with the three timeouts', async () => {
@@ -102,6 +111,30 @@ describe('smtpMailer', () => {
       expect(everything).not.toContain(leak)
     }
     expect((e as { cause?: unknown }).cause).toBeUndefined()
+    expect(e.code).toBe('EENVELOPE')
+  })
+
+  it('keeps a short upper-case code and replaces anything else with UNKNOWN', async () => {
+    const codeOf = async (code: unknown) => {
+      const mailer = smtpMailer({
+        url: URL_WITH_SECRET,
+        from: FROM,
+        makeTransport: () => ({
+          sendMail: async () => {
+            throw Object.assign(new Error('x'), { code })
+          },
+        }),
+      })
+      const error = (await mailer.send({ to: TO, subject: 'S', text: 'T' }).catch((e: unknown) => e)) as {
+        code?: string
+      }
+      return error.code
+    }
+    expect(await codeOf('EAUTH')).toBe('EAUTH')
+    expect(await codeOf('ETIMEDOUT')).toBe('ETIMEDOUT')
+    expect(await codeOf(`535 ${TO} bad`)).toBe('UNKNOWN')
+    expect(await codeOf(undefined)).toBe('UNKNOWN')
+    expect(await codeOf(535)).toBe('UNKNOWN')
   })
 
   it('fails a send that returns no message id', async () => {
@@ -161,6 +194,23 @@ describe('mail configuration', () => {
     )
     expect(() => loadConfig({ ...base, SMTP_URL: URL_WITH_SECRET })).not.toThrow('hunter2')
     expect(() => loadConfig({ ...base, MAIL_FROM: FROM })).toThrow('Invalid configuration: SMTP_URL')
+  })
+
+  it('requires MAIL_FROM to be an address or Name <address>, naming only the variable', () => {
+    for (const ok of ['noreply@example.test', FROM, '"Sarathi, Marketing" <noreply@example.test>']) {
+      expect(loadConfig({ ...base, SMTP_URL: URL_WITH_SECRET, MAIL_FROM: ok }).mailFrom).toBe(ok)
+    }
+    for (const bad of [
+      'not an address',
+      'Name <nope>',
+      'a@b',
+      '<a@b.test> trailing',
+      'x@y.test\r\nBcc: z@y.test',
+    ]) {
+      expect(() => loadConfig({ ...base, SMTP_URL: URL_WITH_SECRET, MAIL_FROM: bad })).toThrow(
+        'Invalid configuration: MAIL_FROM',
+      )
+    }
   })
 
   it('names SMTP_URL only, never its value, when it is malformed', () => {

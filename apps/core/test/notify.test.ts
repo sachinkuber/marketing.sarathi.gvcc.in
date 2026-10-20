@@ -10,6 +10,7 @@ import {
 import { DoubleAlertChannel, DoubleMailer, ManualClock } from '../src/notify/doubles.ts'
 import { deliverPending, enqueueNotification, notificationBackoffMs } from '../src/notify/notifications.ts'
 import type { NotifyDeps } from '../src/notify/ports.ts'
+import { smtpMailer } from '../src/notify/smtp.ts'
 import { approversOf, brandAdminsOf, emailOf, platformOwnersOf } from '../src/notify/recipients.ts'
 import { runNotifyTick } from '../src/notify/tick.ts'
 import { createJob, createRun } from '../src/jobs/service.ts'
@@ -198,6 +199,29 @@ describe('notification delivery', () => {
     expect(text).not.toContain(RECIPIENT)
     expect(text).not.toContain('Marketing Sarathi')
     expect(text).not.toContain('transport down')
+  })
+
+  it('logs the name and error code of a failed SMTP send, never the address, the reply or the secret', async () => {
+    await enqueue()
+    const failing = smtpMailer({
+      url: 'smtp://u:p@smtp.example.test:587',
+      from: 'noreply@example.test',
+      makeTransport: () => ({
+        sendMail: async () => {
+          throw Object.assign(new Error(`535 auth failed for ${RECIPIENT} password s3cr3t-pw-9`), {
+            code: 'EAUTH',
+            response: '535 5.7.8 s3cr3t-pw-9',
+          })
+        },
+      }),
+    })
+    await deliverPending(stack.appPool, { ...deps, mailer: failing }, 10)
+    const text = logged.join('\n')
+    expect(text).toContain('MailSendFailed')
+    expect(text).toContain('EAUTH')
+    expect(text).not.toContain(RECIPIENT)
+    expect(text).not.toContain('s3cr3t-pw-9')
+    expect(text).not.toContain('auth failed')
   })
 
   it('counts a missing recipient as a failed attempt', async () => {

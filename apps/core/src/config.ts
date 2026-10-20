@@ -2,6 +2,10 @@ import { z } from 'zod'
 
 const LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const
 
+// An address, or `Name <address>` (the name may be quoted). No control characters, so no header can be injected.
+const ADDRESS = '[^\\s<>@",;]+@[^\\s<>@",;]+\\.[^\\s<>@",;]+'
+const MAIL_FROM_PATTERN = new RegExp(`^(?:${ADDRESS}|(?:"[^"\\r\\n]+"|[^<>"@,;\\r\\n]+?)\\s*<${ADDRESS}>)$`)
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -22,7 +26,7 @@ const schema = z.object({
     .transform((v) => v === 'true'),
   // Mail: both or neither. SMTP_URL carries credentials, so it is never logged or put in an error.
   SMTP_URL: z.url().optional(),
-  MAIL_FROM: z.string().min(3).optional(),
+  MAIL_FROM: z.string().regex(MAIL_FROM_PATTERN).optional(),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
 })
 
