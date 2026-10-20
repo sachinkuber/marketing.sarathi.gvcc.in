@@ -20,6 +20,9 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // Mail: both or neither. SMTP_URL carries credentials, so it is never logged or put in an error.
+  SMTP_URL: z.url().optional(),
+  MAIL_FROM: z.string().min(3).optional(),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
 })
 
@@ -37,6 +40,8 @@ export interface Config {
   queueBacklogLimit: number
   publicOrigin: string
   n8nHeartbeatExpected: boolean
+  smtpUrl?: string
+  mailFrom?: string
   logLevel: (typeof LEVELS)[number]
 }
 
@@ -45,7 +50,10 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   const picked: Record<string, string> = {}
   for (const key of Object.keys(schema.shape)) {
     const value = env[key]
-    if (value !== undefined) picked[key] = value
+    // An empty value is the same as unset, so a blank line in a deployment file turns mail off.
+    if (value !== undefined && !((key === 'SMTP_URL' || key === 'MAIL_FROM') && value === '')) {
+      picked[key] = value
+    }
   }
   const parsed = schema.safeParse(picked)
   if (!parsed.success) {
@@ -58,6 +66,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   if (new Set(secrets).size !== secrets.length) {
     throw new Error('Invalid configuration: secrets must differ')
   }
+  if (value.SMTP_URL && !value.MAIL_FROM) throw new Error('Invalid configuration: MAIL_FROM')
+  if (value.MAIL_FROM && !value.SMTP_URL) throw new Error('Invalid configuration: SMTP_URL')
   return {
     nodeEnv: value.NODE_ENV,
     port: value.PORT,
@@ -72,6 +82,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     queueBacklogLimit: value.QUEUE_BACKLOG_LIMIT,
     publicOrigin: new URL(value.PUBLIC_ORIGIN).origin,
     n8nHeartbeatExpected: value.N8N_HEARTBEAT_EXPECTED,
+    smtpUrl: value.SMTP_URL,
+    mailFrom: value.MAIL_FROM,
     logLevel: value.LOG_LEVEL,
   }
 }

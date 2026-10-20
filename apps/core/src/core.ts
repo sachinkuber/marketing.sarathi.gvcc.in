@@ -13,7 +13,7 @@ import type { Config } from './config.ts'
 import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
 import { UnconfiguredAlertChannel } from './adapters.ts'
-import { systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
+import { errorName, systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import type { JobsDeps } from './jobs/service.ts'
 import type { ExportStore } from './audit/store.ts'
@@ -67,7 +67,7 @@ export function buildCore(deps: CoreDeps): {
     limiter,
     logger: deps.authLogger ?? libraryLogger(deps.logger),
     // The error only: the message and the address stay out of the log.
-    onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+    onMailFailure: (error) => deps.logger.error({ err: errorName(error) }, 'mail not sent'),
   })
   const guard = requestGuard({
     allowedOrigins: [config.publicOrigin],
@@ -102,7 +102,7 @@ export function buildCore(deps: CoreDeps): {
       audit: deps.audit,
       mailer: deps.mailer,
       origin: config.publicOrigin,
-      onMailFailure: (error) => deps.logger.error({ err: error }, 'mail not sent'),
+      onMailFailure: (error) => deps.logger.error({ err: errorName(error) }, 'mail not sent'),
       jobs: deps.jobs,
       notify,
       triggers: {

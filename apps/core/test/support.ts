@@ -18,7 +18,7 @@ import type { Role } from '../src/auth/session.ts'
 import type { AuditSink, MailMessage } from '../src/ports.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
 import type { AlertChannel, Clock } from '../src/notify/ports.ts'
-import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
+import { HangingMailer, MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
 import type { ExportStore } from '../src/audit/store.ts'
 import type { FxSource } from '../src/triggers/fx.ts'
 
@@ -50,7 +50,7 @@ export interface Stack {
   db: TestDatabase
   appPool: Pool
   authPool: Pool
-  mailer: MemoryMailer | ThrowingMailer
+  mailer: MemoryMailer | ThrowingMailer | HangingMailer
   audit: MemoryAudit
   // The pool behind the database audit sink; null unless the stack was built with realAudit.
   auditPool: Pool | null
@@ -70,7 +70,7 @@ export interface Stack {
 export async function createStack(
   options: {
     now?: () => number
-    mailer?: MemoryMailer | ThrowingMailer
+    mailer?: MemoryMailer | ThrowingMailer | HangingMailer
     audit?: MemoryAudit
     // Give the core the database audit sink over an audit-writer pool instead of the in-memory one;
     // `stack.audit` is then unused.

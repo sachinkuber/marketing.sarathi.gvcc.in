@@ -6,6 +6,10 @@ import { emailOf } from './recipients.ts'
 // A notification is tried at most this many times; the last failure makes it `failed` and raises an alert.
 export const MAX_ATTEMPTS = 5
 
+// The wait after the nth failed attempt: 2^n minutes, at most 60 (the same policy as the alert retry).
+export const notificationBackoffMs = (attempts: number): number =>
+  Math.min(2 ** Math.min(attempts, 16), 60) * 60_000
+
 export interface NewNotification {
   brandId: string
   userId: string
@@ -49,7 +53,8 @@ export interface DeliverResult {
 
 // Sends the queued notifications (up to `limit`, oldest first), outside any caller transaction. Each is
 // handled on its own: its row is locked for the send, so two deliverers never send the same one. A failure
-// counts an attempt; the fifth makes it `failed` and raises a severity 2 alert. The log gets the error name
+// counts an attempt and sets when the next is due (2^attempts minutes, at most 60); the fifth makes it
+// `failed` and raises a severity 2 alert. The log gets the error name
 // only, never the address, the subject or the error message.
 export async function deliverPending(
   pool: Pool,
@@ -59,16 +64,17 @@ export async function deliverPending(
 ): Promise<DeliverResult> {
   const out: DeliverResult = { sent: 0, retried: 0, failed: 0 }
   const queued = await pool.query<{ id: string; brand_id: string }>(
-    'select id, brand_id from app.pending_notifications($1, $2)',
-    [limit, MAX_ATTEMPTS],
+    'select id, brand_id from app.pending_notifications($1, $2, $3)',
+    [limit, MAX_ATTEMPTS, deps.clock.now()],
   )
   for (const { id, brand_id: brandId } of queued.rows) {
     if (overBudget(deps, startedAt)) break
     const outcome = await withBrand(pool, brandId, async (client) => {
       const found = await client.query<Row>(
         `select id, user_id, kind, subject_kind, attempts from app.notification
-          where id = $1 and state = 'queued' and attempts < $2 for update skip locked`,
-        [id, MAX_ATTEMPTS],
+          where id = $1 and state = 'queued' and attempts < $2
+            and (next_attempt_at is null or next_attempt_at <= $3) for update skip locked`,
+        [id, MAX_ATTEMPTS, deps.clock.now()],
       )
       const row = found.rows[0]
       if (!row) return 'skipped' as const
@@ -88,11 +94,12 @@ export async function deliverPending(
         deps.logger?.warn({ err: errorName(error), notification: id }, 'notification not sent')
         const attempts = row.attempts + 1
         const last = attempts >= MAX_ATTEMPTS
-        await client.query(`update app.notification set attempts = $2, state = $3 where id = $1`, [
-          id,
-          attempts,
-          last ? 'failed' : 'queued',
-        ])
+        // A failed attempt waits 2^attempts minutes (at most 60) before the next; the last one is given up on.
+        const next = last ? null : new Date(deps.clock.now().getTime() + notificationBackoffMs(attempts))
+        await client.query(
+          `update app.notification set attempts = $2, state = $3, next_attempt_at = $4 where id = $1`,
+          [id, attempts, last ? 'failed' : 'queued', next],
+        )
         return last ? ('failed' as const) : ('retried' as const)
       }
     })

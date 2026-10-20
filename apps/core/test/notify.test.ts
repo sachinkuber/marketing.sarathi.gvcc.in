@@ -8,7 +8,7 @@ import {
   retryAlerts,
 } from '../src/notify/alerts.ts'
 import { DoubleAlertChannel, DoubleMailer, ManualClock } from '../src/notify/doubles.ts'
-import { deliverPending, enqueueNotification } from '../src/notify/notifications.ts'
+import { deliverPending, enqueueNotification, notificationBackoffMs } from '../src/notify/notifications.ts'
 import type { NotifyDeps } from '../src/notify/ports.ts'
 import { approversOf, brandAdminsOf, emailOf, platformOwnersOf } from '../src/notify/recipients.ts'
 import { runNotifyTick } from '../src/notify/tick.ts'
@@ -116,8 +116,10 @@ describe('notification delivery', () => {
     mailer.failNext(2)
     await deliverPending(stack.appPool, deps, 10)
     expect(await notificationRow(id)).toMatchObject({ state: 'queued', attempts: 1 })
+    clock.advance(2 * 60_000)
     await deliverPending(stack.appPool, deps, 10)
     expect(await notificationRow(id)).toMatchObject({ state: 'queued', attempts: 2 })
+    clock.advance(4 * 60_000)
     await deliverPending(stack.appPool, deps, 10)
     expect(await notificationRow(id)).toMatchObject({ state: 'sent', attempts: 3, provider_id: 'mail-1' })
     expect(await alertRows()).toHaveLength(0)
@@ -126,7 +128,10 @@ describe('notification delivery', () => {
   it('fails after five failures, raises one severity 2 alert, and stops trying', async () => {
     const id = await enqueue()
     mailer.failNext(99)
-    for (let i = 0; i < 7; i += 1) await deliverPending(stack.appPool, deps, 10)
+    for (let i = 0; i < 7; i += 1) {
+      await deliverPending(stack.appPool, deps, 10)
+      clock.advance(61 * 60_000)
+    }
     expect(await notificationRow(id)).toMatchObject({ state: 'failed', attempts: 5 })
     // Five sends to the person, then the alert's two emails to the owners (which fail too, and stay undelivered).
     expect(mailer.attempts).toBe(5 + 2)
@@ -134,6 +139,47 @@ describe('notification delivery', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0]).toMatchObject({ severity: 2, kind: 'notification_failed', brand_id: brandA })
     expect(alerts[0].detail).toEqual({ notificationId: id, ref: id })
+  })
+
+  it('waits 2^attempts minutes (at most 60) after a failure and skips the row until it is due', async () => {
+    const MIN = 60_000
+    const id = await enqueue()
+    mailer.failNext(2)
+    await deliverPending(stack.appPool, deps, 10)
+    expect(mailer.attempts).toBe(1)
+    expect((await notificationRow(id)).next_attempt_at).toEqual(new Date(start.getTime() + 2 * MIN))
+    // Not due yet: nothing is tried, nothing is counted.
+    clock.advance(1 * MIN)
+    expect(await deliverPending(stack.appPool, deps, 10)).toEqual({ sent: 0, retried: 0, failed: 0 })
+    expect(mailer.attempts).toBe(1)
+    // Due at two minutes; the second failure waits four.
+    clock.advance(1 * MIN)
+    expect(await deliverPending(stack.appPool, deps, 10)).toEqual({ sent: 0, retried: 1, failed: 0 })
+    expect(mailer.attempts).toBe(2)
+    expect((await notificationRow(id)).next_attempt_at).toEqual(new Date(clock.now().getTime() + 4 * MIN))
+    clock.advance(3 * MIN)
+    await deliverPending(stack.appPool, deps, 10)
+    expect(mailer.attempts).toBe(2)
+    clock.advance(1 * MIN)
+    expect((await deliverPending(stack.appPool, deps, 10)).sent).toBe(1)
+    expect(await notificationRow(id)).toMatchObject({ state: 'sent', attempts: 3 })
+  })
+
+  it('caps the wait at 60 minutes', () => {
+    expect(notificationBackoffMs(1)).toBe(2 * 60_000)
+    expect(notificationBackoffMs(5)).toBe(32 * 60_000)
+    expect(notificationBackoffMs(6)).toBe(60 * 60_000)
+    expect(notificationBackoffMs(40)).toBe(60 * 60_000)
+  })
+
+  it('delivers a new notification at once, whatever is waiting for its time', async () => {
+    const waiting = await enqueue()
+    mailer.failNext(1)
+    await deliverPending(stack.appPool, deps, 10)
+    const fresh = await enqueue()
+    await deliverPending(stack.appPool, deps, 10)
+    expect((await notificationRow(fresh)).state).toBe('sent')
+    expect((await notificationRow(waiting)).state).toBe('queued')
   })
 
   it('treats a send with no provider id as a failed attempt', async () => {

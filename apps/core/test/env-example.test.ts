@@ -37,4 +37,13 @@ describe('.env.example', () => {
   it('says the heartbeat is not expected until the workflow is live', () => {
     expect(lines).toContain('N8N_HEARTBEAT_EXPECTED=false')
   })
+
+  it('carries the mail settings as placeholders only, never live', () => {
+    for (const key of ['SMTP_URL', 'MAIL_FROM']) {
+      expect(lines.some((line) => line.startsWith(`${key}=`))).toBe(false)
+      expect(lines.some((line) => line.startsWith(`# ${key}=`))).toBe(true)
+    }
+    const text = lines.join('\n')
+    expect(text).not.toMatch(/smtps?:\/\/[^\s:@]+:(?!CHANGE_ME)[^\s@]+@/)
+  })
 })
