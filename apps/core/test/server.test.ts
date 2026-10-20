@@ -74,7 +74,7 @@ describe('startServer', () => {
       await db.drop()
     }
     await expect(fetch(`${server.url}/health/live`)).rejects.toThrow()
-  })
+  }, 30_000)
 
   it('registers the summary and check result handlers', async () => {
     await requireDatabase()

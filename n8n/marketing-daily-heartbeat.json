@@ -44,6 +44,7 @@
             }
           ]
         },
+        "includeOtherFields": true,
         "options": {}
       },
       "id": "a1000000-0000-4000-8000-000000000002",
@@ -57,7 +58,7 @@
         "action": "generate",
         "dataPropertyName": "nonce",
         "encodingType": "hex",
-        "stringLength": 64
+        "stringLength": 128
       },
       "id": "a1000000-0000-4000-8000-000000000003",
       "name": "Generate nonce",
@@ -86,11 +87,18 @@
             {
               "id": "a1000000-0000-4000-8000-000000000015",
               "name": "text",
-              "value": "=POST\n{{ $json.path }}\n{{ $json.ts }}\n{{ $json.nonce }}\n{{ $json.bodyHash }}",
+              "value": "=POST\n{{ $json.path }}\n{{ $json.ts }}\n{{ $json.nonce.slice(0, 64).toLowerCase() }}\n{{ $json.bodyHash }}",
+              "type": "string"
+            },
+            {
+              "id": "a1000000-0000-4000-8000-000000000018",
+              "name": "nonce",
+              "value": "={{ $json.nonce.slice(0, 64).toLowerCase() }}",
               "type": "string"
             }
           ]
         },
+        "includeOtherFields": true,
         "options": {}
       },
       "id": "a1000000-0000-4000-8000-000000000005",
