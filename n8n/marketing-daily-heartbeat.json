@@ -1,0 +1,221 @@
+{
+  "name": "Marketing — daily heartbeat",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "days", "daysInterval": 1, "triggerAtHour": 2, "triggerAtMinute": 30 }]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Daily 02:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1000000-0000-4000-8000-000000000011",
+              "name": "body",
+              "value": "{\"workflow\":\"marketing-daily-heartbeat\"}",
+              "type": "string"
+            },
+            {
+              "id": "a1000000-0000-4000-8000-000000000012",
+              "name": "path",
+              "value": "/api/v1/triggers/daily",
+              "type": "string"
+            },
+            {
+              "id": "a1000000-0000-4000-8000-000000000013",
+              "name": "ts",
+              "value": "={{ String(Math.floor(Date.now()/1000)) }}",
+              "type": "string"
+            },
+            {
+              "id": "a1000000-0000-4000-8000-000000000014",
+              "name": "attempt",
+              "value": "={{ ($json.attempt ?? 0) + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Build request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "dataPropertyName": "nonce",
+        "encodingType": "hex",
+        "stringLength": 64
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Generate nonce",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "action": "hash",
+        "type": "SHA256",
+        "value": "={{ $json.body }}",
+        "dataPropertyName": "bodyHash",
+        "encoding": "hex"
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Hash body",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1000000-0000-4000-8000-000000000015",
+              "name": "text",
+              "value": "=POST\n{{ $json.path }}\n{{ $json.ts }}\n{{ $json.nonce }}\n{{ $json.bodyHash }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Build signing text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA256",
+        "value": "={{ $json.text }}",
+        "dataPropertyName": "signature",
+        "encoding": "hex"
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Sign text",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [1100, 0],
+      "credentials": { "crypto": { "name": "Marketing trigger secret" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.MKT_CORE_ORIGIN }}{{ $json.path }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-Mkt-Timestamp", "value": "={{ $json.ts }}" },
+            { "name": "X-Mkt-Nonce", "value": "={{ $json.nonce }}" },
+            { "name": "X-Mkt-Signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Call core",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 0],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1000000-0000-4000-8000-000000000016",
+              "name": "attempt",
+              "value": "={{ $('Build request').last().json.attempt }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Count attempt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1540, 160]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "a1000000-0000-4000-8000-000000000017",
+              "leftValue": "={{ $json.attempt }}",
+              "rightValue": 4,
+              "operator": { "type": "number", "operation": "lt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Retries left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1760, 160]
+    },
+    {
+      "parameters": { "resume": "timeInterval", "amount": 10, "unit": "minutes" },
+      "id": "a1000000-0000-4000-8000-00000000000a",
+      "name": "Wait before retry",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1980, 80],
+      "webhookId": "a1000000-0000-4000-8000-0000000000a1"
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-00000000000b",
+      "name": "Give up",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1980, 240]
+    }
+  ],
+  "connections": {
+    "Daily 02:30": { "main": [[{ "node": "Build request", "type": "main", "index": 0 }]] },
+    "Build request": { "main": [[{ "node": "Generate nonce", "type": "main", "index": 0 }]] },
+    "Generate nonce": { "main": [[{ "node": "Hash body", "type": "main", "index": 0 }]] },
+    "Hash body": { "main": [[{ "node": "Build signing text", "type": "main", "index": 0 }]] },
+    "Build signing text": { "main": [[{ "node": "Sign text", "type": "main", "index": 0 }]] },
+    "Sign text": { "main": [[{ "node": "Call core", "type": "main", "index": 0 }]] },
+    "Call core": { "main": [[], [{ "node": "Count attempt", "type": "main", "index": 0 }]] },
+    "Count attempt": { "main": [[{ "node": "Retries left?", "type": "main", "index": 0 }]] },
+    "Retries left?": {
+      "main": [
+        [{ "node": "Wait before retry", "type": "main", "index": 0 }],
+        [{ "node": "Give up", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait before retry": { "main": [[{ "node": "Build request", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Kolkata" },
+  "pinData": {}
+}
