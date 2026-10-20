@@ -25,7 +25,8 @@ export async function startServer(
   const appPool = createPool(config.databaseUrl)
   const authPool = createPool(config.databaseUrl, { searchPath: 'auth' })
   // The owner-view role reads the audit log and records the exchange rate; the audit-writer role records the
-  // export. Both serve the daily duties only.
+  // export. The daily duties use both; the owner-view pool also serves the audit screens and the run detail
+  // (they are declared only when it is passed, so OWNER_VIEW_DATABASE_URL is required in the configuration).
   const ownerViewPool = createPool(config.ownerViewDatabaseUrl)
   const auditWriterPool = createPool(config.auditDatabaseUrl)
   // An idle client dropping (for example when the database restarts) emits 'error' on the pool;

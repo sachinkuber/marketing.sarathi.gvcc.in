@@ -1,4 +1,5 @@
 import type { PoolClient } from '@mkt/db'
+import { z } from 'zod'
 import { AppError } from '../errors.ts'
 
 // Read queries for the screens. All of them run inside withBrand, so the database's own row security keeps
@@ -111,6 +112,17 @@ const runView = (r: RunRow): RunSummary => ({
 
 // The cursor is the last run's start time (to the microsecond, as text) and its id.
 export const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z)_([0-9a-f-]{36})$/i
+
+// The cursor must also name a real moment and a real id: the pattern alone lets 2026-13-45 through to the
+// database, which would answer with an error instead of a refusal.
+export function cursorIsReal(cursor: string): boolean {
+  const match = CURSOR.exec(cursor)
+  if (!match) return false
+  const at = new Date(match[1]!.replace(/\d{3}Z$/, 'Z'))
+  // Round trip: a day that does not exist (Feb 30) rolls over, so it comes back different.
+  if (Number.isNaN(at.getTime()) || at.toISOString().slice(0, 19) !== match[1]!.slice(0, 19)) return false
+  return z.uuid().safeParse(match[2]).success
+}
 
 export async function listRuns(
   client: PoolClient,
@@ -295,16 +307,22 @@ export interface ReviewCallView extends ModelCallView {
   reason: 'unknown' | 'possible_duplicate' | 'no_cost'
 }
 
-export async function reviewCalls(client: PoolClient, brandId: string): Promise<ReviewCallView[]> {
+export async function reviewCalls(
+  client: PoolClient,
+  brandId: string,
+): Promise<{ items: ReviewCallView[]; truncated: boolean }> {
   const { rows } = await client.query<CallRow>(
     `select ${CALL_COLUMNS} from app.model_call m where ${REVIEW_WHERE}
-      order by m.started_at desc, m.id limit ${REVIEW_LIMIT}`,
+      order by m.started_at desc, m.id limit ${REVIEW_LIMIT + 1}`,
     [brandId],
   )
-  return rows.map((r) => ({
-    ...callView(r),
-    reason: r.status === 'unknown' ? 'unknown' : r.possible_duplicate ? 'possible_duplicate' : 'no_cost',
-  }))
+  return {
+    items: rows.slice(0, REVIEW_LIMIT).map((r) => ({
+      ...callView(r),
+      reason: r.status === 'unknown' ? 'unknown' : r.possible_duplicate ? 'possible_duplicate' : 'no_cost',
+    })),
+    truncated: rows.length > REVIEW_LIMIT,
+  }
 }
 
 export async function countReviewCalls(client: PoolClient, brandId: string): Promise<number> {

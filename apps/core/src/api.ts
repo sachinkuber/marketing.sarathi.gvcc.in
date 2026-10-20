@@ -1,5 +1,6 @@
 import type { Pool } from '@mkt/db'
 import type { Router } from 'express'
+import type { Logger } from 'pino'
 import { RouteTable } from './access/routes.ts'
 import { principalOf } from './auth/session.ts'
 import type { AttemptLimiter } from './auth/limiter.ts'
@@ -50,6 +51,7 @@ export interface ApiDeps {
   ownerView?: OwnerView
   // The service's clock, for "this month" and the time of a verify. Unset: the system clock.
   now?: () => Date
+  logger?: Logger
 }
 
 export interface ApiContext {
@@ -120,7 +122,8 @@ export function createApi(
     now,
     audit: deps.ownerView ? { ownerView: deps.ownerView, sink: deps.audit } : undefined,
   })
-  if (deps.ownerView) registerAuditRoutes(table, { ownerView: deps.ownerView, audit: deps.audit, now })
+  if (deps.ownerView)
+    registerAuditRoutes(table, { ownerView: deps.ownerView, audit: deps.audit, now, logger: deps.logger })
 
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs, deps.notify)

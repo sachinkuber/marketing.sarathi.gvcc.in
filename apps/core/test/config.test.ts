@@ -108,3 +108,11 @@ describe('loadConfig', () => {
     expect(message).not.toContain(secret)
   })
 })
+
+describe('the owner-view pool is not optional', () => {
+  it('refuses to start without OWNER_VIEW_DATABASE_URL, because the audit screens need it', () => {
+    const rest: Record<string, string> = { ...base }
+    delete rest.OWNER_VIEW_DATABASE_URL
+    expect(() => loadConfig(rest)).toThrow(/OWNER_VIEW_DATABASE_URL/)
+  })
+})

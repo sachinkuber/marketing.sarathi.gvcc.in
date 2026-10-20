@@ -2,14 +2,30 @@ import { Router } from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { undeclaredRoutes } from '../src/access/inspect.ts'
 import { RouteTable } from '../src/access/routes.ts'
+import { MemoryExportStore } from '../src/audit/store.ts'
+import { StandInFxSource } from '../src/triggers/fx.ts'
 import { createStack, type Stack } from './support.ts'
 
 describe('every route declares the access it needs (acceptance test 13, SEC-2)', () => {
   let stack: Stack
   beforeAll(async () => {
-    stack = await createStack({ withQueue: true })
+    stack = await createStack({
+      withQueue: true,
+      daily: { fx: new StandInFxSource(83_000_000n), store: new MemoryExportStore() },
+    })
   })
   afterAll(async () => stack?.close())
+
+  it('declares the audit routes and the run detail, which exist only with the owner-view pool', () => {
+    const declared = stack.core.routes.list().map((r) => `${r.method} ${r.path}`)
+    for (const path of [
+      'get /brands/:brandId/audit',
+      'get /brands/:brandId/runs/:runId',
+      'get /audit/platform',
+    ]) {
+      expect(declared).toContain(path)
+    }
+  })
 
   it('has a declaration, with a summary, for every route the service holds', () => {
     expect(stack.core.routes.list().length).toBeGreaterThan(0)
@@ -102,7 +118,7 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
         .filter((r) => r.path.startsWith('/triggers/'))
         .map((r) => [`${r.method} ${r.path}`, r.access.kind]),
     )
-    expect(declared).toEqual({ 'post /triggers/ping': 'trigger' })
+    expect(declared).toEqual({ 'post /triggers/daily': 'trigger', 'post /triggers/ping': 'trigger' })
   })
 
   it('declares the dead-letter routes as the platform owner permission', () => {

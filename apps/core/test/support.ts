@@ -87,7 +87,7 @@ export async function createStack(
     alertChannel?: AlertChannel
     clock?: Clock
     // Declare the daily trigger route, with this exchange-rate source and export store (null: none configured).
-    daily?: { fx: FxSource; store: ExportStore | null; dutyBudgetMs?: number }
+    daily?: { fx: FxSource; store: ExportStore | null; dutyBudgetMs?: number; verifyTimeoutMs?: number }
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
@@ -153,6 +153,7 @@ export async function createStack(
             store: options.daily.store,
             fx: options.daily.fx,
             dutyBudgetMs: options.daily.dutyBudgetMs,
+            verifyTimeoutMs: options.daily.verifyTimeoutMs,
           }
         : undefined,
     limiter,

@@ -157,11 +157,15 @@ export const runDetailReply = z.strictObject({
   modelCalls: z.array(modelCall),
   cost: money,
   audit: z.array(auditEntry),
+  // True when the scan of the audit chain stopped at its cap before reaching the run's start.
+  auditTruncated: z.boolean(),
 })
 
 // --- model-call review ----------------------------------------------------------------------------------
 
 export const modelCallReviewReply = z.strictObject({
+  // True when more calls need review than the list holds.
+  truncated: z.boolean(),
   items: z.array(
     modelCall.extend({
       reason: z.enum(['unknown', 'possible_duplicate', 'no_cost']),

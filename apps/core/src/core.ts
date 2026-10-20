@@ -40,6 +40,8 @@ export interface CoreDeps {
     store: ExportStore | null
     fx: FxSource
     dutyBudgetMs?: number
+    // A test seam: how long an on-demand audit verify may run in the database.
+    verifyTimeoutMs?: number
   }
   limiter?: AttemptLimiter
   // The sign-in library's own log lines. Unset (production): sent through `logger`, see libraryLogger.
@@ -111,7 +113,10 @@ export function buildCore(deps: CoreDeps): {
         now: () => clock.now(),
         logger: deps.logger,
       },
-      ownerView: daily ? { pool: daily.ownerViewPool, store: daily.store } : undefined,
+      ownerView: daily
+        ? { pool: daily.ownerViewPool, store: daily.store, verifyTimeoutMs: daily.verifyTimeoutMs }
+        : undefined,
+      logger: deps.logger,
       now: () => clock.now(),
       daily: daily
         ? {

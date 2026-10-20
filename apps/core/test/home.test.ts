@@ -104,3 +104,43 @@ describe('GET /brands/:brandId/home', () => {
     expect(reply.json.problems).toEqual({ deadJobs: 0, openAlerts: 0, reviewCalls: 0 })
   })
 })
+
+describe('home after the work engine has run a job', () => {
+  it('moves a job from waiting to running as the service starts it, and shows the run', async () => {
+    const { createJob, createRun, startAttempt } = await import('../src/jobs/service.ts')
+    const { withBrand } = await import('@mkt/db')
+    const live = await readsStack(undefined, { withQueue: true })
+    try {
+      const mine = await cast(live)
+      const def = await live.db.admin.query(
+        "select id from app.agent_definition_version where agent = 'summary' and live",
+      )
+      const jobId = await withBrand(live.appPool, mine.brandId, async (client) => {
+        const runId = await createRun(client, mine.brandId, {
+          agent: 'summary',
+          definitionVersionId: def.rows[0].id,
+          startedByKind: 'system',
+          startedById: null,
+        })
+        return createJob(client, live.jobs!, mine.brandId, {
+          runId,
+          jobClass: 'interactive',
+          input: {},
+          expectedResultType: 'test.echo',
+        })
+      })
+      const waiting = (await mine.admin.request('GET', api(mine.brandId, '/home'))).json
+      expect(waiting.progress.jobs).toEqual({ waiting: 1, running: 0, held: 0, dead: 0, finished: 0 })
+      expect(waiting.results.lastRuns).toHaveLength(1)
+      await live.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+        jobId,
+      ])
+      await startAttempt(live.jobs!, jobId, 'w1')
+      const running = (await mine.admin.request('GET', api(mine.brandId, '/home'))).json
+      expect(running.progress.jobs).toEqual({ waiting: 0, running: 1, held: 0, dead: 0, finished: 0 })
+      expect(running.results.lastRuns[0].state).toBe('running')
+    } finally {
+      await live.close()
+    }
+  })
+})

@@ -226,3 +226,37 @@ describe('GET /brands/:brandId/model-calls/review', () => {
     expect(JSON.stringify(reply.json)).not.toContain(theirs)
   })
 })
+
+describe('values that pass the pattern but cannot exist', () => {
+  it('answers 400 to an impossible cursor, not 500', async () => {
+    const impossible = [
+      '2026-13-45T99:99:99.000000Z_3f2b8c1e-5a4d-4e6f-8a7b-9c0d1e2f3a4b',
+      '2026-02-30T10:00:00.000000Z_3f2b8c1e-5a4d-4e6f-8a7b-9c0d1e2f3a4b',
+      '2026-10-20T10:00:00.000000Z_------------------------------------',
+      '2026-10-20T10:00:00.000000Z_zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz',
+    ]
+    for (const cursor of impossible) {
+      const reply = await c.admin.request('GET', api(c.brandId, `/runs?cursor=${encodeURIComponent(cursor)}`))
+      expect(reply.status, cursor).toBe(400)
+    }
+  })
+})
+
+describe('the model-call review list says when it was cut', () => {
+  it('flags truncated at the cap of 200 and not below it', async () => {
+    const mine = await cast(stack)
+    const run = await seedRun(stack, mine.brandId)
+    const few = await mine.admin.request('GET', api(mine.brandId, '/model-calls/review'))
+    expect(few.json.truncated).toBe(false)
+    const jobs = await seedJob(stack, mine.brandId, run, { attempts: ['succeeded'] })
+    const attempt = await stack.db.admin.query('select id from app.job_attempt where job_id = $1', [jobs])
+    await stack.db.admin.query(
+      `insert into app.model_call (brand_id, run_id, job_id, attempt_id, step, request_hash, status, model)
+       select $1, $2, $3, $4, 'draft', gen_random_uuid()::text, 'unknown', 'claude-opus-5-5' from generate_series(1, 201)`,
+      [mine.brandId, run, jobs, attempt.rows[0].id],
+    )
+    const many = await mine.admin.request('GET', api(mine.brandId, '/model-calls/review'))
+    expect(many.json.items).toHaveLength(200)
+    expect(many.json.truncated).toBe(true)
+  })
+})

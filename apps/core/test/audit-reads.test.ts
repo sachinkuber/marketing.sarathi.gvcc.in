@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { exportAudit } from '../src/audit/export.ts'
-import { TamperedStore, api, cast, readsStack, statuses, type Cast } from './reads-support.ts'
+import { TamperedStore, advance, api, cast, readsStack, statuses, type Cast } from './reads-support.ts'
 import type { Stack } from './support.ts'
 
 let stack: Stack
@@ -142,7 +142,9 @@ describe('GET /brands/:brandId/audit', () => {
 
 describe('POST /brands/:brandId/audit/verify', () => {
   it('is for the owner and the brand admin', async () => {
-    expect(await statuses(c, 'POST', api(c.brandId, '/audit/verify'), {})).toEqual([200, 200, 403, 403, 404])
+    expect(await statuses(c, 'POST', api(c.brandId, '/audit/verify'), {}, advance)).toEqual([
+      200, 200, 403, 403, 404,
+    ])
   })
 
   it('reports ok with no finding and the last export, and audits audit.verified once', async () => {
@@ -154,7 +156,7 @@ describe('POST /brands/:brandId/audit/verify', () => {
     const reply = await mine.admin.request('POST', api(mine.brandId, '/audit/verify'), { body: {} })
     expect(reply.status).toBe(200)
     expect(reply.json).toMatchObject({ ok: true, findings: [] })
-    expect(reply.json.checkedAt).toMatch(/^2026-10-20T12:00:00/)
+    expect(reply.json.checkedAt).toMatch(/^2026-10-20T1[23]:/)
     expect(reply.json.lastExport.throughSeq).toBeGreaterThanOrEqual(2)
     expect(typeof reply.json.lastExport.exportedAt).toBe('string')
     const after = await verifiedOf(mine.brandId)
@@ -182,6 +184,7 @@ describe('POST /brands/:brandId/audit/verify', () => {
     } finally {
       store.tamper = false
     }
+    advance()
     const clean = await mine.admin.request('POST', api(mine.brandId, '/audit/verify'), { body: {} })
     expect(clean.json.ok).toBe(true)
 
@@ -198,6 +201,7 @@ describe('POST /brands/:brandId/audit/verify', () => {
       await client.query('reset session_replication_role')
       client.release()
     }
+    advance()
     const altered = await mine.admin.request('POST', api(mine.brandId, '/audit/verify'), { body: {} })
     expect(altered.json.ok).toBe(false)
     expect(altered.json.findings[0]).toMatchObject({ kind: 'export_mismatch' })
@@ -228,7 +232,9 @@ describe('POST /brands/:brandId/audit/verify', () => {
 describe('the platform chain', () => {
   it('is the platform owner’s alone', async () => {
     expect(await statuses(c, 'GET', '/api/v1/audit/platform')).toEqual([200, 403, 403, 403, 403])
-    expect(await statuses(c, 'POST', '/api/v1/audit/platform/verify', {})).toEqual([200, 403, 403, 403, 403])
+    expect(await statuses(c, 'POST', '/api/v1/audit/platform/verify', {}, advance)).toEqual([
+      200, 403, 403, 403, 403,
+    ])
   })
 
   it('returns platform entries only, and audits audit.read and audit.verified on the platform chain', async () => {
@@ -240,6 +246,7 @@ describe('the platform chain', () => {
     expect(reads.length - before).toBe(1)
     expect(reads[reads.length - 1]!.detail).toEqual({ action: 'test.platform' })
     const verified = await verifiedOf('platform')
+    advance()
     const verify = await c.owner.request('POST', '/api/v1/audit/platform/verify', { body: {} })
     expect(verify.json).toMatchObject({ ok: true, findings: [] })
     expect((await verifiedOf('platform')).length - verified.length).toBe(1)
@@ -255,6 +262,134 @@ describe('when no export store is configured', () => {
       expect(reply.json).toMatchObject({ ok: true, findings: [], lastExport: null })
     } finally {
       await bare.close()
+    }
+  })
+})
+
+// Fills a chain with n entries in one statement, as the superuser (audit.append takes the chain's lock per call).
+async function bulk(chain: string | null, n: number, subject: string | null = null) {
+  await stack.db.admin.query(
+    `select audit.append($1::uuid, 'system', null, 'test.bulk', 'success', $3, null) from generate_series(1, $2)`,
+    [chain, n, subject],
+  )
+}
+
+const LONG_AGO = new Date('2020-01-01T00:00:00Z')
+
+describe('run detail pages the whole chain', () => {
+  it('finds a run’s entries that are older than the newest 200, and none from another chain', async () => {
+    const { seedRun } = await import('./reads-support.ts')
+    const mine = await cast(stack)
+    const run = await seedRun(stack, mine.brandId, { startedAt: LONG_AGO })
+    await append(mine.brandId, 'test.run_event_old')
+    await stack.auditPool!.query(
+      `select audit.append($1::uuid, 'system', null, 'test.run_event', 'success', $2, null)`,
+      [mine.brandId, run],
+    )
+    await bulk(mine.brandId, 450)
+    // The same run id as the subject on another brand's chain and on the platform chain.
+    await bulk(other.brandId, 3, run)
+    await bulk(null, 3, run)
+    const reply = await mine.admin.request('GET', api(mine.brandId, `/runs/${run}`))
+    expect(reply.status).toBe(200)
+    expect(reply.json.audit.map((e: { action: string }) => e.action)).toEqual(['test.run_event'])
+    expect(reply.json.auditTruncated).toBe(false)
+  })
+
+  it('says so when the scan cap is reached before the run’s start', async () => {
+    const { seedRun } = await import('./reads-support.ts')
+    const mine = await cast(stack)
+    const run = await seedRun(stack, mine.brandId, { startedAt: LONG_AGO })
+    await stack.auditPool!.query(
+      `select audit.append($1::uuid, 'system', null, 'test.run_event', 'success', $2, null)`,
+      [mine.brandId, run],
+    )
+    await bulk(mine.brandId, 5100)
+    const reply = await mine.admin.request('GET', api(mine.brandId, `/runs/${run}`))
+    expect(reply.status).toBe(200)
+    expect(reply.json.auditTruncated).toBe(true)
+    expect(reply.json.audit).toEqual([])
+  })
+})
+
+describe('verify is bounded', () => {
+  it('allows one verify per brand a minute, answering 429 with Retry-After, and the platform chain separately', async () => {
+    const mine = await cast(stack)
+    advance()
+    const path = api(mine.brandId, '/audit/verify')
+    expect((await mine.admin.request('POST', path, { body: {} })).status).toBe(200)
+    const second = await mine.owner.request('POST', path, { body: {} })
+    expect(second.status).toBe(429)
+    expect(second.json.error.code).toBe('verify_rate_limited')
+    expect(Number(second.headers.get('retry-after'))).toBeGreaterThan(0)
+    expect(Number(second.headers.get('retry-after'))).toBeLessThanOrEqual(60)
+    // Another brand is not held up by it, and the platform chain has its own allowance.
+    const elsewhere = await cast(stack)
+    expect(
+      (await elsewhere.admin.request('POST', api(elsewhere.brandId, '/audit/verify'), { body: {} })).status,
+    ).toBe(200)
+    advance()
+    expect((await mine.admin.request('POST', path, { body: {} })).status).toBe(200)
+    expect((await mine.owner.request('POST', '/api/v1/audit/platform/verify', { body: {} })).status).toBe(200)
+    expect((await mine.owner.request('POST', '/api/v1/audit/platform/verify', { body: {} })).status).toBe(429)
+  })
+
+  it('answers 503 verify_timeout when the check outruns its statement timeout, and logs the name only', async () => {
+    const { readsStack } = await import('./reads-support.ts')
+    const slow = await readsStack(new TamperedStore(), { verifyTimeoutMs: 1 })
+    try {
+      const mine = await cast(slow)
+      await slow.db.admin.query(
+        `select audit.append($1::uuid, 'system', null, 'test.bulk', 'success', null, null) from generate_series(1, 4000)`,
+        [mine.brandId],
+      )
+      const reply = await mine.admin.request('POST', api(mine.brandId, '/audit/verify'), { body: {} })
+      expect(reply.status).toBe(503)
+      expect(reply.json.error.code).toBe('verify_timeout')
+      expect(slow.logs.join('\n')).not.toContain(mine.brandId)
+    } finally {
+      await slow.close()
+    }
+  })
+
+  it('validates the platform verify call like the others', async () => {
+    const reply = await c.owner.request('POST', '/api/v1/audit/platform/verify?x=1', { body: {} })
+    expect(reply.status).toBe(400)
+    expect(reply.json.error.code).toBe('invalid_request')
+  })
+})
+
+describe('the audit routes exist only with an owner-view pool', () => {
+  it('declares none of them without one', async () => {
+    const { createStack } = await import('./support.ts')
+    const bare = await createStack()
+    try {
+      const paths = bare.core.routes.list().map((r) => `${r.method} ${r.path}`)
+      for (const gone of [
+        'get /brands/:brandId/audit',
+        'post /brands/:brandId/audit/verify',
+        'get /audit/platform',
+        'post /audit/platform/verify',
+        'get /brands/:brandId/runs/:runId',
+      ]) {
+        expect(paths).not.toContain(gone)
+      }
+      expect(paths).toContain('get /brands/:brandId/runs')
+    } finally {
+      await bare.close()
+    }
+  })
+
+  it('declares all of them with one', () => {
+    const paths = stack.core.routes.list().map((r) => `${r.method} ${r.path}`)
+    for (const here of [
+      'get /brands/:brandId/audit',
+      'post /brands/:brandId/audit/verify',
+      'get /audit/platform',
+      'post /audit/platform/verify',
+      'get /brands/:brandId/runs/:runId',
+    ]) {
+      expect(paths).toContain(here)
     }
   })
 })

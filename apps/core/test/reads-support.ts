@@ -17,11 +17,21 @@ export class TamperedStore extends MemoryExportStore {
   }
 }
 
-export async function readsStack(store: MemoryExportStore | null = new MemoryExportStore()): Promise<Stack> {
+// The clock moves only when a test says so (a verify is allowed once a minute per chain).
+let offset = 0
+export const advance = (ms = 61_000): void => {
+  offset += ms
+}
+
+export async function readsStack(
+  store: MemoryExportStore | null = new MemoryExportStore(),
+  options: { withQueue?: boolean; verifyTimeoutMs?: number } = {},
+): Promise<Stack> {
   return createStack({
     realAudit: true,
-    clock: { now: () => NOW },
-    daily: { fx: new StandInFxSource(83_000_000n), store },
+    withQueue: options.withQueue,
+    clock: { now: () => new Date(NOW.getTime() + offset) },
+    daily: { fx: new StandInFxSource(83_000_000n), store, verifyTimeoutMs: options.verifyTimeoutMs },
   })
 }
 
@@ -82,9 +92,11 @@ export async function statuses(
   method: string,
   path: string,
   body?: unknown,
+  between?: () => void,
 ): Promise<[number, number, number, number, number]> {
   const out: number[] = []
   for (const who of [c.owner, c.admin, c.approver, c.viewer, c.stranger]) {
+    between?.()
     out.push((await who.request(method, path, { body })).status)
   }
   return out as [number, number, number, number, number]

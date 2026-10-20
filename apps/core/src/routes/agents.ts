@@ -5,7 +5,7 @@ import { startSummaryRun } from '../agents/start.ts'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
 import { principalOf } from '../auth/session.ts'
-import { CURSOR, listAgents, listRuns, reviewCalls, runDetail } from '../agents/reads.ts'
+import { cursorIsReal, listAgents, listRuns, reviewCalls, runDetail } from '../agents/reads.ts'
 import { entriesAbout } from '../audit/reads.ts'
 import type { AuditSink } from '../ports.ts'
 import { recordRead, type OwnerView } from './audit.ts'
@@ -45,7 +45,7 @@ const runsQuery = z.strictObject({
     .max(60)
     .regex(/^[A-Za-z][A-Za-z0-9_-]*$/)
     .optional(),
-  cursor: z.string().regex(CURSOR).optional(),
+  cursor: z.string().refine(cursorIsReal, 'not a cursor this service gave').optional(),
 })
 
 export interface AgentReadDeps {
@@ -98,7 +98,7 @@ export function registerAgentReadRoutes(table: RouteTable, deps: AgentReadDeps):
       validate({ params: brandParams }),
       async (_req, res) => {
         const brandId = brandContextOf(res).brandId
-        res.json({ items: await withBrand(deps.pool, brandId, (client) => reviewCalls(client, brandId)) })
+        res.json(await withBrand(deps.pool, brandId, (client) => reviewCalls(client, brandId)))
       },
     ],
   })
@@ -120,13 +120,18 @@ export function registerAgentReadRoutes(table: RouteTable, deps: AgentReadDeps):
         )
         // audit.search has no subject filter: the core reads the brand chain newest first and keeps the
         // entries about this run.
-        const entries = await entriesAbout(audit.ownerView.pool, brandId, params.runId)
+        const about = await entriesAbout(
+          audit.ownerView.pool,
+          brandId,
+          params.runId,
+          new Date(detail.run.startedAt),
+        )
         await recordRead(audit.sink, {
           actor: principalOf(res).userId,
           brandId,
           detail: { runId: params.runId },
         })
-        res.json({ ...detail, audit: entries })
+        res.json({ ...detail, audit: about.entries, auditTruncated: about.truncated })
       },
     ],
   })
