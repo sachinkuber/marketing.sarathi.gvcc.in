@@ -77,7 +77,7 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
     method: 'get',
     path: '/brands/:brandId/content/:itemId',
     access: { kind: 'permission', permission: 'view_content' },
-    summary: 'One content item with all its versions and their states',
+    summary: 'One content item with all its versions, their states and their check results',
     handlers: [
       validate({ params: itemParams }),
       async (_req, res) => {
@@ -98,9 +98,27 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
               order by v.number`,
             [brandId, params.itemId],
           )
-          return { item: item.rows[0], versions: versions.rows }
+          const checks = await client.query(
+            `select c.content_version_id, c.check_name, c.kind, c.passed, c.detail, c.created_at
+               from app.check_result c
+               join app.content_version v on v.id = c.content_version_id
+              where c.brand_id = $1 and v.content_item_id = $2
+              order by c.created_at, c.id`,
+            [brandId, params.itemId],
+          )
+          return { item: item.rows[0], versions: versions.rows, checks: checks.rows }
         })
         if (!result) throw notFound()
+        const checksOf = (versionId: string) =>
+          result.checks
+            .filter((c) => c.content_version_id === versionId)
+            .map((c) => ({
+              name: c.check_name,
+              kind: c.kind,
+              passed: c.passed,
+              detail: c.detail,
+              at: c.created_at,
+            }))
         res.json({
           id: result.item.id,
           kind: result.item.kind,
@@ -116,6 +134,7 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
             payload: JSON.parse(v.payload_canonical as string),
             createdBy: { kind: v.created_by_kind, userId: v.created_by_user, runId: v.created_by_run },
             createdAt: v.created_at,
+            checks: checksOf(v.id as string),
           })),
         })
       },

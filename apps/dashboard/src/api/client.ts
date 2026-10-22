@@ -7,12 +7,15 @@ import { sessionReply } from './schemas'
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  // The core's `error.details`, when it sent any (for a 400 invalid_request: one entry per refused field).
+  readonly details: unknown
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -76,16 +79,18 @@ interface RawReply {
 }
 
 // The core's errors are { error: { code, message } }; the sign-in library's are { code, message }.
-function errorOf(json: unknown): { code: string; message: string } {
+function errorOf(json: unknown): { code: string; message: string; details: unknown } {
   const body = json as {
-    error?: { code?: unknown; message?: unknown }
+    error?: { code?: unknown; message?: unknown; details?: unknown }
     code?: unknown
     message?: unknown
+    details?: unknown
   } | null
   const error = body?.error ?? body
   return {
     code: typeof error?.code === 'string' ? error.code : 'error',
     message: typeof error?.message === 'string' ? error.message : 'The request failed.',
+    details: error?.details,
   }
 }
 
@@ -145,9 +150,9 @@ export async function api<T>(schema: z.ZodType<T>, method: string, path: string,
     throw new ApiError(401, code, message)
   }
   if (reply.status < 200 || reply.status >= 300) {
-    const { code, message } = errorOf(reply.json)
+    const { code, message, details } = errorOf(reply.json)
     if (reply.status === 403 && code === 'enrolment_required') navigate('/enrol')
-    throw new ApiError(reply.status, code, message)
+    throw new ApiError(reply.status, code, message, details)
   }
   const parsed = schema.safeParse(reply.json)
   if (!parsed.success) {

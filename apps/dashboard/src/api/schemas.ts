@@ -255,6 +255,113 @@ export const inviteLookupReply = z.strictObject({
 
 export const inviteAcceptReply = z.strictObject({ userId: z.string() })
 
+// --- content, approvals, approval settings, alerts (Task 12) --------------------------------------------------
+
+export const versionState = z.enum([
+  'draft',
+  'in_checks',
+  'check_failed',
+  'awaiting_approval',
+  'approved',
+  'rejected',
+  'superseded',
+  'invalidated',
+  'scheduled',
+  'publish_unknown',
+  'published',
+  'withdrawn',
+])
+
+// GET /brands/:brandId/content: newest first; an item without a version has nulls in the version's fields.
+export const contentListItem = z.strictObject({
+  id: z.uuid(),
+  kind: z.string(),
+  currentVersionId: z.uuid().nullable(),
+  number: z.number().int().positive().nullable(),
+  state: versionState.nullable(),
+  title: z.string().nullable(),
+  overdue: z.boolean(),
+  requestedAt: iso.nullable(),
+  createdAt: iso.nullable(),
+})
+
+export const contentListReply = z.strictObject({ items: z.array(contentListItem) })
+
+// The stored payload is the content itself, not a reply envelope: the screen reads the fields it renders and
+// keeps the rest untouched (an edit sends them back), so it is a loose object.
+export const contentPayload = z.looseObject({
+  kind: z.string().optional(),
+  title: z.string().optional(),
+  summary: z.string().optional(),
+  body: z.array(z.looseObject({ type: z.string() })).optional(),
+  hashtags: z.array(z.string()).optional(),
+})
+
+export const checkResult = z.strictObject({
+  name: z.string(),
+  kind: z.enum(['blocking', 'score']),
+  passed: z.boolean().nullable(),
+  detail: z.unknown(),
+  at: iso,
+})
+
+export const contentVersion = z.strictObject({
+  id: z.uuid(),
+  number: z.number().int().positive(),
+  state: versionState,
+  stateChangedAt: iso,
+  hash: z.string(),
+  hashScheme: z.string(),
+  payload: contentPayload,
+  createdBy: z.strictObject({
+    kind: z.enum(['user', 'agent', 'system', 'n8n']),
+    userId: z.string().nullable(),
+    runId: z.string().nullable(),
+  }),
+  createdAt: iso,
+  checks: z.array(checkResult),
+})
+
+export const contentItemReply = z.strictObject({
+  id: z.uuid(),
+  kind: z.string(),
+  currentVersionId: z.uuid().nullable(),
+  createdAt: iso,
+  versions: z.array(contentVersion),
+})
+
+export const decisionReply = z.strictObject({ approvalId: z.string() })
+export const commentReply = z.strictObject({ ok: z.literal(true) })
+export const versionCreatedReply = z.strictObject({
+  versionId: z.uuid(),
+  number: z.number().int().positive(),
+  hash: z.string(),
+})
+
+// Whole minutes, as the core speaks them; the screen shows hours.
+export const approvalSettingsReply = z.strictObject({
+  firstReminderAfterMinutes: z.number().int().positive(),
+  reminderGapMinutes: z.number().int().positive(),
+  reminderCount: z.number().int().min(1).max(5),
+})
+
+export const alert = z.strictObject({
+  id: z.uuid(),
+  severity: z.number().int(),
+  kind: z.string(),
+  detail: z.unknown(),
+  raisedAt: iso,
+  acknowledgedBy: z.string().nullable(),
+  acknowledgedAt: iso.nullable(),
+  resolvedAt: iso.nullable(),
+  delivered: z.boolean(),
+  deliveryAttempts: z.number().int().nonnegative(),
+  deliveryStalled: z.boolean(),
+  deliveryIssue: z.string().nullable(),
+})
+
+export const alertsReply = z.strictObject({ alerts: z.array(alert) })
+
 // GET /overdue: per brand the caller may approve in, what is overdue and whether the pop-up is due.
 export const overdueAllReply = z.strictObject({
   brands: z.array(

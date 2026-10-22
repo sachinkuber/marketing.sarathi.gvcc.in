@@ -93,6 +93,12 @@ describe('the API client', () => {
     expect(assign).not.toHaveBeenCalled()
   })
 
+  it('keeps the core’s error details, so a screen can put them on its fields', async () => {
+    const details = [{ part: 'body', path: 'reminderCount', message: 'Too big' }]
+    replies.push({ status: 400, body: { error: { code: 'invalid_request', message: 'no', details } } })
+    await expect(api(ok, 'GET', '/things')).rejects.toMatchObject({ code: 'invalid_request', details })
+  })
+
   it('sends a 401 to sign-in with the current path as next', async () => {
     replies.push({ status: 401, body: { error: { code: 'not_signed_in', message: 'Sign in' } } })
     await expect(api(ok, 'GET', '/things')).rejects.toMatchObject({ status: 401 })

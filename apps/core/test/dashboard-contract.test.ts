@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   agentsReply,
+  alertsReply,
+  approvalSettingsReply,
   auditReply,
   auditVerifyReply,
   brandReply,
   brandsReply,
+  contentItemReply,
+  contentListReply,
   homeReply,
   modelCallReviewReply,
   overdueAllReply,
@@ -31,6 +35,7 @@ import type { Stack } from './support.ts'
 let stack: Stack
 let c: Cast
 let runId: string
+let itemId: string
 
 beforeAll(async () => {
   stack = await readsStack()
@@ -41,7 +46,25 @@ beforeAll(async () => {
   await seedJob(stack, c.brandId, runId, { dead: true, attempts: ['failed'] })
   await seedCall(stack, c.brandId, runId, { status: 'unknown' })
   await seedCall(stack, c.brandId, runId)
-  await seedAwaiting(stack, c.brandId, new Date(NOW.getTime() - 3_600_000))
+  const versionId = await seedAwaiting(stack, c.brandId, new Date(NOW.getTime() - 3_600_000))
+  const version = await stack.db.admin.query(
+    'select content_item_id from app.content_version where id = $1',
+    [versionId],
+  )
+  itemId = version.rows[0].content_item_id as string
+  await stack.db.admin.query('update app.content_item set current_version_id = $2 where id = $1', [
+    itemId,
+    versionId,
+  ])
+  await stack.db.admin.query(
+    `insert into app.check_result (brand_id, content_version_id, check_name, kind, passed, detail)
+     values ($1, $2, 'placeholder_length', 'blocking', true, '{"summaryLength":1}')`,
+    [c.brandId, versionId],
+  )
+  await stack.db.admin.query(
+    `insert into app.alert (brand_id, severity, kind, detail) values ($1, 2, 'dead_job', '{}'), (null, 1, 'n8n_heartbeat_missing', null)`,
+    [c.brandId],
+  )
   await stack.auditPool!.query(
     `select audit.append($1::uuid, 'system', null, 'test.run_event', 'success', $2, '{"k":1}'::jsonb)`,
     [c.brandId, runId],
@@ -111,6 +134,25 @@ describe('the dashboard schemas accept the core’s replies', () => {
     for (const who of ['admin', 'owner', 'approver', 'viewer'] as const) {
       overdueAllReply.parse(await get(who, '/api/v1/overdue'))
     }
+  })
+
+  it('the inbox list and one item, with the check results of each version', async () => {
+    for (const query of ['', '?state=awaiting_approval', '?state=awaiting_approval&overdue=true']) {
+      contentListReply.parse(await get('viewer', api(c.brandId, `/content${query}`)))
+    }
+    const list = contentListReply.parse(await get('approver', api(c.brandId, '/content')))
+    expect(list.items.map((i) => i.id)).toContain(itemId)
+    const item = contentItemReply.parse(await get('approver', api(c.brandId, `/content/${itemId}`)))
+    expect(item.versions[0]?.checks).toEqual([
+      expect.objectContaining({ name: 'placeholder_length', kind: 'blocking', passed: true }),
+    ])
+  })
+  it('approval settings and alerts, brand and platform', async () => {
+    approvalSettingsReply.parse(await get('admin', api(c.brandId, '/approval-settings')))
+    const brand = alertsReply.parse(await get('viewer', api(c.brandId, '/alerts')))
+    expect(brand.alerts.length).toBeGreaterThan(0)
+    const platform = alertsReply.parse(await get('owner', '/api/v1/alerts'))
+    expect(platform.alerts.length).toBeGreaterThan(0)
   })
 
   it('refuses a reply with an unexpected shape, so the schemas are not vacuous', () => {

@@ -1540,3 +1540,76 @@ html.modal-open body {
 .mt-2 {
   margin-top: 8px;
 }
+.mt-4 {
+  margin-top: 16px;
+}
+.mb-4 {
+  margin-bottom: 16px;
+}
+.block {
+  display: block;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.list > li.wrap-row {
+  flex-wrap: wrap;
+}
+a.inherit {
+  color: inherit;
+}
+.subhead {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+/* ---------- screens (Task 12) ---------- */
+.ledger.figures > li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.inbox.plain > li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.seg a {
+  padding: 5px 13px;
+  border-radius: 7px;
+  font-size: 14px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.seg a[aria-current='page'] {
+  background: var(--ink);
+  color: #fff;
+}
+.preview {
+  display: grid;
+  gap: 10px;
+}
+.preview .preview-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.keywords > li {
+  background: var(--primary-bg);
+  color: var(--primary-dark);
+  border-radius: 99px;
+  padding: 2px 11px;
+  font-size: 14px;
+}
+@media (max-width: 980px) {
+  .ledger.figures > li,
+  .inbox.plain > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inbox.plain > li > .right {
+    grid-column: 1;
+  }
+}
