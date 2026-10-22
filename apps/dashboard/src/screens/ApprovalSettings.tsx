@@ -40,6 +40,7 @@ function minutesOf(hours: string): number | null {
 }
 
 const HOURS_ERROR = 'Enter a number of hours above zero and at most 8760 (a year).'
+const COUNT_ERROR = 'Choose 1 to 5 reminders.'
 
 export function settingsFromForm(
   form: SettingsForm,
@@ -50,7 +51,7 @@ export function settingsFromForm(
   const errors: SettingsErrors = {}
   if (first === null) errors.firstHours = HOURS_ERROR
   if (gap === null) errors.gapHours = HOURS_ERROR
-  if (count === null) errors.count = 'Choose 1 to 5 reminders.'
+  if (count === null) errors.count = COUNT_ERROR
   if (first === null || gap === null || count === null) return { ok: false, errors }
   return {
     ok: true,
@@ -64,16 +65,23 @@ const FIELD_OF: Record<string, keyof SettingsForm> = {
   reminderCount: 'count',
 }
 
-// The core's 400 invalid_request lists each refused field; each message goes on the field it names. Anything
-// it cannot place goes above the form. Other failures place nothing here.
+// The screen's own words for each field: the core's messages speak minutes, which this screen never shows.
+const FIELD_MESSAGE: Record<keyof SettingsForm | 'form', string> = {
+  firstHours: HOURS_ERROR,
+  gapHours: HOURS_ERROR,
+  count: COUNT_ERROR,
+  form: 'The settings were not accepted. Check each field and try again.',
+}
+
+// The core's 400 invalid_request lists each refused field; each is marked on the field it names. Anything it
+// cannot place goes above the form. Other failures place nothing here.
 export function settingsFieldErrors(error: unknown): SettingsErrors {
   if (!(error instanceof ApiError) || error.code !== 'invalid_request' || !Array.isArray(error.details))
     return {}
   const errors: SettingsErrors = {}
-  for (const issue of error.details as Array<{ path?: unknown; message?: unknown }>) {
+  for (const issue of error.details as Array<{ path?: unknown }>) {
     const field = typeof issue.path === 'string' ? (FIELD_OF[issue.path] ?? 'form') : 'form'
-    const message = typeof issue.message === 'string' ? issue.message : 'This value is not accepted.'
-    errors[field] ??= message
+    errors[field] = FIELD_MESSAGE[field]
   }
   return errors
 }

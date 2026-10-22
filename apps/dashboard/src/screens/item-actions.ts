@@ -23,8 +23,14 @@ const CONFLICTS: Record<string, string> = {
   not_awaiting_approval: 'This version is no longer waiting for approval. The item has been reloaded.',
 }
 
+// `reloaded` carries the fresh item, or null when the reload itself failed: the decision's answer still stands.
 export type Outcome<K extends string> =
-  { kind: K } | { kind: 'reloaded'; item: ContentItem; notice: string } | { kind: 'invalid'; message: string }
+  | { kind: K }
+  | { kind: 'reloaded'; item: ContentItem | null; notice: string }
+  | { kind: 'invalid'; message: string }
+
+// Said after a write that succeeded when the item could not be read again afterwards.
+export const RELOAD_HINT = 'The screen could not load the latest state; reload the page to see it.'
 
 const itemPath = (brandId: string, itemId: string) => `/brands/${brandId}/content/${itemId}`
 const versionPath = (brandId: string, itemId: string, versionId: string) =>
@@ -34,11 +40,21 @@ export function loadItem(brandId: string, itemId: string): Promise<ContentItem> 
   return api(contentItemReply, 'GET', itemPath(brandId, itemId))
 }
 
+// The read after a write. Its failure must not turn the write into a failure (the person would repeat it), so
+// it answers null and the screen says to reload.
+export async function reloadAfterWrite(brandId: string, itemId: string): Promise<ContentItem | null> {
+  try {
+    return await loadItem(brandId, itemId)
+  } catch {
+    return null
+  }
+}
+
 // A 409 from a decision: the screen no longer shows what the core holds, so it reloads and says why. Nothing
 // is retried: a decision applies only to the version the person saw.
 async function onConflict(error: unknown, brandId: string, itemId: string) {
   if (error instanceof ApiError && error.status === 409 && CONFLICTS[error.code]) {
-    const item = await loadItem(brandId, itemId)
+    const item = await reloadAfterWrite(brandId, itemId)
     return { kind: 'reloaded' as const, item, notice: CONFLICTS[error.code] as string }
   }
   throw error
@@ -108,11 +124,16 @@ export interface EditValues {
 // The fields the server sets itself; the edit route refuses a payload that carries them.
 const SERVER_FIELDS = new Set(['schema', 'brand_id', 'content_item_id'])
 
+// Where an item keeps its keywords: the body's first list (the summary agent's shape), else its hashtags.
+function keywordSource(payload: Payload): 'list' | 'hashtags' {
+  if (payload.body?.some((block) => block.type === 'list')) return 'list'
+  return payload.hashtags ? 'hashtags' : 'list'
+}
+
 export function keywordsOf(payload: Payload): string[] {
-  const list = payload.body?.find((block) => block.type === 'list')
-  const items = list?.['items']
-  if (Array.isArray(items)) return items.filter((k): k is string => typeof k === 'string')
-  return payload.hashtags ?? []
+  if (keywordSource(payload) === 'hashtags') return payload.hashtags ?? []
+  const items = payload.body?.find((block) => block.type === 'list')?.['items']
+  return Array.isArray(items) ? items.filter((k): k is string => typeof k === 'string') : []
 }
 
 export function editValues(payload: Payload): EditValues {
@@ -124,8 +145,8 @@ export function editValues(payload: Payload): EditValues {
 }
 
 // The next version: the current payload with the edited title, summary and keywords, and everything the form
-// does not cover kept as it was. The summary is also the body's first paragraph and the keywords its first
-// list, as the summary agent writes them.
+// does not cover kept as it was. The summary is also the body's first paragraph. The keywords go back where
+// they came from: the body's first list (as the summary agent writes them), or the hashtags.
 export function editedPayload(current: Payload, values: EditValues): Record<string, unknown> {
   const kept = Object.fromEntries(Object.entries(current).filter(([key]) => !SERVER_FIELDS.has(key)))
   const title = values.title.trim()
@@ -138,11 +159,15 @@ export function editedPayload(current: Payload, values: EditValues): Record<stri
   const paragraph = body.findIndex((block) => block.type === 'paragraph')
   if (paragraph >= 0) body[paragraph] = { type: 'paragraph', text: summary }
   else body.unshift({ type: 'paragraph', text: summary })
-  const list = body.findIndex((block) => block.type === 'list')
-  const listBlock = { type: 'list', ordered: false, items: keywords }
-  if (list >= 0) body[list] = listBlock
-  else body.push(listBlock)
   const next: Record<string, unknown> = { ...kept, summary, body }
+  if (keywordSource(current) === 'hashtags') {
+    next['hashtags'] = keywords
+  } else {
+    const list = body.findIndex((block) => block.type === 'list')
+    const listBlock = { type: 'list', ordered: false, items: keywords }
+    if (list >= 0) body[list] = listBlock
+    else body.push(listBlock)
+  }
   if (title) next['title'] = title
   else delete next['title']
   return next
@@ -153,12 +178,12 @@ export async function saveEdit(
   itemId: string,
   current: Payload,
   values: EditValues,
-): Promise<{ number: number; item: ContentItem }> {
+): Promise<{ number: number; item: ContentItem | null }> {
   const created = await api(
     versionCreatedReply,
     'POST',
     `${itemPath(brandId, itemId)}/versions`,
     editedPayload(current, values),
   )
-  return { number: created.number, item: await loadItem(brandId, itemId) }
+  return { number: created.number, item: await reloadAfterWrite(brandId, itemId) }
 }

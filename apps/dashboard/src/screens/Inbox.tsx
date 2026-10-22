@@ -37,11 +37,12 @@ export function inboxFilter(raw: string | null | undefined): InboxFilter {
   return FILTERS.some((f) => f.id === raw) ? (raw as InboxFilter) : 'waiting'
 }
 
-// What to ask the core for each filter. Overdue items are still awaiting approval.
+// What to ask the core for each filter. Overdue items are still awaiting approval. The core is asked for the
+// oldest first, so its row cap drops the newest items rather than the ones that have waited longest.
 export function inboxQuery(filter: InboxFilter): string {
-  if (filter === 'overdue') return '?state=awaiting_approval&overdue=true'
-  if (filter === 'check_failed') return '?state=check_failed'
-  return '?state=awaiting_approval'
+  if (filter === 'overdue') return '?state=awaiting_approval&overdue=true&order=oldest'
+  if (filter === 'check_failed') return '?state=check_failed&order=oldest'
+  return '?state=awaiting_approval&order=oldest'
 }
 
 const since = (item: InboxItem) => item.requestedAt ?? item.createdAt ?? ''
@@ -58,7 +59,7 @@ function href(brandId: string, filter: InboxFilter): string {
 function Status({ item, now }: { item: InboxItem; now: number }) {
   const from = since(item)
   const wait = from ? waitedFor(from, now) : 'unknown'
-  if (item.state === 'check_failed') return <span className="tag danger">Checks failed</span>
+  if (item.state === 'check_failed') return <span className="tag danger">{`Checks failed · ${wait}`}</span>
   if (item.overdue) return <span className="tag danger">{`Overdue · ${wait}`}</span>
   return <span className="tag warn">{`Waiting · ${wait}`}</span>
 }

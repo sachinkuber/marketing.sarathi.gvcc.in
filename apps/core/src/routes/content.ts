@@ -21,6 +21,9 @@ const itemParams = z.strictObject({ brandId: z.uuid(), itemId: z.uuid() })
 const listQuery = z.strictObject({
   state: z.enum(VERSION_STATES).optional(),
   overdue: z.enum(['true', 'false']).optional(),
+  // `oldest` lists by how long each item has waited, oldest first, so the row cap drops the newest, not the
+  // oldest; the default is newest first.
+  order: z.enum(['newest', 'oldest']).optional(),
 })
 // What a client may send: the payload without the fields the server owns.
 const editBody = contentPayloadSchema.omit({ schema: true, brand_id: true, content_item_id: true })
@@ -50,9 +53,16 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
               where i.brand_id = $1
                 and ($2::app.version_state is null or s.state = $2)
                 and ($3::boolean is null or coalesce(r.overdue, false) = $3)
-              order by coalesce(v.created_at, i.created_at) desc, i.id
+              order by case when $4::text = 'oldest'
+                            then coalesce(r.requested_at, v.created_at, i.created_at) end,
+                       coalesce(v.created_at, i.created_at) desc, i.id
               limit 200`,
-            [brandId, query.state ?? null, query.overdue === undefined ? null : query.overdue === 'true'],
+            [
+              brandId,
+              query.state ?? null,
+              query.overdue === undefined ? null : query.overdue === 'true',
+              query.order ?? 'newest',
+            ],
           )
           return found.rows
         })

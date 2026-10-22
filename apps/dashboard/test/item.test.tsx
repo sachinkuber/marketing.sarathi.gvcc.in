@@ -4,6 +4,7 @@ import { setCsrfToken } from '../src/api/client'
 import { ItemReview, hashPrefix, shownVersion } from '../src/screens/ItemReview'
 import {
   approveShown,
+  editValues,
   editedPayload,
   rejectShown,
   STALE_MESSAGE,
@@ -171,11 +172,25 @@ describe('approving and rejecting', () => {
     expect(calls.map((c) => c.method)).toEqual(['POST', 'GET'])
     expect(calls.filter((c) => c.url.endsWith('/approve'))).toHaveLength(1)
     expect(calls[1]?.url).toBe(`/api/v1/brands/${brandId}/content/${itemId}`)
-    if (outcome.kind !== 'reloaded') throw new Error('expected a reload')
+    if (outcome.kind !== 'reloaded' || !outcome.item) throw new Error('expected a reloaded item')
     expect(shownVersion(outcome.item)?.hash).toBe(HASH2)
     const html = review('awaiting_approval', { item: outcome.item, notice: outcome.notice })
     expect(html).toContain('This item changed. Review the new version.')
     expect(html).toContain('9f8e7d6c5b4a')
+  })
+
+  it('on 409 stale_hash with a reload that fails, still says the item changed and gives no item', async () => {
+    const shown = shownVersion(item('awaiting_approval'))!
+    replies.push(
+      { status: 409, body: { error: { code: 'stale_hash', message: 'The content has changed.' } } },
+      { status: 500, body: { error: { code: 'internal_error', message: 'x' } } },
+    )
+    const outcome = await approveShown(brandId, itemId, shown)
+    expect(outcome.kind).toBe('reloaded')
+    if (outcome.kind !== 'reloaded') throw new Error('expected a reload')
+    expect(outcome.item).toBeNull()
+    expect(outcome.notice).toContain('This item changed. Review the new version.')
+    expect(calls.filter((c) => c.url.endsWith('/approve'))).toHaveLength(1)
   })
 
   it('reject needs a reason and sends nothing without one', async () => {
@@ -216,5 +231,31 @@ describe('editing', () => {
         { type: 'list', ordered: false, items: ['one', 'two', 'three'] },
       ],
     })
+  })
+
+  it('edits the hashtags when the keywords came from there, and adds no list block', () => {
+    const tagged = {
+      kind: 'social_post',
+      language: 'en',
+      title: 'Post',
+      summary: 'Text',
+      body: [{ type: 'paragraph', text: 'Text' }],
+      hashtags: ['film', 'care'],
+    }
+    expect(editValues(tagged).keywords).toBe('film\ncare')
+    expect(editedPayload(tagged, { title: 'Post', summary: 'Text', keywords: 'film\ncoating' })).toEqual({
+      ...tagged,
+      hashtags: ['film', 'coating'],
+    })
+  })
+
+  it('leaves the hashtags alone when the keywords are a list block', () => {
+    const both = { ...shownVersion(item('awaiting_approval'))!.payload, hashtags: ['tag'] }
+    const next = editedPayload(both, { title: 'T', summary: 'S', keywords: 'x' })
+    expect(next['hashtags']).toEqual(['tag'])
+    expect(next['body']).toEqual([
+      { type: 'paragraph', text: 'S' },
+      { type: 'list', ordered: false, items: ['x'] },
+    ])
   })
 })

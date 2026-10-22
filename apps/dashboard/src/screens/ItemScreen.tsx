@@ -10,6 +10,8 @@ import {
   commentOn,
   loadItem,
   rejectShown,
+  reloadAfterWrite,
+  RELOAD_HINT,
   saveEdit,
   type ContentItem,
   type Outcome,
@@ -37,6 +39,19 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
   // Each finished action remounts the review, which closes any open form.
   const [round, setRound] = useState(0)
 
+  // True once the core holds something newer than the screen and it could not be read: no decision may be
+  // taken on what is shown until the page is reloaded.
+  const [outdated, setOutdated] = useState(false)
+
+  // After a write: the fresh item, or, when it could not be read, the answer plus a request to reload. The
+  // write's own success is never reported as a failure.
+  const show = (next: ContentItem | null, said: string) => {
+    if (next) setFresh(next)
+    setOutdated(next === null)
+    setNotice(next ? said : `${said} ${RELOAD_HINT}`)
+    setRound((n) => n + 1)
+  }
+
   const finish = async (
     work: () => Promise<Outcome<'approved'> | Outcome<'rejected'> | Outcome<'commented'>>,
     done: string,
@@ -45,18 +60,9 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
     setError(null)
     try {
       const outcome = await work()
-      if (outcome.kind === 'invalid') {
-        setError(outcome.message)
-        return
-      }
-      if (outcome.kind === 'reloaded') {
-        setFresh(outcome.item)
-        setNotice(outcome.notice)
-      } else {
-        setFresh(await loadItem(brandId, itemId))
-        setNotice(done)
-      }
-      setRound((n) => n + 1)
+      if (outcome.kind === 'invalid') setError(outcome.message)
+      else if (outcome.kind === 'reloaded') show(outcome.item, outcome.notice)
+      else show(await reloadAfterWrite(brandId, itemId), done)
     } catch (e) {
       setError(failure(e))
     } finally {
@@ -77,7 +83,7 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
           brandId={brandId}
           item={item}
           canDecide={canDecide}
-          busy={busy}
+          busy={busy || outdated}
           notice={notice}
           error={error}
           onApprove={(shown) =>
@@ -100,9 +106,10 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
             setError(null)
             saveEdit(brandId, itemId, shown.payload, values).then(
               ({ number, item: next }) => {
-                setFresh(next)
-                setNotice(`Saved as version ${number}. It goes through the checks before it can be approved.`)
-                setRound((n) => n + 1)
+                show(
+                  next,
+                  `Saved as version ${number}. It goes through the checks before it can be approved.`,
+                )
                 setBusy(false)
               },
               (e: unknown) => {

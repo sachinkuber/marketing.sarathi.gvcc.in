@@ -54,12 +54,25 @@ describe('the approval inbox', () => {
     expect(html).toMatch(/href="\/b\/[^"]*\/inbox"[^>]*>Waiting</)
     expect(html).toMatch(/href="[^"]*\?filter=check_failed"[^>]*>Checks failed</)
     expect(html.match(/aria-current="page"/g)).toHaveLength(1)
-    expect(inboxQuery('waiting')).toBe('?state=awaiting_approval')
-    expect(inboxQuery('overdue')).toBe('?state=awaiting_approval&overdue=true')
-    expect(inboxQuery('check_failed')).toBe('?state=check_failed')
+    // The core is asked for the oldest first, so its 200-row cap never drops the oldest items.
+    expect(inboxQuery('waiting')).toBe('?state=awaiting_approval&order=oldest')
+    expect(inboxQuery('overdue')).toBe('?state=awaiting_approval&overdue=true&order=oldest')
+    expect(inboxQuery('check_failed')).toBe('?state=check_failed&order=oldest')
     expect(inboxFilter('overdue')).toBe('overdue')
     expect(inboxFilter('nonsense')).toBe('waiting')
     expect(inboxFilter(undefined)).toBe('waiting')
+  })
+
+  it('shows how long a row whose checks failed has been there', () => {
+    const failed = {
+      ...row('a0000000-0000-4000-8000-000000000004', 'Failed', '2026-10-20T07:00:00.000Z'),
+      state: 'check_failed' as const,
+      requestedAt: null,
+    }
+    const html = renderToStaticMarkup(
+      <InboxList brandId={brandId} filter="check_failed" items={[failed]} now={NOW} />,
+    )
+    expect(html).toContain('Checks failed · 5 hours')
   })
 
   it('says what will appear when nothing waits', () => {

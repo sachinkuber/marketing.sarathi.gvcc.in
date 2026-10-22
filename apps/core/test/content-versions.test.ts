@@ -290,6 +290,39 @@ describe('content versions', () => {
       expect(list.json.items.every((i: { overdue: boolean }) => i.overdue)).toBe(true)
     })
 
+    it('lists the oldest waiting first when asked, so the 200-row cap never hides the oldest', async () => {
+      const awaiting = async (requestedAt: string) => {
+        const item = await newItem(brandA)
+        const v = await create(brandA, item)
+        await move(brandA, v.versionId, 'in_checks')
+        await move(brandA, v.versionId, 'awaiting_approval')
+        await stack.db.admin.query(
+          'update app.approval_request set requested_at = $2 where content_version_id = $1',
+          [v.versionId, requestedAt],
+        )
+        return item
+      }
+      const middle = await awaiting('2001-01-02T00:00:00Z')
+      const oldest = await awaiting('2001-01-01T00:00:00Z')
+      const newest = await awaiting('2001-01-03T00:00:00Z')
+      const ids = (json: { items: { id: string }[] }) => json.items.map((i) => i.id)
+      const asked = await viewer.request('GET', `${base(brandA)}?state=awaiting_approval&order=oldest`)
+      expect(asked.status).toBe(200)
+      expect(ids(asked.json)[0]).toBe(oldest)
+      expect(ids(asked.json).filter((id) => [oldest, middle, newest].includes(id))).toEqual([
+        oldest,
+        middle,
+        newest,
+      ])
+      const plain = await viewer.request('GET', `${base(brandA)}?state=awaiting_approval`)
+      expect(ids(plain.json).filter((id) => [oldest, middle, newest].includes(id))).toEqual([
+        newest,
+        oldest,
+        middle,
+      ])
+      expect((await viewer.request('GET', `${base(brandA)}?order=sideways`)).status).toBe(400)
+    })
+
     it('lets a viewer read but not edit, and a sales contact do neither', async () => {
       const item = await newItem(brandA)
       expect((await viewer.request('GET', `${base(brandA)}/${item}`)).status).toBe(200)

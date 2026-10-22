@@ -63,7 +63,16 @@ describe('approval settings', () => {
       { part: 'body', path: 'firstReminderAfterMinutes', message: 'Too big' },
     ])
     const errors = settingsFieldErrors(error)
-    expect(errors).toEqual({ count: 'Too big: expected number to be <=5', firstHours: 'Too big' })
+    // The core speaks minutes; the screen speaks hours, so each field gets the screen's own wording.
+    expect(errors).toEqual({
+      count: 'Choose 1 to 5 reminders.',
+      firstHours: 'Enter a number of hours above zero and at most 8760 (a year).',
+    })
+    expect(
+      settingsFieldErrors(
+        new ApiError(400, 'invalid_request', 'x', [{ part: 'body', path: '', message: 'at least one' }]),
+      ),
+    ).toEqual({ form: 'The settings were not accepted. Check each field and try again.' })
     const html = renderToStaticMarkup(
       <ApprovalSettingsForm
         value={formFromSettings(stored)}
@@ -74,7 +83,8 @@ describe('approval settings', () => {
         onSave={noop}
       />,
     )
-    expect(html).toContain('Too big: expected number to be &lt;=5')
+    expect(html).toContain('Choose 1 to 5 reminders.')
+    expect(html).not.toContain('Too big')
     expect(html).toMatch(/id="count"[^>]*aria-invalid="true"|aria-invalid="true"[^>]*id="count"/)
     expect(html).toMatch(/aria-describedby="[^"]*\bcount-error\b[^"]*"/)
     expect(html).toContain('id="count-error"')
