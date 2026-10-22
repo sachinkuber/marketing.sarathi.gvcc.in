@@ -362,6 +362,73 @@ export const alert = z.strictObject({
 
 export const alertsReply = z.strictObject({ alerts: z.array(alert) })
 
+// --- agent start, dead letters, users, kill switch (Task 13) ---------------------------------------------------
+
+// A write the core answers with 204 and no body.
+export const noContent = z.null()
+
+export const runStartedReply = z.strictObject({ runId: z.uuid(), jobId: z.uuid() })
+
+// GET /brands/:brandId/jobs/dead: a bare list, newest death first.
+export const deadJobsReply = z.array(
+  z.strictObject({
+    jobId: z.uuid(),
+    runId: z.uuid(),
+    jobClass: z.enum(['interactive', 'publishing', 'production', 'bulk']),
+    deadAt: iso,
+    attempts: z.number().int().nonnegative(),
+  }),
+)
+
+export const member = z.strictObject({
+  userId: z.uuid(),
+  email: z.string(),
+  name: z.string(),
+  role: membershipRole,
+  twoFactorEnabled: z.boolean(),
+  since: iso,
+})
+
+export const usersReply = z.strictObject({
+  members: z.array(member),
+  pendingInvites: z.array(
+    z.strictObject({
+      id: z.uuid(),
+      email: z.string(),
+      role: membershipRole,
+      expiresAt: iso,
+      expired: z.boolean(),
+    }),
+  ),
+})
+
+export const inviteCreatedReply = z.strictObject({ id: z.uuid(), expiresAt: iso })
+export const roleChangedReply = z.strictObject({ userId: z.uuid(), role: membershipRole })
+
+export const killScope = z.enum(['brand', 'channel', 'agent'])
+
+export const killSwitch = z.strictObject({
+  id: z.uuid(),
+  scope: killScope,
+  target: z.string().nullable(),
+  active: z.boolean(),
+  setBy: z.uuid(),
+  setAt: iso,
+})
+
+export const killSwitchReply = z.strictObject({ switches: z.array(killSwitch), shadowMode: z.boolean() })
+// `held`: how many waiting jobs the switch held; `created` is false when the same switch was already on.
+export const switchSetReply = z.strictObject({
+  switch: killSwitch,
+  held: z.number().int().nonnegative(),
+  created: z.boolean(),
+})
+export const switchReleasedReply = z.strictObject({
+  released: z.boolean(),
+  unheld: z.number().int().nonnegative(),
+})
+export const shadowModeReply = z.strictObject({ shadowMode: z.boolean() })
+
 // GET /overdue: per brand the caller may approve in, what is overdue and whether the pop-up is due.
 export const overdueAllReply = z.strictObject({
   brands: z.array(

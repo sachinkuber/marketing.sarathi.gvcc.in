@@ -38,6 +38,7 @@ describe('alerts', () => {
           }),
         ]}
         canAck
+        canSeeDeadLetters
         busyId={null}
         error={null}
         onAck={noop}
@@ -64,6 +65,7 @@ describe('alerts', () => {
           alert('e0000000-0000-4000-8000-000000000003', { acknowledgedAt: '2026-10-20T11:00:00.000Z' }),
         ]}
         canAck
+        canSeeDeadLetters
         busyId={null}
         error={null}
         onAck={noop}
@@ -76,6 +78,7 @@ describe('alerts', () => {
         brandId={brandId}
         alerts={[alert('e0000000-0000-4000-8000-000000000004')]}
         canAck={false}
+        canSeeDeadLetters={false}
         busyId={null}
         error={null}
         onAck={noop}
@@ -86,7 +89,15 @@ describe('alerts', () => {
 
   it('says what will appear when there are no alerts', () => {
     const html = renderToStaticMarkup(
-      <AlertList brandId={brandId} alerts={[]} canAck busyId={null} error={null} onAck={noop} />,
+      <AlertList
+        brandId={brandId}
+        alerts={[]}
+        canAck
+        canSeeDeadLetters
+        busyId={null}
+        error={null}
+        onAck={noop}
+      />,
     )
     expect(html).toContain('No open alerts')
     expect(html).toContain(

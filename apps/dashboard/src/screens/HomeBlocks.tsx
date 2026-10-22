@@ -15,8 +15,19 @@ export function hasProblems(problems: Home['problems']): boolean {
 
 // Home in the order the owner asked for (app-flow 4.1): results, progress, waiting for you, problems. A block
 // the role may not see comes back null from the core and is left out; problems show only when there are any.
-// In phase 1 the results are the agents' runs and cost, and the progress is where the jobs stand.
-export function HomeBlocks({ brandId, home, now }: { brandId: string; home: Home; now: number }) {
+// In phase 1 the results are the agents' runs and cost, and the progress is where the jobs stand. Dead letters
+// are linked only for the platform owner, the one person the core lets open them.
+export function HomeBlocks({
+  brandId,
+  home,
+  now,
+  canSeeDeadLetters,
+}: {
+  brandId: string
+  home: Home
+  now: number
+  canSeeDeadLetters: boolean
+}) {
   const { results, progress, waiting, problems } = home
   return (
     <>
@@ -126,9 +137,13 @@ export function HomeBlocks({ brandId, home, now }: { brandId: string; home: Home
                 <li>
                   <span className="dot danger" />
                   <b>{plural(problems.deadJobs, 'job is', 'jobs are')} in dead letters</b>
-                  <Link className="sp btn sm" href={`/b/${brandId}/agents/dead-letters`}>
-                    Open
-                  </Link>
+                  {canSeeDeadLetters ? (
+                    <Link className="sp btn sm" href={`/b/${brandId}/agents/dead-letters`}>
+                      Open
+                    </Link>
+                  ) : (
+                    <span className="sp muted small">The platform owner deals with these.</span>
+                  )}
                 </li>
               ) : null}
               {problems.openAlerts > 0 ? (

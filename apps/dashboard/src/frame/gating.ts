@@ -24,6 +24,12 @@ export function switcherBrands(
   return who.platformOwner ? brands : null
 }
 
+// Dead letters are the platform owner's: the core refuses everyone else (see_other_brands), so links to them
+// are shown to the owner only.
+export function canSeeDeadLetters(who: Pick<WhoAmI, 'platformOwner'>): boolean {
+  return who.platformOwner
+}
+
 // The pop-up is for the first brand whose pop-up is due.
 export function popupTarget(overdue: OverdueAll | null): OverdueBrand | null {
   return overdue?.brands.find((brand) => brand.popupDue) ?? null

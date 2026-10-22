@@ -1613,3 +1613,9 @@ a.inherit {
     grid-column: 1;
   }
 }
+
+/* ---------- screens (Task 13) ---------- */
+/* Wide tables scroll inside their panel on a phone instead of widening the page. */
+.scroll-x {
+  overflow-x: auto;
+}

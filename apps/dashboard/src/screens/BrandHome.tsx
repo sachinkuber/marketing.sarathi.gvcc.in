@@ -2,10 +2,13 @@
 import { api } from '../api/client'
 import { homeReply } from '../api/schemas'
 import { useLoad } from '../api/use-load'
+import { canSeeDeadLetters } from '../frame/gating'
 import { LoadError } from '../frame/LoadError'
+import { useShell } from '../frame/shell-context'
 import { HomeBlocks } from './HomeBlocks'
 
 export function BrandHome({ brandId }: { brandId: string }) {
+  const { session } = useShell()
   const loaded = useLoad(() => api(homeReply, 'GET', `/brands/${brandId}/home`), brandId)
   return (
     <main id="content" className="page">
@@ -19,7 +22,14 @@ export function BrandHome({ brandId }: { brandId: string }) {
       {loaded.state === 'error' ? (
         <LoadError what="the home figures" error={loaded.error} onRetry={loaded.retry} />
       ) : null}
-      {loaded.state === 'ready' ? <HomeBlocks brandId={brandId} home={loaded.data} now={Date.now()} /> : null}
+      {loaded.state === 'ready' ? (
+        <HomeBlocks
+          brandId={brandId}
+          home={loaded.data}
+          now={Date.now()}
+          canSeeDeadLetters={canSeeDeadLetters(session)}
+        />
+      ) : null}
     </main>
   )
 }

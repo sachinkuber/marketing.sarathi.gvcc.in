@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { HomeBlocks } from '../src/screens/HomeBlocks'
+import { HomeBlocks as Blocks } from '../src/screens/HomeBlocks'
 import { AllBrandsList } from '../src/screens/AllBrands'
 import { formatMicros } from '../src/screens/format'
 
@@ -17,6 +17,11 @@ const full = {
   waiting: { awaitingApproval: 3, oldestWaitingSince: '2026-10-18T12:00:00.000Z' },
   problems: { deadJobs: 1, openAlerts: 2, reviewCalls: 0 },
 }
+
+// The owner's view; the dead-letter link for other roles is in dead-letters.test.tsx.
+const HomeBlocks = (props: Omit<Parameters<typeof Blocks>[0], 'canSeeDeadLetters'>) => (
+  <Blocks {...props} canSeeDeadLetters />
+)
 
 const headings = (html: string) => [...html.matchAll(/<h2[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])
 

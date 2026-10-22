@@ -8,6 +8,7 @@ import { alert as alertSchema, alertsReply, brandsReply } from '../api/schemas'
 import { roleIn } from '../api/session'
 import { useLoad } from '../api/use-load'
 import { Empty } from '../frame/Empty'
+import { canSeeDeadLetters } from '../frame/gating'
 import { LoadError } from '../frame/LoadError'
 import { useShell } from '../frame/shell-context'
 import { formatTime, words } from './format'
@@ -53,6 +54,8 @@ export function AlertList(props: {
   brandId: string | null
   alerts: Alert[]
   canAck: boolean
+  // Dead letters open for the platform owner only (the core refuses anyone else); nobody else gets the link.
+  canSeeDeadLetters: boolean
   busyId: string | null
   error: string | null
   onAck: (id: string) => void
@@ -60,6 +63,8 @@ export function AlertList(props: {
   const open = props.alerts.filter((a) => !a.acknowledgedAt && !a.resolvedAt)
   const closed = props.alerts.filter((a) => a.acknowledgedAt || a.resolvedAt)
   const brandId = props.brandId
+  const reachable = (target: Target | undefined) =>
+    target !== undefined && (target !== 'dead' || props.canSeeDeadLetters)
   return (
     <>
       <section className="sec" aria-labelledby="h-open">
@@ -68,7 +73,7 @@ export function AlertList(props: {
           <p>{open.length}</p>
           {brandId ? (
             <span className="more row">
-              <Link href={TARGETS.dead.path(brandId)}>Dead letters</Link>
+              {props.canSeeDeadLetters ? <Link href={TARGETS.dead.path(brandId)}>Dead letters</Link> : null}
               <Link href={TARGETS.audit.path(brandId)}>Audit log</Link>
             </span>
           ) : null}
@@ -90,7 +95,7 @@ export function AlertList(props: {
             <ul className="list">
               {open.map((a) => {
                 const kind = KINDS[a.kind]
-                const target = brandId && kind?.target ? TARGETS[kind.target] : null
+                const target = brandId && kind?.target && reachable(kind.target) ? TARGETS[kind.target] : null
                 return (
                   <li key={a.id} className="wrap-row">
                     <span className={`tag ${severityTone(a.severity)}`}>{`Severity ${a.severity}`}</span>
@@ -205,6 +210,7 @@ export function BrandAlertsScreen({ brandId }: { brandId: string }) {
           brandId={brandId}
           alerts={view.alerts}
           canAck={canAck}
+          canSeeDeadLetters={canSeeDeadLetters(session)}
           busyId={view.busyId}
           error={view.error}
           onAck={(id) => void view.ack(id)}
@@ -244,6 +250,7 @@ export function AllAlertsScreen() {
             brandId={null}
             alerts={view.alerts}
             canAck
+            canSeeDeadLetters={canSeeDeadLetters(session)}
             busyId={view.busyId}
             error={view.error}
             onAck={(id) => void view.ack(id)}

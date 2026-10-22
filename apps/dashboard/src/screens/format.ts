@@ -21,6 +21,12 @@ export function formatMicros(micros: string, currency: keyof typeof CURRENCY): s
   return `${symbol}${group(whole, indian)}.${padded.slice(-6)}`
 }
 
+// Both currencies, each from its own millionths as the core stored them: the rupee figure is never worked out
+// from the dollar one here, so the two cannot drift apart by rounding.
+export function formatMoney(money: { usdMicros: string; inrMicros: string }): string {
+  return `${formatMicros(money.usdMicros, 'USD')} · ${formatMicros(money.inrMicros, 'INR')}`
+}
+
 // How long something has waited: hours up to two days, then days.
 export function waitedFor(since: string, now: number): string {
   const hours = Math.max(0, Math.floor((now - Date.parse(since)) / 3_600_000))
