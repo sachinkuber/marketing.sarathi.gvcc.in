@@ -75,7 +75,7 @@ describe('changing a role and removing a person (users routes, part 2)', () => {
     const target = people.get('approver')!
     const reply = await patch('admin', target.id, { role: 'viewer', code: code('admin') })
     expect(reply.status).toBe(200)
-    expect(reply.json).toEqual({ userId: target.id, role: 'viewer' })
+    expect(reply.json).toEqual({ userId: target.id, role: 'viewer', changed: true })
     expect(await roleOf(target.id)).toBe('viewer')
     const entry = audit.entries.filter((e) => e.action === 'users.role_changed').at(-1)!
     expect(entry).toMatchObject({
@@ -270,6 +270,8 @@ describe('changing a role and removing a person (users routes, part 2)', () => {
     const before = audit.entries.length
     const reply = await patch('admin', target.id, { role: 'approver', code: code('admin') })
     expect(reply.status).toBe(200)
+    // The reply says nothing changed, so the screen does not report a change.
+    expect(reply.json).toEqual({ userId: target.id, role: 'approver', changed: false })
     expect(audit.entries.filter((e) => e.action === 'users.role_changed').length).toBe(
       audit.entries.slice(0, before).filter((e) => e.action === 'users.role_changed').length,
     )

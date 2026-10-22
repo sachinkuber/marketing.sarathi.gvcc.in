@@ -133,13 +133,32 @@ describe('the dead-letters screen, driven', () => {
     expect(dom.button('Requeue').disabled).toBe(false)
   })
 
-  it('says why a refused action failed', async () => {
+  it('says why a refused action failed, and claims no reload when the reload failed', async () => {
     dom.replies.push(
       { status: 200, body: [job(1)] },
       { status: 409, body: { error: { code: 'job_not_dead', message: 'x' } } },
+      failure,
     )
     await dom.mount(<DeadLettersScreen brandId={brandId} />, sessionAs('owner'))
     await dom.click('Requeue')
-    expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain('no longer in dead letters')
+    const said = dom.host.querySelector('[role="alert"]')?.textContent ?? ''
+    expect(said).toContain('no longer in dead letters')
+    expect(said).not.toContain('has been reloaded')
+    expect(said).toContain('reload the page')
+  })
+
+  it('reloads the list when the job is gone (404) and says so', async () => {
+    dom.replies.push(
+      { status: 200, body: [job(1), job(2)] },
+      { status: 404, body: { error: { code: 'job_not_found', message: 'x' } } },
+      { status: 200, body: [job(2)] },
+    )
+    await dom.mount(<DeadLettersScreen brandId={brandId} />, sessionAs('owner'))
+    await dom.click('Requeue')
+    expect(dom.calls.at(-1)).toMatchObject({ url: `/api/v1/brands/${brandId}/jobs/dead`, method: 'GET' })
+    expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain(
+      'This job is no longer in dead letters. The list has been reloaded.',
+    )
+    expect(dom.buttons('Requeue')).toHaveLength(1)
   })
 })

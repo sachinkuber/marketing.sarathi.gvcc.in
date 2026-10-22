@@ -84,12 +84,15 @@ describe('the users screen, driven', () => {
     await dom.click('Change role', 1)
     expect(dom.field('act-code')).not.toBeNull()
     expect(dom.button('Change role', 2).disabled).toBe(true)
+    // The picker starts at Anil's own role: with a full code, the same role still cannot be sent.
+    dom.type('act-code', '123456')
+    expect(dom.button('Change role', 2).disabled).toBe(true)
     dom.type('act-role', 'viewer')
     dom.type('act-code', '12345')
     expect(dom.button('Change role', 2).disabled).toBe(true)
     dom.type('act-code', '123456')
     expect(dom.button('Change role', 2).disabled).toBe(false)
-    dom.replies.push({ status: 200, body: { userId: anil, role: 'viewer' } }, failure)
+    dom.replies.push({ status: 200, body: { userId: anil, role: 'viewer', changed: true } }, failure)
     await dom.submit('Change role', 2)
     expect(dom.writes()).toEqual([
       {
@@ -118,7 +121,24 @@ describe('the users screen, driven', () => {
       body: { code: '000000' },
     })
     expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain('The code is not right')
-    expect(dom.field('act-code')).not.toBeNull()
+    // The form stays open with the refused code cleared, so a retry needs a fresh code.
+    expect((dom.field('act-code') as HTMLInputElement).value).toBe('')
+    expect(dom.button('Remove', 2).disabled).toBe(true)
+  })
+
+  it('says nothing changed when the core reports the role was already set', async () => {
+    dom.replies.push({ status: 200, body: users })
+    await dom.mount(<UsersScreen brandId={brandId} />, sessionAs('brand_admin'))
+    await dom.click('Change role', 1)
+    dom.type('act-role', 'viewer')
+    dom.type('act-code', '123456')
+    dom.replies.push(
+      { status: 200, body: { userId: anil, role: 'viewer', changed: false } },
+      { status: 200, body: users },
+    )
+    await dom.submit('Change role', 2)
+    expect(dom.text()).toContain('Nothing changed: Anil is already a viewer.')
+    expect(dom.text()).not.toContain('Anil is now a viewer.')
   })
 
   it('lets the platform owner reset a second factor with the owner’s code', async () => {

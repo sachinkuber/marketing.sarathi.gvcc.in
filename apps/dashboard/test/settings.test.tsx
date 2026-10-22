@@ -27,4 +27,22 @@ describe('brand settings', () => {
     }
     expect(html).not.toMatch(/\sstyle=/)
   })
+
+  it('colours the status tag by the status', () => {
+    const tag = (status: string) =>
+      /<span class="tag (\w+)">/.exec(
+        renderToStaticMarkup(
+          <BrandSettingsView
+            brandId={brandId}
+            brand={{ id: brandId, name: 'A', slug: 'a', status, shadowMode: false, role: 'brand_admin' }}
+          />,
+        ),
+      )?.[1]
+    expect(tag('active')).toBe('ok')
+    expect(tag('onboarding')).toBe('info')
+    expect(tag('paused')).toBe('warn')
+    expect(tag('offboarding')).toBe('warn')
+    expect(tag('closed')).toBe('danger')
+    expect(tag('something_new')).toBe('plain')
+  })
 })

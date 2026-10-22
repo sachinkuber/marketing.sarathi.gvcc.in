@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Frame } from '../src/frame/Frame'
 import { SafetyScreen } from '../src/screens/Safety'
 import { Dom, ME, T, brandId, failure, sessionAs } from './dom-support'
+
+// The frame reads the router; outside a Next.js app there is none.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {} }),
+  usePathname: () => '/b/x/settings/safety',
+}))
 
 const brandSwitch = {
   id: 'a1000000-0000-4000-8000-000000000001',
@@ -127,6 +134,29 @@ describe('the safety screen, driven', () => {
     await dom.submit('Release', 1)
     expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain('The code is not right')
     expect(dom.calls).toHaveLength(3)
+    // The refused code is cleared: a retry takes a fresh one.
+    expect((dom.field('rel-code') as HTMLInputElement).value).toBe('')
+    expect(dom.button('Release', 1).disabled).toBe(true)
+  })
+
+  it('clears the stop form’s code after a refused set too', async () => {
+    load([], 0)
+    await dom.mount(<SafetyScreen brandId={brandId} />, sessionAs('brand_admin'))
+    dom.type('ks-code', '000000')
+    dom.replies.push({ status: 403, body: { error: { code: 'second_factor_invalid', message: 'x' } } })
+    await dom.submit('Stop')
+    expect(dom.host.querySelector('[role="alert"]')?.textContent).toContain('The code is not right')
+    expect((dom.field('ks-code') as HTMLInputElement).value).toBe('')
+  })
+
+  it('locks the shadow toggle once a stored change could not be read back', async () => {
+    load([], 0)
+    await dom.mount(<SafetyScreen brandId={brandId} />, sessionAs('owner'))
+    dom.type('ks-code', '123456')
+    dom.replies.push({ status: 200, body: { switch: brandSwitch, held: 0, created: true } }, failure, failure)
+    await dom.submit('Stop')
+    expect(dom.text()).toContain('reload the page')
+    expect(dom.button('Turn shadow mode on').disabled).toBe(true)
   })
 
   it('shows the shadow toggle to the platform owner only', async () => {
@@ -147,6 +177,52 @@ describe('the safety screen, driven', () => {
     ])
     expect(dom.text()).toContain('Shadow mode is on')
     expect(dom.buttons('Turn shadow mode off')).toHaveLength(1)
+  })
+
+  it('updates the brand’s banner at once after a stop, a release and a shadow toggle', async () => {
+    const status = (active: boolean, shadowMode = false) => ({
+      status: 200,
+      body: {
+        killSwitch: { active, scopes: active ? [{ scope: 'brand', target: null }] : [] },
+        shadowMode,
+        canApprove: true,
+        canStop: true,
+      },
+    })
+    const brand = {
+      status: 200,
+      body: { id: brandId, name: 'Aztek', slug: 'aztek', status: 'active', shadowMode: false, role: 'x' },
+    }
+    // The frame first (brand, status, the owner's brand list), then the screen.
+    dom.replies.push(brand, status(false), { status: 200, body: { brands: [] } })
+    load([], 0)
+    await dom.mount(
+      <Frame brandId={brandId}>
+        <SafetyScreen brandId={brandId} />
+      </Frame>,
+      sessionAs('owner'),
+    )
+    expect(dom.text()).not.toContain('Kill switch is on')
+
+    dom.type('ks-code', '123456')
+    dom.replies.push({ status: 200, body: { switch: brandSwitch, held: 0, created: true } })
+    load([brandSwitch], 0)
+    dom.replies.push(status(true))
+    await dom.submit('Stop')
+    expect(dom.calls.at(-1)?.url).toBe(`/api/v1/brands/${brandId}/status`)
+    expect(dom.text()).toContain('Kill switch is on for Aztek')
+
+    await dom.click('Release')
+    dom.type('rel-code', '654321')
+    dom.replies.push({ status: 200, body: { released: true, unheld: 0 } })
+    load([], 0)
+    dom.replies.push(status(false))
+    await dom.submit('Release', 1)
+    expect(dom.text()).not.toContain('Kill switch is on')
+
+    dom.replies.push({ status: 200, body: { shadowMode: true } }, status(false, true))
+    await dom.click('Turn shadow mode on')
+    expect(dom.text()).toContain('Shadow mode is on.')
   })
 
   it('tells someone who cannot use the kill switch so, and asks the core nothing', async () => {

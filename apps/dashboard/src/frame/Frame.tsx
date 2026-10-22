@@ -1,12 +1,13 @@
 'use client'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { z } from 'zod'
 import { signOut } from '../api/auth'
 import { api } from '../api/client'
 import { brandReply, brandsReply, statusReply } from '../api/schemas'
 import { roleIn } from '../api/session'
 import { useLoad } from '../api/use-load'
+import { FrameContext } from './frame-context'
 import { switcherBrands } from './gating'
 import { LoadError } from './LoadError'
 import { SideMenu } from './SideMenu'
@@ -31,6 +32,17 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
   const { session, overdue } = useShell()
   const loaded = useLoad(() => frameData(brandId, session.platformOwner), brandId)
   const [status, setStatus] = useState<z.infer<typeof statusReply> | null>(null)
+
+  // A screen that changed the kill switch or shadow mode asks for this at once. A failed read changes nothing:
+  // the poll below tries again.
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await api(statusReply, 'GET', `/brands/${brandId}/status`))
+    } catch {
+      // Left to the next poll.
+    }
+  }, [brandId])
+  const frameValue = useMemo(() => ({ refreshStatus }), [refreshStatus])
 
   // The banner follows the kill switch and shadow mode while a person stays on a screen.
   useEffect(() => {
@@ -82,7 +94,7 @@ export function Frame({ brandId, children }: { brandId: string; children: React.
           }
         />
         <StatusBanner brandId={brandId} brandName={brand.name} status={live} overdueCount={overdueCount} />
-        {children}
+        <FrameContext value={frameValue}>{children}</FrameContext>
       </div>
     </div>
   )

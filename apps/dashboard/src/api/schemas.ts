@@ -403,7 +403,12 @@ export const usersReply = z.strictObject({
 })
 
 export const inviteCreatedReply = z.strictObject({ id: z.uuid(), expiresAt: iso })
-export const roleChangedReply = z.strictObject({ userId: z.uuid(), role: membershipRole })
+// `changed` is false when the person already had that role.
+export const roleChangedReply = z.strictObject({
+  userId: z.uuid(),
+  role: membershipRole,
+  changed: z.boolean(),
+})
 
 export const killScope = z.enum(['brand', 'channel', 'agent'])
 

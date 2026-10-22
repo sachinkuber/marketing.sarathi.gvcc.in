@@ -9,7 +9,7 @@ import { Empty } from '../frame/Empty'
 import { canSeeDeadLetters } from '../frame/gating'
 import { LoadError } from '../frame/LoadError'
 import { useShell } from '../frame/shell-context'
-import { afterWrite, readAfterWrite } from './after-write'
+import { afterWrite, readAfterWrite, RELOAD_HINT } from './after-write'
 import { formatTime, words } from './format'
 
 export type DeadJob = z.infer<typeof deadJobsReply>[number]
@@ -78,11 +78,17 @@ export function DeadLetterList(props: {
   )
 }
 
-function failure(error: unknown): string {
+// The list no longer matches the core: the job was requeued, cancelled or finished elsewhere.
+const gone = (error: unknown): boolean =>
+  error instanceof ApiError && (error.status === 409 || error.status === 404)
+
+// `reloaded`: whether the list was read again after a `gone` refusal; only then is it said to be fresh.
+function failure(error: unknown, reloaded: boolean): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return 'The platform could not be reached. Try again.'
-    if (error.code === 'job_not_dead' || error.code === 'job_not_found')
-      return 'This job is no longer in dead letters. The list has been reloaded.'
+    if (gone(error)) {
+      return `This job is no longer in dead letters. ${reloaded ? 'The list has been reloaded.' : RELOAD_HINT}`
+    }
     if (error.status === 403) return 'Only the platform owner can act on dead letters.'
   }
   return 'That did not work. Try again.'
@@ -116,11 +122,13 @@ export function DeadLettersScreen({ brandId }: { brandId: string }) {
     try {
       await api(noContent, 'POST', `/brands/${brandId}/jobs/${job.jobId}/${kind}`, {})
     } catch (e) {
-      setError(failure(e))
-      if (e instanceof ApiError && e.status === 409) {
+      let reloaded = false
+      if (gone(e)) {
         const fresh = await readAfterWrite(read)
         if (fresh) setJobs(fresh)
+        reloaded = fresh !== null
       }
+      setError(failure(e, reloaded))
       setBusy(false)
       return
     }

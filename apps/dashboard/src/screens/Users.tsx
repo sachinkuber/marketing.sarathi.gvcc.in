@@ -208,7 +208,9 @@ export function UsersScreen({ brandId }: { brandId: string }) {
           role: newRole,
           code,
         })
-        done = `${m.name} is now ${ROLE_PHRASE[changed.role]}.`
+        done = changed.changed
+          ? `${m.name} is now ${ROLE_PHRASE[changed.role]}.`
+          : `Nothing changed: ${m.name} is already ${ROLE_PHRASE[changed.role]}.`
       } else if (kind === 'remove') {
         await api(noContent, 'DELETE', `/brands/${brandId}/users/${m.userId}`, { code })
         done = `${m.name} was removed from this brand.`
@@ -357,6 +359,7 @@ export function UsersScreen({ brandId }: { brandId: string }) {
                   submitLabel={text.label}
                   danger={action.kind !== 'role'}
                   busy={busy}
+                  ready={action.kind !== 'role' || newRole !== action.member.role}
                   error={error}
                   onSubmit={(code) => void run(code)}
                   onCancel={() => {

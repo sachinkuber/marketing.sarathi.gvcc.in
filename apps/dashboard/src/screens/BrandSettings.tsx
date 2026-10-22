@@ -31,6 +31,15 @@ const AREAS = [
   { path: 'audit', label: 'Audit log', about: 'Who did what, and the chain check' },
 ]
 
+// The tag colour for each brand status (app.brand_status); a status not listed here is shown plain.
+const STATUS_TONE: Record<string, string> = {
+  active: 'ok',
+  onboarding: 'info',
+  paused: 'warn',
+  offboarding: 'warn',
+  closed: 'danger',
+}
+
 export function BrandSettingsView({ brandId, brand }: { brandId: string; brand: Brand }) {
   return (
     <>
@@ -42,7 +51,7 @@ export function BrandSettingsView({ brandId, brand }: { brandId: string; brand: 
           <dd>{brand.slug}</dd>
           <dt>Status</dt>
           <dd>
-            <span className="tag ok">{words(brand.status)}</span>
+            <span className={`tag ${STATUS_TONE[brand.status] ?? 'plain'}`}>{words(brand.status)}</span>
           </dd>
         </dl>
       </div>

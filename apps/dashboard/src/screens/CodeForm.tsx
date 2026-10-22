@@ -16,7 +16,8 @@ export function codeFailure(error: unknown): string | null {
 
 // A change that asks for the person's own fresh 6-digit code first (app-flow 5.3 and 5.11): the code field is
 // part of the form from the start, and the submit button stays disabled until six digits are in it. The code is
-// held only here and goes in the request body; a new form (a new `key`) starts empty.
+// held only here and goes in the request body. It is cleared as soon as it is sent: a refused code must not be
+// sent again (each wrong one counts towards the lockout), and a used one is spent.
 export function CodeForm(props: {
   id: string
   title: string
@@ -24,13 +25,15 @@ export function CodeForm(props: {
   submitLabel: string
   danger?: boolean
   busy: boolean
+  // False while the rest of the form would send nothing worth a code (a role change to the same role).
+  ready?: boolean
   error: string | null
   children?: React.ReactNode
   onSubmit: (code: string) => void
   onCancel?: () => void
 }) {
   const [code, setCode] = useState('')
-  const ready = CODE.test(code)
+  const ready = CODE.test(code) && props.ready !== false
   return (
     <form
       className="panel pad stack"
@@ -38,7 +41,9 @@ export function CodeForm(props: {
       aria-labelledby={`${props.id}-title`}
       onSubmit={(event) => {
         event.preventDefault()
-        if (ready && !props.busy) props.onSubmit(code)
+        if (!ready || props.busy) return
+        props.onSubmit(code)
+        setCode('')
       }}
     >
       <h3 id={`${props.id}-title`} className="subhead">

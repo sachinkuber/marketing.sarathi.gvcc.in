@@ -114,7 +114,8 @@ export function registerUserRoutes(table: RouteTable, deps: UserRouteDeps): void
           targetId: params.userId,
           role: body.role,
         })
-        res.json({ userId: result.userId, role: result.role })
+        // `changed` is false when the person already had that role: nothing was written or audited.
+        res.json({ userId: result.userId, role: result.role, changed: result.changed })
       },
     ],
   })

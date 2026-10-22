@@ -13,6 +13,7 @@ import {
 import { roleIn } from '../api/session'
 import { useLoad } from '../api/use-load'
 import { Empty } from '../frame/Empty'
+import { useFrame } from '../frame/frame-context'
 import { LoadError } from '../frame/LoadError'
 import { useShell } from '../frame/shell-context'
 import { afterWrite, readAfterWrite } from './after-write'
@@ -77,6 +78,7 @@ export function HeldNow({ held }: { held: number }) {
 
 export function SafetyScreen({ brandId }: { brandId: string }) {
   const { session } = useShell()
+  const { refreshStatus } = useFrame()
   const role = roleIn(session, brandId)
   const mayUse = role === 'owner' || role === 'brand_admin'
   const owner = session.platformOwner
@@ -129,6 +131,8 @@ export function SafetyScreen({ brandId }: { brandId: string }) {
     setOutdated(!ok)
     setNotice(afterWrite(done, ok))
     setRound((n) => n + 1)
+    // The red banner on every screen of the brand follows at once, not at the next poll.
+    await refreshStatus()
   }
 
   const stop = async (code: string) => {
@@ -188,6 +192,7 @@ export function SafetyScreen({ brandId }: { brandId: string }) {
         shadow_mode: next,
       })
       setShadow(reply.shadowMode)
+      await refreshStatus()
     } catch (e) {
       setShadowError(
         e instanceof ApiError && e.status === 403
@@ -390,7 +395,7 @@ export function SafetyScreen({ brandId }: { brandId: string }) {
               <button
                 className="btn sm"
                 type="button"
-                disabled={busy}
+                disabled={busy || outdated}
                 onClick={() => void toggleShadow(!shadow)}
               >
                 {shadow ? 'Turn shadow mode off' : 'Turn shadow mode on'}

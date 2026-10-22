@@ -223,7 +223,11 @@ describe('the dashboard schemas accept the core’s replies', () => {
         body: { role: 'viewer', code: totp(admin.secret) },
       })
       expect(changed.status).toBe(200)
-      expect(roleChangedReply.parse(changed.json)).toEqual({ userId: targetId, role: 'viewer' })
+      expect(roleChangedReply.parse(changed.json)).toEqual({
+        userId: targetId,
+        role: 'viewer',
+        changed: true,
+      })
       empty(
         await owner.client.request('POST', `/api/v1/users/${targetId}/second-factor/reset`, {
           body: { code: totp(owner.secret) },
