@@ -27,7 +27,7 @@ function failure(error: unknown): string {
 }
 
 export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: string }) {
-  const { session } = useShell()
+  const { session, reload: reloadOverdue } = useShell()
   const role = roleIn(session, brandId)
   const canDecide = role === 'owner' || role === 'brand_admin' || role === 'approver'
   const loaded = useLoad(() => loadItem(brandId, itemId), `${brandId}:${itemId}`)
@@ -60,9 +60,15 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
     setError(null)
     try {
       const outcome = await work()
-      if (outcome.kind === 'invalid') setError(outcome.message)
-      else if (outcome.kind === 'reloaded') show(outcome.item, outcome.notice)
-      else show(await reloadAfterWrite(brandId, itemId), done)
+      if (outcome.kind === 'invalid') {
+        setError(outcome.message)
+      } else {
+        // A decision closes the item's approval request (and a refused one means somebody else did), so the
+        // overdue banner and pop-up are read again now, not at the next minute's poll.
+        if (outcome.kind !== 'commented') void reloadOverdue()
+        if (outcome.kind === 'reloaded') show(outcome.item, outcome.notice)
+        else show(await reloadAfterWrite(brandId, itemId), done)
+      }
     } catch (e) {
       setError(failure(e))
     } finally {
@@ -106,6 +112,8 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
             setError(null)
             saveEdit(brandId, itemId, shown.payload, values).then(
               ({ number, item: next }) => {
+                // The old version's request is closed by the new one.
+                void reloadOverdue()
                 show(
                   next,
                   `Saved as version ${number}. It goes through the checks before it can be approved.`,

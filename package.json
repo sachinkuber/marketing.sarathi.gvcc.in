@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/dashboard/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/dashboard/tsconfig.json && tsc --noEmit -p apps/dashboard/e2e/tsconfig.json",
     "check:pins": "node tools/check-pins/check-pins.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -21,7 +21,8 @@
     "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml .",
     "db:up": "docker compose -f infra/dev/compose.yaml up -d --wait",
     "db:down": "docker compose -f infra/dev/compose.yaml down",
-    "verify": "npm run check:pins && npm run lint && npm run format:check && npm run typecheck && npm test && npm run secrets"
+    "verify": "npm run check:pins && npm run lint && npm run format:check && npm run typecheck && npm test && npm run secrets",
+    "e2e": "npm run e2e --workspace @mkt/dashboard"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -187,13 +187,13 @@ export async function createStack(
   }
 }
 
-export async function addBrand(stack: Stack, slug: string): Promise<string> {
+export async function addBrand(stack: Pick<Stack, 'db'>, slug: string): Promise<string> {
   const result = await stack.db.admin.query('select app.create_brand($1, $1) as id', [slug])
   return result.rows[0].id as string
 }
 
 export async function addUser(
-  stack: Stack,
+  stack: Pick<Stack, 'core' | 'db'>,
   options: { email: string; password: string; role?: Role; brandId?: string; platformOwner?: boolean },
 ): Promise<string> {
   const { id } = await createUserWithPassword(stack.core.auth, {

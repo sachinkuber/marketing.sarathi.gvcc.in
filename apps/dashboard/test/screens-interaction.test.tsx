@@ -76,11 +76,14 @@ let calls: Call[]
 let replies: Array<{ status: number; body: unknown }>
 let root: Root | null
 let host: HTMLElement
+// How often the shell was asked to read the overdue list again (the banner and the pop-up follow it).
+let shellReload: ReturnType<typeof vi.fn<() => Promise<void>>>
 
 beforeEach(() => {
   calls = []
   replies = []
   root = null
+  shellReload = vi.fn(async () => {})
   setCsrfToken('tok-1')
   host = document.createElement('div')
   document.body.append(host)
@@ -109,9 +112,7 @@ async function settle() {
 async function mount(ui: React.ReactNode) {
   root = createRoot(host)
   act(() =>
-    root!.render(
-      <ShellContext value={{ session, overdue: null, reload: async () => {} }}>{ui}</ShellContext>,
-    ),
+    root!.render(<ShellContext value={{ session, overdue: null, reload: shellReload }}>{ui}</ShellContext>),
   )
   await settle()
 }
@@ -164,6 +165,40 @@ describe('the item screen, driven', () => {
     expect(host.textContent).toContain('9f8e7d6c5b4a')
     expect(host.textContent).toContain('Second text')
     expect(button('Approve').disabled).toBe(false)
+  })
+
+  it('asks the shell to read the overdue list again after a decision, so the banner follows at once', async () => {
+    replies.push(
+      { status: 200, body: itemV1 },
+      { status: 201, body: { approvalId: 'x' } },
+      { status: 200, body: itemV1 },
+    )
+    await mount(<ItemScreen brandId={brandId} itemId={itemId} />)
+    expect(shellReload).not.toHaveBeenCalled()
+    await click('Approve')
+    expect(approves()).toHaveLength(1)
+    expect(shellReload).toHaveBeenCalledTimes(1)
+  })
+
+  it('does the same after a rejection, and after a decision that was refused as stale', async () => {
+    replies.push(
+      { status: 200, body: itemV1 },
+      { status: 201, body: { approvalId: 'x' } },
+      { status: 200, body: itemV1 },
+    )
+    await mount(<ItemScreen brandId={brandId} itemId={itemId} />)
+    await click('Reject')
+    type('reject-reason', 'Not now.')
+    await submit('Reject version 1')
+    expect(shellReload).toHaveBeenCalledTimes(1)
+
+    shellReload.mockClear()
+    replies.push(
+      { status: 409, body: { error: { code: 'stale_hash', message: 'changed' } } },
+      { status: 200, body: itemV2 },
+    )
+    await click('Approve')
+    expect(shellReload).toHaveBeenCalledTimes(1)
   })
 
   it('reports a successful approve as done even when the reload after it fails', async () => {

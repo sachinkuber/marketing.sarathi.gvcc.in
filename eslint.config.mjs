@@ -86,5 +86,22 @@ export default defineConfig(
       ],
     },
   },
+  {
+    // The browser checks start the whole stack in one Node process (like the core's tests do), so unlike the
+    // dashboard's own code they may import the workspace packages. The database clients stay banned.
+    files: ['apps/dashboard/e2e/**/*.ts'],
+    languageOptions: { globals: { ...globals.node } },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['pg', 'kysely', 'pg-boss'].map((name) => ({
+            name,
+            message: 'Business data is reached only through @mkt/db.',
+          })),
+        },
+      ],
+    },
+  },
   prettier,
 )
