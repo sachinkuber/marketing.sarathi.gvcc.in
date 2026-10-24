@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "auth:schema": "node src/auth/print-schema.ts",
+    "bootstrap": "node src/bootstrap.ts",
     "start": "node src/main.ts"
   },
   "dependencies": {
