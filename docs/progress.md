@@ -376,7 +376,7 @@ Built 2026-10-19 to 2026-10-25. Branch `m6-proof`, base `3ce6c7c` (main). Plan: 
 | Package | State | Evidence |
 |---|---|---|
 | 13 Trivial agent | Done, real provider not checked | The summary agent (`agents/summary/`, version 1), the worker's summary and placeholder-check handlers, the core's two result handlers, multi-job run finalisation. Every automated test uses the stand-in model; the real Anthropic adapter (milestone 4) is the production path and its live check is skipped without `ANTHROPIC_API_KEY` (owner item A3) |
-| 14 n8n and the signed trigger | Done, not activated | The `trigger` access kind and `POST /triggers/daily`; the daily duties (audit export, audit verify, exchange rate, nonce clean-up) once per UTC date; the heartbeat watch; the heartbeat and canary workflows are exported inactive under `tools/n8n` and checked by `tools/n8n/workflows.test.mjs`. Activation against a deployed core is milestone 7. The SMTP mail adapter (Nodemailer 9.1.1) is built here and active only when `SMTP_URL` and `MAIL_FROM` are set |
+| 14 n8n and the signed trigger | Done, not activated | The `trigger` access kind and `POST /triggers/daily`; the daily duties (audit export, audit verify, exchange rate, nonce clean-up) once per UTC date; the heartbeat watch; the heartbeat and canary workflows are exported inactive under `n8n/` and checked by `tools/n8n/workflows.test.mjs`. Activation against a deployed core is milestone 7. The SMTP mail adapter (Nodemailer 9.1.1) is built here and active only when `SMTP_URL` and `MAIL_FROM` are set |
 | 15 Dashboard | Done | `apps/dashboard` (Next.js, a client of the core API only): sign-in and enrolment, the frame with banner, kill-switch and shadow bars and the overdue pop-up, Home, inbox, item review, approval settings, alerts, agents and runs, dead letters, audit, users, safety. The core gained read routes for home, agents, runs, model-call review, audit and status |
 
 | Acceptance test | State | Evidence |
@@ -404,7 +404,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   7. (Plan 7) The summary request asks for structured output (`json_schema`), 1024 tokens, no tools. A reply that did not stop at `end_turn` is an error and is never stored. Whether the pinned SDK and `claude-opus-5-5` accept the request is decided only by the live check (A3).
   8. (Plan 8) Daily duties run in the core on n8n's signed call; the model-call sweep, the approvals tick and notification delivery stay on the worker's 5-minute timer. This replaces milestone 4 decision 8's "the n8n schedule replaces the timer".
   9. (Plan 9) `TRIGGER_SECRET` is at least 32 characters and different from the other three secrets (the config test enforces it). Refused trigger calls are logged by reason and not audited; accepted calls are audited as `trigger.received`.
-  10. (Plan 10) The exchange rate is the ECB's euro reference rates, USD to INR as a cross rate, source `ecb-cross`, behind an `FxSource` port. The official INR reference has no stable machine-readable feed. Owner to confirm (database schema open point 4).
+  10. (Plan 10) The exchange rate is the ECB's euro reference rates, USD to INR as a cross rate, source `ecb`, behind an `FxSource` port. The official INR reference has no stable machine-readable feed. Owner to confirm (database schema open point 4).
   11. (Plan 11) `npm run bootstrap --workspace @mkt/core -- --owner-email <address>` creates the brands and the platform owner; the temporary password is printed once. It connects with `BOOTSTRAP_DATABASE_URL`, a role that may write the tenancy tables, not the application's own URL (see `docs/dev-environment.md`).
   12. (Plan 12) Enrolment shows the setup key and an `otpauth://` link, no QR image (no new run-time dependency).
   13. (Plan 13) Nodemailer stays at 9.1.1 with exactly one transport per process; its high advisory (a process-wide DNS cache) needs more than one. The move to 10.x is the owner's decision.
@@ -414,7 +414,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   17. (Migration 0018) The nonce is kept 11 minutes, not the spec's 10, so it outlasts the longest time a signed request stays acceptable. Cost: none (a longer retention only refuses more).
 - The first browser run found a real defect: approving, rejecting or editing an item left the overdue banner and pop-up on screen until the next minute's poll. The item screen now asks the shell to read the overdue list again after each of those (commit 20b68ba).
 - Deployment preconditions new in this milestone:
-  - Migration 0018 (trigger nonces, daily-duty log, the summary agent's definition row, `audit.search`, the approved-needs-an-approval guard for follow-up M-7), after 0014 to 0017.
+  - Migration 0018 (trigger nonces, daily-duty log, the summary agent's definition row, `audit.search`, the approved-needs-an-approval guard for follow-up M-7), after 0014 to 0017; then 0019 (notification back-off) and 0020 (owner brand list). All three must be applied before the core of this milestone starts.
   - New secrets and settings for the core: `TRIGGER_SECRET`, `OWNER_VIEW_DATABASE_URL` and `N8N_HEARTBEAT_EXPECTED`; optional `SMTP_URL` and `MAIL_FROM` (both or neither). `BOOTSTRAP_DATABASE_URL` is needed only by the operator when running the bootstrap command.
   - Before the first real model call: enter the model prices (`app.model_price`) and make sure a first exchange rate is recorded (the daily call fetches one, but not before it has run once).
   - The proxy must route `/api/` to the core and everything else to the dashboard, pass the three `X-Mkt-*` headers and the raw body unchanged on `/api/v1/triggers/` (the signature covers the raw bytes, the path as received and no query string).
@@ -437,6 +437,8 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   - Move Nodemailer to 10.x on the owner's approval (plan decision 13).
   - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
   - The remaining milestone 5 minors (listed under milestone 5 Findings) that this milestone did not absorb.
+  - `apps/worker` runner.ts checkpoints a schema-invalid `end_turn` reply before validating it, so a retry replays the same bad text; validate before saving the checkpoint.
+  - Dependencies added beyond the decisions' list, needing the owner's sign-off (not removed): `happy-dom` 20.14.5 (plan decision 3 names it, but not as an approved pin) and `@types/nodemailer` 8.0.2.
   - Test 41 (load and the canary measurement) and the activation of the n8n workflows: milestone 7.
 - Documents: the schema document `docs/database/2026-10-04-database-schema.md` is updated for migration 0018 (sections 7.1, 7.11, 8.3, 9.3, 11.1, 11.2 and 12). No pin changed, so spec section 3 is unchanged. The `.docx` copy of the schema document was not regenerated: `tools/build-docs` has no script for it, and the renderer `mmdc` is not installed (it needs a headless Chromium, which `tools/build-docs` does not install); the Markdown is canonical.
 
