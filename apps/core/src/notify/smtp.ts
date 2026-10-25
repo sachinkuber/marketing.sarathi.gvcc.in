@@ -42,8 +42,22 @@ export interface SmtpMailerOptions {
   makeTransport?: (url: string, timeouts: TransportTimeouts) => MailTransport
 }
 
-const defaultTransport = (url: string, timeouts: TransportTimeouts): MailTransport =>
-  nodemailer.createTransport(url, timeouts)
+// The timeouts go in the connection options. createTransport(url, defaults) would take them as message
+// defaults, and a url key in an options object is parsed and replaces them, so the URL is read here into
+// host, port, security and login and the timeouts are set beside them.
+export const defaultTransport = (url: string, timeouts: TransportTimeouts): MailTransport => {
+  const parsed = new URL(url)
+  const secure = parsed.protocol === 'smtps:'
+  return nodemailer.createTransport({
+    host: parsed.hostname,
+    port: parsed.port ? Number(parsed.port) : secure ? 465 : 587,
+    secure,
+    ...(parsed.username
+      ? { auth: { user: decodeURIComponent(parsed.username), pass: decodeURIComponent(parsed.password) } }
+      : {}),
+    ...timeouts,
+  })
+}
 
 // Sends through SMTP. Exactly one transport is made for the process, on the first send, and reused.
 export function smtpMailer(options: SmtpMailerOptions): Mailer {

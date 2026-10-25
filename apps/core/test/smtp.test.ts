@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { UnconfiguredMailer } from '../src/adapters.ts'
 import { loadConfig } from '../src/config.ts'
 import { errorName } from '../src/notify/ports.ts'
-import { MailSendFailed, mailerFromConfig, smtpMailer, type MailTransport } from '../src/notify/smtp.ts'
+import {
+  MailSendFailed,
+  defaultTransport,
+  mailerFromConfig,
+  smtpMailer,
+  type MailTransport,
+} from '../src/notify/smtp.ts'
 
 const URL_WITH_SECRET = 'smtp://mailuser:hunter2-secret@smtp.example.test:587'
 const FROM = 'Marketing Sarathi <noreply@example.test>'
@@ -221,5 +227,23 @@ describe('mail configuration', () => {
       message = (error as Error).message
     }
     expect(message).toBe('Invalid configuration: SMTP_URL')
+  })
+})
+
+describe('the default transport', () => {
+  it('holds the timeouts and the credentials as transport options, not as message defaults', () => {
+    const transport = defaultTransport(URL_WITH_SECRET, {
+      connectionTimeout: 1111,
+      greetingTimeout: 2222,
+      socketTimeout: 3333,
+    }) as unknown as { options: Record<string, unknown> }
+    expect(transport.options).toMatchObject({
+      host: 'smtp.example.test',
+      port: 587,
+      connectionTimeout: 1111,
+      greetingTimeout: 2222,
+      socketTimeout: 3333,
+      auth: { user: 'mailuser', pass: 'hunter2-secret' },
+    })
   })
 })
