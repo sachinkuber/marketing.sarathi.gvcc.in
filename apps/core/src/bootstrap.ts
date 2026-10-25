@@ -46,8 +46,18 @@ export async function bootstrap(options: BootstrapOptions): Promise<{ created: b
         [brand.name, brand.slug],
       )
     }
-    const existing = await pool.query('select 1 from auth."user" where email = $1', [email])
-    if (existing.rowCount) return { created: false }
+    // Done only when the user is also a platform owner; a user without owner rights is not the owner.
+    const existing = await pool.query<{ owner: boolean }>(
+      `select exists (select 1 from app.platform_owner o where o.user_id = u.id) as owner
+         from auth."user" u where u.email = $1`,
+      [email],
+    )
+    if (existing.rows[0]?.owner) return { created: false }
+    if (existing.rowCount) {
+      throw new Error(
+        'A user with this address exists without owner rights. Nothing was changed; remove the user or grant the rights by hand.',
+      )
+    }
 
     // The library hashes the password itself. Nothing here sends mail, signs a session or counts attempts,
     // so the secret is a throw-away and the mailer refuses.
@@ -134,13 +144,17 @@ export function parseArguments(
     } else if (arg.startsWith('--owner-email=')) {
       ownerEmail = arg.slice('--owner-email='.length)
     } else {
-      throw new Error(`Unknown argument ${arg}. Usage: --owner-email <address>`)
+      throw new Error('Unknown argument. Usage: --owner-email <address>')
     }
   }
   ownerEmail ||= env.OWNER_EMAIL
   if (!ownerEmail) throw new Error('Missing --owner-email <address> (or OWNER_EMAIL).')
   return { ownerEmail }
 }
+
+// Our own messages name a variable, an argument or a leftover user id, never a secret or a value.
+export const isKnownMessage = (message: string): boolean =>
+  /^(Missing|Unknown|The owner email|A user with this address|bootstrap:)/.test(message)
 
 if (import.meta.main) {
   try {
@@ -161,7 +175,7 @@ if (import.meta.main) {
   } catch (error) {
     // The message of our own errors names a variable or an argument, never a value; anything else is
     // reported by name only.
-    const known = error instanceof Error && /^(Missing|Unknown|The owner email)/.test(error.message)
+    const known = error instanceof Error && isKnownMessage(error.message)
     process.stderr.write(`Bootstrap failed: ${known ? (error as Error).message : errorName(error)}\n`)
     process.exitCode = 1
   }

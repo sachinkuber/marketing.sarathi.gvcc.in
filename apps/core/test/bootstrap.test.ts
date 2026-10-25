@@ -130,6 +130,30 @@ describe('owner bootstrap (plan decision 11)', () => {
     }
   })
 
+  it('a user who exists without owner rights is refused with a clear message, and nothing is changed', async () => {
+    const other = await createTestDatabase()
+    try {
+      await other.admin.query(
+        `insert into auth."user" (id, name, email, "emailVerified", "createdAt", "updatedAt")
+         values ('11111111-1111-4111-8111-111111111111', 'x', 'plain@example.test', true, now(), now())`,
+      )
+      const url = new URL(databaseUrl)
+      url.pathname = `/${other.name}`
+      const printed: string[] = []
+      await expect(
+        bootstrap({
+          adminUrl: url.toString(),
+          ownerEmail: 'plain@example.test',
+          print: (t) => printed.push(t),
+        }),
+      ).rejects.toThrow(/without owner rights/)
+      expect(printed).toEqual([])
+      expect((await other.admin.query('select 1 from app.platform_owner')).rowCount).toBe(0)
+    } finally {
+      await other.drop()
+    }
+  })
+
   it('refuses an address that is not an email, before touching the database', async () => {
     const printed: string[] = []
     await expect(
@@ -144,6 +168,13 @@ describe('owner bootstrap (plan decision 11)', () => {
 })
 
 describe('bootstrap command line', () => {
+  it('prints a leftover-user message from a failed grant instead of only its name', async () => {
+    const { isKnownMessage } = await import('../src/bootstrap.ts')
+    expect(isKnownMessage('bootstrap: user abc left behind after a failed grant')).toBe(true)
+    expect(isKnownMessage('The owner email is not a valid address.')).toBe(true)
+    expect(isKnownMessage('connect ECONNREFUSED 10.0.0.1')).toBe(false)
+  })
+
   it('takes the address from --owner-email, or from OWNER_EMAIL', () => {
     expect(parseArguments(['--owner-email', 'a@example.test'], {})).toEqual({ ownerEmail: 'a@example.test' })
     expect(parseArguments(['--owner-email=b@example.test'], {})).toEqual({ ownerEmail: 'b@example.test' })
@@ -152,6 +183,19 @@ describe('bootstrap command line', () => {
 
   it('refuses a missing address and unknown arguments', () => {
     expect(() => parseArguments([], {})).toThrow('--owner-email')
-    expect(() => parseArguments(['--owner-email', 'a@example.test', '--force'], {})).toThrow('--force')
+    expect(() => parseArguments(['--owner-email', 'a@example.test', '--force'], {})).toThrow(
+      'Unknown argument',
+    )
+  })
+
+  it('does not echo the unknown argument value', () => {
+    let message = ''
+    try {
+      parseArguments(['--password=hunter2-secret'], {})
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain('Unknown argument')
+    expect(message).not.toContain('hunter2')
   })
 })
