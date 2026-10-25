@@ -11,6 +11,7 @@
 | Canonical source | `docs/database/2026-10-04-database-schema.md`. The Word file is generated from it. |
 | Changes in version 2 | Owner decisions of 2026-10-04: the refinements in section 12 accepted; 90-day retention for job inputs and notifications confirmed; every cost recorded in both US dollars and Indian rupees (sections 2, 7.6 to 7.8). |
 | Changes at milestone 4 (2026-10-14) | Brought in line with migrations 0011 to 0013 as built: sections 7.3, 7.5, 7.6, new 7.9 and 7.10, and 11.1. The Word copy is not regenerated (it needs `mmdc`, which the server lacks); this Markdown file is canonical. |
+| Changes at milestone 6 (2026-10-25) | Brought in line with migration 0018 as built: sections 7.1 (the summary agent's first definition), 7.11 (new, `app.duty_run`), 8.3 (nonce retention and grants), 9.3 (new, `audit.search`), 11.1 and 11.2, and refinements 16 to 18 in section 12. The Word copy is not regenerated (`tools/build-docs` has no script for this document and `mmdc` is not installed); this Markdown file is canonical. |
 | Based on | Phase 1 spec version 4, Architecture version 2, Master PRD version 3, App flow version 2, Content guidelines version 2, Tech stack version 1. All approved. |
 
 ## 1. Scope and status of each part
@@ -440,6 +441,8 @@ Not brand-scoped. Changed only by the release step.
 
 At most one live version per agent (partial unique index where `live`).
 
+Migration 0018 inserts the first definition of the summary agent: agent `summary`, version 1, model `claude-opus-5-5`, effort `low`, live. `files_hash` is the hash of the repository directory `agents/summary/` (sorted relative paths, each followed by a NUL byte and the file's bytes); a test recomputes it, so a change to those files without a new version fails the suite.
+
 ### 7.2 `app.run`
 
 | Column | Type | Rules |
@@ -602,6 +605,21 @@ All are `security definer`, owned by `mkt_definer`, with `search_path` fixed to 
 
 The functions need rights the roles do not otherwise have, so the definer role has: read policies `using (true)` for the definer role only on `job_input`, `model_call` and `job_control` (with `select` on each); an update policy `using (true) with check (true)` for the definer role only on `model_call` (with `select, update` on the table); and `select, insert` on `fx_rate`.
 
+### 7.11 `app.duty_run`
+
+Not brand-scoped. Added by migration 0018. One row per daily duty per UTC date; the n8n heartbeat is the row with `duty = 'n8n_heartbeat'`.
+
+| Column | Type | Rules |
+|---|---|---|
+| duty | text | Part of the primary key: `n8n_heartbeat`, `audit_export`, `audit_verify`, `fx_rate` or `nonce_cleanup` |
+| run_date | date | Part of the primary key (the UTC date) |
+| state | text | Not null. `running`, `done`, `failed` or `not_configured`. |
+| detail | jsonb | Null, or a short result (never a secret) |
+| started_at | timestamptz | Not null, default now |
+| finished_at | timestamptz | Null while running |
+
+Each duty runs at most once per UTC date: a `done` row is skipped, a `failed` row is run again on the next call, and a `running` row older than 15 minutes is taken to have crashed and may be claimed again. The application role holds select, insert and update.
+
 ## 8. Phase 1: notifications, alerts and triggers
 
 ### 8.1 `app.notification`
@@ -647,7 +665,9 @@ Not brand-scoped. Replay protection for n8n calls.
 | Column | Type | Rules |
 |---|---|---|
 | nonce | bytea | Primary key |
-| received_at | timestamptz | Not null. Rows older than 10 minutes are deleted. |
+| received_at | timestamptz | Not null, default now. Rows older than 11 minutes are deleted (see below). |
+
+Added by migration 0018. The application role holds select, insert and delete. The core records a nonce only after the request's signature has been proved, so a caller without the secret cannot fill the table. Retention is 11 minutes, one more than the 10 the spec states: a signed request is acceptable for up to twice the 5-minute window (a timestamp ahead of the core's clock when first used, behind it when replayed), and the extra minute covers the clock being floored to the second, the time between the timestamp check and the write, and skew between the core's clock and the database's. A longer retention only refuses more.
 
 ## 9. Phase 1: audit
 
@@ -682,6 +702,10 @@ Insert only, and no role holds a right on the table: entries are written only by
 | chain_hash | text | Not null |
 | exported_at | timestamptz | Not null |
 | location | text | Not null. Where the write-once copy is. |
+
+### 9.3 `audit.search`
+
+Added by migration 0018. A `security definer` read function (owner `mkt_definer`, no execute for `PUBLIC`, execute for the owner-view role only) that returns the entries of one chain, newest first, with optional filters on actor, action and time range, paged by `seq` (`p_before_seq`) and limited to 200 rows. The owner screen for the audit log uses it. The definer role holds `create` on schema `audit` only while the migration creates the function.
 
 ## 10. Later phases (provisional)
 
@@ -762,7 +786,7 @@ The hashed content payload gains references to offers, products and the complian
 | Application | Read and write, through row-level security. Cannot alter tables. | Read and write | Create jobs only: insert on `pgboss.job` and `pgboss.job_common`, select on `pgboss.queue`, and select on the two columns `(id, start_after)` of `pgboss.job_common`; nothing else | Execute `audit.append` only | None |
 | Queue (workers) | None | None | Claim and update jobs: all rights on the `pgboss` tables, and a guarded direct update of a failed job to cancelled when a dead job is cancelled | None | None |
 | Audit-writer | None | None | None | Execute `audit.append` and `audit.record_export`; no right on any audit table | None |
-| Owner-view | Read across brands through named functions only; execute `app.record_fx_rate` | None | Read | Execute the read and verify functions | None |
+| Owner-view | Read across brands through named functions only; execute `app.record_fx_rate` | None | Read | Execute the read and verify functions and `audit.search` | None |
 | Read-only | Read, through row-level security | None | None | None | None |
 | Connection (phase 3) | Outbox and connection tables only | None | Claim publishing jobs | None | Read and write |
 
@@ -780,6 +804,8 @@ No run-time role can bypass row-level security, and none owns a table.
 | A content version moves only along the allowed edges, starts as `draft`, and a same-state update changes nothing | Table `app.version_state_transition` (the 18 edges of architecture 8.2, plus draft, in_checks and approved to superseded) and a trigger that reads that table (0014) |
 | A brand's jobs can be held or released only by that brand's own session | `app.hold_brand_jobs(brand, agent, hold)` refuses a brand other than the session's (0014) |
 | Only the newest queue id of a job may start it, when the worker sends the id | `app.job_control.queue_id`, checked when an attempt starts (0014, milestone 5); the worker's `queueId` is optional, and a start without it is not checked |
+| A version cannot move from awaiting approval to approved without an approving decision for it | The transition trigger `app.check_version_state_transition` (0018, follow-up M-7) |
+| A signed trigger cannot be replayed | Primary key on `app.trigger_nonce.nonce` (0018) |
 | The audit log is never changed | No update or delete rights, and a trigger |
 | One live definition per agent; one active attempt per job; one active kill switch per scope | Partial unique indexes |
 | A model call is costed once | Unique partial index `cost_ledger_one_per_call` on `model_call_id` in the cost ledger |
@@ -824,6 +850,9 @@ These are small additions or changes made while specifying columns. **The owner 
 | 13 | `app.alert` gains delivery columns and `app.notification` gains a queued-rows index (milestone 5, migrations 0015 and 0016) | Delivery must be confirmed per recipient and per channel, with backoff and a stall flag, not only attempted |
 | 14 | `app.version_state_transition` is added (milestone 5, migration 0014) | The allowed moves of a content version are data the database enforces |
 | 15 | `app.brands_with_open_requests()` is added (milestone 5, migration 0017) | The reminder tick has no brand context and needs the list of brands with open approval requests |
+| 16 | `app.trigger_nonce` is created with retention of 11 minutes, not 10 (milestone 6, migration 0018) | A nonce must outlast the longest time a signed request stays acceptable; 10 minutes is not enough by a margin |
+| 17 | `app.duty_run` is added, and `audit.search` is added for the owner-view role (milestone 6, migration 0018) | Daily duties must run once per date and the n8n heartbeat must be recorded; the owner's audit screen needs filtered, paged reads |
+| 18 | The transition trigger now refuses `awaiting_approval` to `approved` without an approving decision on record (milestone 6, migration 0018, follow-up M-7) | The database, not only the application, guarantees that an approved version was approved by someone |
 
 ## 13. Decisions and open points
 
