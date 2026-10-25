@@ -368,3 +368,82 @@ M4 tests (24 to 29, 32) still pass.
   - Fix-wave minors: the I-3 test waits 1.5 s instead of polling `pg_locks`; the no-recipient warning repeats every tick for each due request; the submitter is also notified when they are an approver or admin.
   - The `.docx` copy of the schema document was not regenerated (`mmdc` and `pandoc` are not installed); the Markdown is current.
 - M4 follow-ups closed by this milestone: release of held and cancelled jobs (package 12: new queue id, held result applied once); the `retry()` semantics question (it raises the limit by one and keeps the count).
+
+## Phase 1, milestone 6: Proof
+
+Built 2026-10-19 to 2026-10-25. Branch `m6-proof`, base `3ce6c7c` (main). Plan: `docs/plans/2026-10-19-m6-proof.md`. The commits on the branch (`git log 3ce6c7c..m6-proof`) are the tasks 1 to 14 and their fix commits. At the time of this note the pull request is not opened, CI has not run on this branch, the whole-branch review has not been done, and nothing is merged; those are Task 15's remaining steps.
+
+| Package | State | Evidence |
+|---|---|---|
+| 13 Trivial agent | Done, real provider not checked | The summary agent (`agents/summary/`, version 1), the worker's summary and placeholder-check handlers, the core's two result handlers, multi-job run finalisation. Every automated test uses the stand-in model; the real Anthropic adapter (milestone 4) is the production path and its live check is skipped without `ANTHROPIC_API_KEY` (owner item A3) |
+| 14 n8n and the signed trigger | Done, not activated | The `trigger` access kind and `POST /triggers/daily`; the daily duties (audit export, audit verify, exchange rate, nonce clean-up) once per UTC date; the heartbeat watch; the heartbeat and canary workflows are exported inactive under `tools/n8n` and checked by `tools/n8n/workflows.test.mjs`. Activation against a deployed core is milestone 7. The SMTP mail adapter (Nodemailer 9.1.1) is built here and active only when `SMTP_URL` and `MAIL_FROM` are set |
+| 15 Dashboard | Done | `apps/dashboard` (Next.js, a client of the core API only): sign-in and enrolment, the frame with banner, kill-switch and shadow bars and the overdue pop-up, Home, inbox, item review, approval settings, alerts, agents and runs, dead letters, audit, users, safety. The core gained read routes for home, agents, runs, model-call review, audit and status |
+
+| Acceptance test | State | Evidence |
+|---|---|---|
+| 33 | Proven | A trigger is refused for a wrong signature, a changed body, path, method, timestamp or nonce, a query string, a timestamp outside 5 minutes, and a repeated nonce: `apps/core/test/triggers.test.ts` and `apps/core/test/trigger-signature.test.ts` |
+| 34 | Proven | An old nonce is removed and a request reusing it is still refused by the timestamp check: `apps/core/test/triggers.test.ts`. The daily duties run once per UTC date: `apps/core/test/daily-duties.test.ts` |
+| 37 | Proven | The summary agent end to end, with its model call, cost and audit entries: `apps/worker/test/summary-e2e.test.ts` (commit 04c977e), and again through the screens by `apps/dashboard/e2e/agent-flow.spec.ts` |
+| 22 | Proven in full | The API half from milestone 5 (`apps/core/test/overdue.test.ts`); the screen half by `apps/dashboard/e2e/overdue.spec.ts` (pop-up opens over the current screen, Escape, outside click and back do not close it, "Later" keeps the banner, a new sign-in shows it again, a viewer sees neither) |
+| 8 | Screen half proven | `apps/dashboard/e2e/sign-in.spec.ts` (an approver who has not enrolled is held at `/enrol`; a viewer sees the inbox read-only; the idle timeout returns to the same page after sign-in). The API half was proven in milestone 2b |
+| Phone checks (spec 15, app-flow 8) | Proven | `apps/dashboard/e2e/phone.spec.ts` at 390 x 844 with touch |
+| 38 | Not proven | Needs a real mail account and a second alert channel: owner items A6 and A11. The SMTP adapter exists, but `UnconfiguredAlertChannel` stays because no adapter can be written before the second channel is chosen. Until then no alert counts as delivered |
+| 41 | Not proven | Load and the canary measurement belong to milestone 7 (the plan's scope). The canary workflow is built and exported here, but nothing has measured it |
+
+The browser suite passed 6 of 6 specs on the development server (desktop and phone projects) in about 152 s, with a peak of about 1.8 GiB under the container's 3 GB cap. The earlier acceptance tests (2 to 7, 9 to 21, 23 to 32, 35, 36) are covered by the full suite, run by `npm run verify`; the counts of the final verification run are in the section "Final verification" below.
+
+## Findings
+
+- Rulings (the plan's proposed decisions, as built; each with its cost if wrong):
+  1. (Plan 1) The dashboard is a client of the core API on the same origin and imports no workspace package at run time; its reply schemas are in `apps/dashboard/src/api/schemas.ts` and a core test parses real replies with them. Cost: the schemas are written twice.
+  2. (Plan 2) Browser checks run on the development server in a derived image (`infra/dev/browser.Dockerfile`, `infra/dev/server-run-browser.sh`, 3 GB and 1.5 CPUs), as `npm run e2e`, separate from `npm run verify`. CI has a second job, `e2e`. Cost: 3 GB on the shared host while it runs.
+  3. (Plan 3) Component tests render with `react-dom/server` and `happy-dom` (a development dependency, 20.14.5); interaction is proven only by Playwright. Cost: the render tests do not click.
+  4. (Plan 4) Next.js stays at 16.3.4 (the spec pin); the dashboard never imports `next/og`, which is where the advisory is (an ESLint rule enforces it).
+  5. (Plan 5) Reads of agents, runs, model-call review and the audit log use `edit_profile`; starting the summary agent and dead-letter requeue and cancel use `see_other_brands`. No permission key was added, so the 50-cell comparison test is unchanged.
+  6. (Plan 6) The placeholder check `placeholder_length` is blocking: summary at most 400 characters, each keyword at most 40; the core recomputes it from the stored payload.
+  7. (Plan 7) The summary request asks for structured output (`json_schema`), 1024 tokens, no tools. A reply that did not stop at `end_turn` is an error and is never stored. Whether the pinned SDK and `claude-opus-5-5` accept the request is decided only by the live check (A3).
+  8. (Plan 8) Daily duties run in the core on n8n's signed call; the model-call sweep, the approvals tick and notification delivery stay on the worker's 5-minute timer. This replaces milestone 4 decision 8's "the n8n schedule replaces the timer".
+  9. (Plan 9) `TRIGGER_SECRET` is at least 32 characters and different from the other three secrets (the config test enforces it). Refused trigger calls are logged by reason and not audited; accepted calls are audited as `trigger.received`.
+  10. (Plan 10) The exchange rate is the ECB's euro reference rates, USD to INR as a cross rate, source `ecb-cross`, behind an `FxSource` port. The official INR reference has no stable machine-readable feed. Owner to confirm (database schema open point 4).
+  11. (Plan 11) `npm run bootstrap --workspace @mkt/core -- --owner-email <address>` creates the brands and the platform owner; the temporary password is printed once. It connects with `BOOTSTRAP_DATABASE_URL`, a role that may write the tenancy tables, not the application's own URL (see `docs/dev-environment.md`).
+  12. (Plan 12) Enrolment shows the setup key and an `otpauth://` link, no QR image (no new run-time dependency).
+  13. (Plan 13) Nodemailer stays at 9.1.1 with exactly one transport per process; its high advisory (a process-wide DNS cache) needs more than one. The move to 10.x is the owner's decision.
+  14. (Plan 14) The notification bell is not built; email and the banner cover phase 1.
+  15. (Plan 15) A run with several jobs is finalised when no job is dead and none is unfinished and not cancelled. This closes milestone 4's parked ruling 11.
+  16. (Plan 16) The core has an owner-view connection (`OWNER_VIEW_DATABASE_URL`); every audit read through it writes an `audit.read` entry.
+  17. (Migration 0018) The nonce is kept 11 minutes, not the spec's 10, so it outlasts the longest time a signed request stays acceptable. Cost: none (a longer retention only refuses more).
+- The first browser run found a real defect: approving, rejecting or editing an item left the overdue banner and pop-up on screen until the next minute's poll. The item screen now asks the shell to read the overdue list again after each of those (commit 20b68ba).
+- Deployment preconditions new in this milestone:
+  - Migration 0018 (trigger nonces, daily-duty log, the summary agent's definition row, `audit.search`, the approved-needs-an-approval guard for follow-up M-7), after 0014 to 0017.
+  - New secrets and settings for the core: `TRIGGER_SECRET`, `OWNER_VIEW_DATABASE_URL` and `N8N_HEARTBEAT_EXPECTED`; optional `SMTP_URL` and `MAIL_FROM` (both or neither). `BOOTSTRAP_DATABASE_URL` is needed only by the operator when running the bootstrap command.
+  - Before the first real model call: enter the model prices (`app.model_price`) and make sure a first exchange rate is recorded (the daily call fetches one, but not before it has run once).
+  - The proxy must route `/api/` to the core and everything else to the dashboard, pass the three `X-Mkt-*` headers and the raw body unchanged on `/api/v1/triggers/` (the signature covers the raw bytes, the path as received and no query string).
+  - In n8n: the Crypto credential `Marketing trigger secret` (holding `TRIGGER_SECRET`) and the variable `MKT_CORE_ORIGIN`; the two workflows are imported inactive and are activated against the deployed core.
+  - The dashboard image is built from `output: 'standalone'`.
+  - Core and worker still deploy together (milestone 5).
+- Owner items still open, and what each leaves unproven:
+  - A3 model provider key: a real provider call; that the pinned SDK and `claude-opus-5-5` accept the structured request and return a schema-valid summary; a real cost row from real token counts (`apps/worker/test/anthropic-live.test.ts` runs once the key is supplied).
+  - A9 the owner's sign-in email and authenticator: the demonstration on the owner's own account and phone. The bootstrap command and every screen are built and are tested with generated users.
+  - A6 sending address and account: any real delivery of email; test 38.
+  - A11 second alert channel: delivery on the second channel; test 38.
+  - A4 and A5 write-once storage: the daily export outside the server (spec 12). With no store configured the export duty records `not_configured` and raises one severity 2 alert.
+- Follow-ups, one line each:
+  - The CI `e2e` job has been written but has not yet run on GitHub; the browser suite has been run only on the development server. Both CI jobs must be green before merge.
+  - `next start` warns that it does not suit `output: 'standalone'`; the browser harness starts the dashboard with `next start`. Run the standalone server (`node .next/standalone/...`) in the deployment image and, if wanted, in the harness.
+  - The bootstrap command uses `BOOTSTRAP_DATABASE_URL`, a separate privileged role the operator must supply at deployment; decide who holds it and where it is kept.
+  - The notification bell (plan decision 14).
+  - QR image for enrolment (needs a new run-time dependency; plan decision 12).
+  - Move Next.js to 16.3.8 once that release is 30 days old (plan decision 4), as a one-line change plus the full suite.
+  - Move Nodemailer to 10.x on the owner's approval (plan decision 13).
+  - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
+  - The remaining milestone 5 minors (listed under milestone 5 Findings) that this milestone did not absorb.
+  - Test 41 (load and the canary measurement) and the activation of the n8n workflows: milestone 7.
+- Documents: the schema document `docs/database/2026-10-04-database-schema.md` is updated for migration 0018 (sections 7.1, 7.11, 8.3, 9.3, 11.1, 11.2 and 12). No pin changed, so spec section 3 is unchanged. The `.docx` copy of the schema document was not regenerated: `tools/build-docs` has no script for it, and the renderer `mmdc` is not installed (it needs a headless Chromium, which `tools/build-docs` does not install); the Markdown is canonical.
+
+## Final verification
+
+Run on the development server on 2026-10-25 from the tree at commit 20b68ba plus this documentation change:
+
+- `npm ci && npm run verify` (pins, lint, format, typecheck, tests, secret scan): 133 test files passed, 2 skipped; 1162 tests passed, 2 skipped (the live model checks, which need an API key); 744 s; gitleaks found no leaks in 96 commits.
+- `npm ci && npm run e2e` in the browser image: 6 passed in 1.9 minutes (2 min 44 s wall clock including `npm ci`).
+- Afterwards no `mkt_t_%` database remained and the only containers were `mkt-dev-postgres-1` and the host's other projects. Two idle test databases that predated Task 14 were dropped at the owner's request.
