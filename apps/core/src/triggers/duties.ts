@@ -8,7 +8,7 @@ import type { FxSource } from './fx.ts'
 import { cleanNonces } from './nonce.ts'
 
 export type Duty = 'n8n_heartbeat' | 'audit_export' | 'audit_verify' | 'fx_rate' | 'nonce_cleanup'
-export type DutyOutcome = 'done' | 'skipped' | 'failed' | 'not_configured'
+export type DutyOutcome = 'done' | 'skipped' | 'failed' | 'not_configured' | 'busy'
 
 export interface DailyDeps {
   appPool: Pool
@@ -27,7 +27,8 @@ export interface DailyDeps {
 // One duty may take this long; after it the duty is recorded failed and the next one starts.
 export const DUTY_BUDGET_MS = 60_000
 // A duty left 'running' longer than this is taken to have crashed and may be claimed again, so a crash does
-// not block the rest of the UTC day.
+// not block the rest of the UTC day. Until then another call answers 'busy', which is not a success: the
+// call answers 502 and n8n (retrying every 10 minutes) keeps asking until the row is stale and is taken over.
 export const RUNNING_STALE_MS = 15 * 60_000
 
 const ORDER: Duty[] = ['audit_export', 'audit_verify', 'fx_rate', 'nonce_cleanup']
@@ -66,7 +67,9 @@ async function recordHeartbeat(deps: DailyDeps, today: string): Promise<DutyOutc
   return result.rows[0]?.inserted ? 'done' : 'skipped'
 }
 
-async function claim(deps: DailyDeps, duty: Duty, today: string): Promise<boolean> {
+// 'claimed': this call runs the duty. 'skipped': it is already settled today. 'busy': another call has it
+// running and it is not stale yet.
+async function claim(deps: DailyDeps, duty: Duty, today: string): Promise<'claimed' | 'skipped' | 'busy'> {
   const now = deps.clock.now()
   const staleBefore = new Date(now.getTime() - RUNNING_STALE_MS)
   const result = await deps.appPool.query(
@@ -77,7 +80,12 @@ async function claim(deps: DailyDeps, duty: Duty, today: string): Promise<boolea
      returning duty`,
     [duty, today, now, staleBefore],
   )
-  return (result.rowCount ?? 0) === 1
+  if ((result.rowCount ?? 0) === 1) return 'claimed'
+  const row = await deps.appPool.query<{ state: string }>(
+    'select state from app.duty_run where duty = $1 and run_date = $2',
+    [duty, today],
+  )
+  return row.rows[0]?.state === 'running' ? 'busy' : 'skipped'
 }
 
 async function finish(
@@ -120,7 +128,8 @@ function workOf(deps: DailyDeps, duty: Duty, today: string): Work {
       }
     case 'audit_verify':
       return async () => {
-        if (!deps.store) return { state: 'not_configured', detail: {} }
+        // With no store the chain check still runs over every chain; only the comparison with the copies
+        // outside the server is missing.
         const result = await verifyAudit({
           reader: deps.ownerViewPool,
           store: deps.store,
@@ -128,7 +137,12 @@ function workOf(deps: DailyDeps, duty: Duty, today: string): Work {
         })
         return {
           state: 'done',
-          detail: { ok: result.ok, chains: result.chains, findings: result.findings.length },
+          detail: {
+            ok: result.ok,
+            chains: result.chains,
+            findings: result.findings.length,
+            store: deps.store !== null,
+          },
         }
       }
     case 'fx_rate':
@@ -147,12 +161,14 @@ function workOf(deps: DailyDeps, duty: Duty, today: string): Work {
 }
 
 // The duties n8n's daily call asks for. Each runs at most once per UTC date: a done one is skipped, a failed
-// one runs again on the retry, and one left running past RUNNING_STALE_MS is taken over.
+// one runs again on the retry, one running now is busy (answered 502 so n8n asks again), and one left
+// running past RUNNING_STALE_MS is taken over.
 export async function runDailyDuties(deps: DailyDeps, today: string): Promise<Record<Duty, DutyOutcome>> {
   const outcome = { n8n_heartbeat: await recordHeartbeat(deps, today) } as Record<Duty, DutyOutcome>
   for (const duty of ORDER) {
-    if (!(await claim(deps, duty, today))) {
-      outcome[duty] = 'skipped'
+    const claimed = await claim(deps, duty, today)
+    if (claimed !== 'claimed') {
+      outcome[duty] = claimed
       continue
     }
     try {

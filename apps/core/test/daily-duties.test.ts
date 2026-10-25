@@ -161,7 +161,30 @@ describe('runDailyDuties', () => {
     )
     const out = await runDailyDuties(deps, TODAY)
     expect(out.fx_rate).toBe('done')
-    expect(out.nonce_cleanup).toBe('skipped')
+    expect(out.nonce_cleanup).toBe('busy')
+  })
+
+  it('a duty left running and not yet stale is busy, not skipped, so the call answers a retry', async () => {
+    await stack.db.admin.query(
+      `insert into app.duty_run (duty, run_date, state, started_at) values ('fx_rate', $1, 'running', $2)`,
+      [TODAY, new Date(FIXED_SECONDS * 1000 - 5 * 60_000)],
+    )
+    const out = await runDailyDuties(deps, TODAY)
+    expect(out.fx_rate).toBe('busy')
+    expect(out.nonce_cleanup).toBe('done')
+    expect(fx.calls).toBe(0)
+  })
+
+  it('a crash that leaves a duty running: n8n retries 10 minutes later and 20 minutes later it runs', async () => {
+    await stack.db.admin.query(
+      `insert into app.duty_run (duty, run_date, state, started_at) values ('fx_rate', $1, 'running', $2)`,
+      [TODAY, new Date(FIXED_SECONDS * 1000)],
+    )
+    let now = FIXED_SECONDS * 1000 + 10 * 60_000
+    const later = { ...deps, clock: { now: () => new Date(now) } }
+    expect((await runDailyDuties(later, TODAY)).fx_rate).toBe('busy')
+    now = FIXED_SECONDS * 1000 + 20 * 60_000
+    expect((await runDailyDuties(later, TODAY)).fx_rate).toBe('done')
   })
 
   it('removes nonces older than the retention and keeps newer ones', async () => {
@@ -185,7 +208,6 @@ describe('runDailyDuties', () => {
     expect(out).toEqual({
       ...allOutcomes('done'),
       audit_export: 'not_configured',
-      audit_verify: 'not_configured',
     })
     expect(await runDailyDuties({ ...deps, store: null }, TODAY)).toEqual(allOutcomes('skipped'))
     await runDailyDuties({ ...deps, store: null }, '2030-03-18')
@@ -193,6 +215,35 @@ describe('runDailyDuties', () => {
     expect(rows.map((r) => [r.brand_id, r.severity, r.kind])).toEqual([
       [null, 2, 'audit_export_not_configured'],
     ])
+  })
+
+  it('without a store the chain check still runs, and a tampered row raises the severity 1 alert', async () => {
+    await new DbAudit(stack.auditPool!).record({
+      action: 'test.entry',
+      actor: null,
+      brandId: null,
+      outcome: 'success',
+      detail: {},
+    })
+    const alter = async (from: string, to: string) => {
+      const client = await stack.db.admin.connect()
+      try {
+        await client.query('set session_replication_role = replica')
+        await client.query('update audit.log set action = $2 where action = $1', [from, to])
+      } finally {
+        await client.query('reset session_replication_role')
+        client.release()
+      }
+    }
+    await alter('test.entry', 'test.altered')
+    const out = await runDailyDuties({ ...deps, store: null }, TODAY)
+    expect(out.audit_verify).toBe('done')
+    const rows = await alerts()
+    expect(rows.some((r) => r.severity === 1 && r.kind === 'audit_chain_mismatch')).toBe(true)
+    const verify = (await dutyRows()).find((r) => r.duty === 'audit_verify')
+    expect(verify?.detail).toMatchObject({ ok: false, store: false })
+    // Put the row back so the shared log is whole for the tests after this one.
+    await alter('test.altered', 'test.entry')
   })
 
   it('exports the log, and raises a severity 1 alert when an export mark no longer matches', async () => {
@@ -254,7 +305,11 @@ describe('the per-duty budget, failure recording and concurrency', () => {
 
   it('runs each duty exactly once when two calls arrive together', async () => {
     const [a, b] = await Promise.all([runDailyDuties(deps, TODAY), runDailyDuties(deps, TODAY)])
-    for (const duty of DUTIES) expect([a[duty], b[duty]].sort()).toEqual(['done', 'skipped'])
+    // The loser sees either the finished row (skipped) or the winner still running (busy: not a success).
+    for (const duty of DUTIES) {
+      expect([a[duty], b[duty]]).toContain('done')
+      expect([a[duty], b[duty]].filter((o) => o !== 'done')[0]).toMatch(/^(skipped|busy)$/)
+    }
     expect(fx.calls).toBe(1)
     expect(await dutyRows()).toHaveLength(DUTIES.length)
   })

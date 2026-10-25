@@ -42,7 +42,8 @@ export function registerTriggerRoutes(
           parseBody(dailyBody, req.body)
           const today = daily.now().toISOString().slice(0, 10)
           const duties = await daily.run(today)
-          const failed = Object.values(duties).includes('failed')
+          // 'busy' is a duty another call is running: not a success, so n8n asks again.
+          const failed = Object.values(duties).some((o) => o === 'failed' || o === 'busy')
           await deps.audit.record({
             action: 'trigger.received',
             actor: null,
@@ -52,7 +53,7 @@ export function registerTriggerRoutes(
             outcome: failed ? 'failure' : 'success',
             detail: { workflow: 'marketing-daily-heartbeat', duties },
           })
-          // 502 with the same body, so n8n retries; the retry runs only the duty that failed.
+          // 502 with the same body, so n8n retries; the retry runs only the duty that failed or was busy.
           res.status(failed ? 502 : 200).json({ duties })
         },
       ],

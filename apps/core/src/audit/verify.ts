@@ -12,14 +12,15 @@ export interface Finding {
 // against the copies held outside the server, which a person with write access to the database cannot
 // change: the log must still hold, at every exported point, the hash that was exported. The second check is
 // what catches an entry altered together with its hash, a chain cut short, and a chain removed.
+// With no store (none is configured yet) only the first check runs, over every chain in the log.
 export async function verifyAudit(deps: {
   reader: Pool
-  store: ExportStore
+  store: ExportStore | null
   onMismatch?: (findings: Finding[]) => Promise<void> | void
 }): Promise<{ ok: boolean; chains: number; findings: Finding[] }> {
   const heads = await deps.reader.query('select chain_key from audit.chain_heads()')
   const live = new Set((heads.rows as { chain_key: string }[]).map((r) => r.chain_key))
-  const keys = new Set([...live, ...(await deps.store.chainKeys())])
+  const keys = new Set([...live, ...(deps.store ? await deps.store.chainKeys() : [])])
   const findings: Finding[] = []
 
   for (const chainKey of [...keys].sort()) {
@@ -41,7 +42,7 @@ export async function verifyAudit(deps: {
         detail: 'the chain does not check out at this entry',
       })
     }
-    for (const mark of await deps.store.marks(chainKey)) {
+    for (const mark of deps.store ? await deps.store.marks(chainKey) : []) {
       const at = await deps.reader.query('select audit.hash_at($1, $2) as h', [chainKey, mark.throughSeq])
       const hash = (at.rows[0] as { h: string | null }).h
       if (hash === null) {

@@ -48,7 +48,8 @@ export async function startServer(
     logger: deps.logger,
     appPool,
     authPool,
-    // No write-once export store exists yet (owner items A4 and A5): the export reports not_configured.
+    // No write-once export store exists yet (owner items A4 and A5): the export reports not_configured
+    // and the verify runs its chain-only check.
     daily: { ownerViewPool, auditWriterPool, store: null, fx: ecbFxSource() },
     mailer: deps.mailer,
     audit: deps.audit,
