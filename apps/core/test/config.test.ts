@@ -5,9 +5,11 @@ const base = {
   DATABASE_URL: 'postgres://app:pw@127.0.0.1:5432/mkt',
   AUDIT_DATABASE_URL: 'postgres://audit:pw@127.0.0.1:5432/mkt',
   QUEUE_DATABASE_URL: 'postgres://queue:pw@127.0.0.1:5432/mkt',
+  OWNER_VIEW_DATABASE_URL: 'postgres://owner:pw@127.0.0.1:5432/mkt',
   AUTH_SECRET: 'a'.repeat(32),
   WORKER_SECRET: 'w'.repeat(32),
   ATTEMPT_TOKEN_SECRET: 't'.repeat(32),
+  TRIGGER_SECRET: 'g'.repeat(32),
   PUBLIC_ORIGIN: 'https://app.example.test',
 }
 
@@ -21,8 +23,11 @@ describe('loadConfig', () => {
       publicOrigin: 'https://app.example.test',
       queueDatabaseUrl: base.QUEUE_DATABASE_URL,
       workerSecret: base.WORKER_SECRET,
+      triggerSecret: base.TRIGGER_SECRET,
       attemptTokenSecret: base.ATTEMPT_TOKEN_SECRET,
       queueBacklogLimit: 2000,
+      ownerViewDatabaseUrl: base.OWNER_VIEW_DATABASE_URL,
+      n8nHeartbeatExpected: false,
     })
   })
 
@@ -36,6 +41,9 @@ describe('loadConfig', () => {
       { ...base, WORKER_SECRET: same, ATTEMPT_TOKEN_SECRET: same },
       { ...base, WORKER_SECRET: base.AUTH_SECRET },
       { ...base, ATTEMPT_TOKEN_SECRET: base.AUTH_SECRET },
+      { ...base, TRIGGER_SECRET: base.AUTH_SECRET },
+      { ...base, TRIGGER_SECRET: base.WORKER_SECRET },
+      { ...base, TRIGGER_SECRET: base.ATTEMPT_TOKEN_SECRET },
     ]) {
       expect(() => loadConfig(env)).toThrow('Invalid configuration: secrets must differ')
       expect(() => loadConfig(env)).not.toThrow(same)
@@ -52,6 +60,32 @@ describe('loadConfig', () => {
       message = (error as Error).message
     }
     expect(message).toBe('Invalid configuration: WORKER_SECRET')
+  })
+
+  it('requires a trigger secret of at least 32 characters, naming only the variable', () => {
+    const missing: Record<string, string> = { ...base }
+    delete missing.TRIGGER_SECRET
+    expect(() => loadConfig(missing)).toThrow('Invalid configuration: TRIGGER_SECRET')
+    expect(() => loadConfig({ ...base, TRIGGER_SECRET: 'short' })).toThrow(
+      'Invalid configuration: TRIGGER_SECRET',
+    )
+  })
+
+  it('requires the owner-view database url, naming only the variable', () => {
+    const missing: Record<string, string> = { ...base }
+    delete missing.OWNER_VIEW_DATABASE_URL
+    expect(() => loadConfig(missing)).toThrow('Invalid configuration: OWNER_VIEW_DATABASE_URL')
+    expect(() => loadConfig({ ...base, OWNER_VIEW_DATABASE_URL: 'nope' })).toThrow(
+      'Invalid configuration: OWNER_VIEW_DATABASE_URL',
+    )
+  })
+
+  it('reads the heartbeat expectation as a strict boolean, false by default', () => {
+    expect(loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'true' }).n8nHeartbeatExpected).toBe(true)
+    expect(loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'false' }).n8nHeartbeatExpected).toBe(false)
+    expect(() => loadConfig({ ...base, N8N_HEARTBEAT_EXPECTED: 'yes' })).toThrow(
+      'Invalid configuration: N8N_HEARTBEAT_EXPECTED',
+    )
   })
 
   it('reduces the public origin to scheme, host and port', () => {
@@ -72,5 +106,13 @@ describe('loadConfig', () => {
     expect(message).toContain('AUTH_SECRET')
     expect(message).toContain('PUBLIC_ORIGIN')
     expect(message).not.toContain(secret)
+  })
+})
+
+describe('the owner-view pool is not optional', () => {
+  it('refuses to start without OWNER_VIEW_DATABASE_URL, because the audit screens need it', () => {
+    const rest: Record<string, string> = { ...base }
+    delete rest.OWNER_VIEW_DATABASE_URL
+    expect(() => loadConfig(rest)).toThrow(/OWNER_VIEW_DATABASE_URL/)
   })
 })

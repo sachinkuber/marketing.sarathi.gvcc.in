@@ -1,0 +1,41 @@
+{
+  "name": "Marketing — canary",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] }
+      },
+      "id": "5a1f0c52-6d1e-4c1a-9a2e-0b1c2d3e4f01",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7b2e1d63-7e2f-4d2b-8b3f-1c2d3e4f5a02",
+              "name": "ranAt",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6c3f2e74-8f30-4e3c-9c40-2d3e4f5a6b03",
+      "name": "Record run time",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "Record run time", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Kolkata" },
+  "pinData": {}
+}

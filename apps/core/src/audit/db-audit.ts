@@ -15,7 +15,7 @@ export class DbAudit implements AuditSink {
     const runner = tx ?? this.standalone
     await runner.query('select audit.append($1::uuid, $2::app.actor_kind, $3::uuid, $4, $5, $6, $7::jsonb)', [
       entry.brandId ?? null,
-      entry.actor ? 'user' : 'system',
+      entry.actorKind ?? (entry.actor ? 'user' : 'system'),
       entry.actor,
       entry.action,
       entry.outcome,

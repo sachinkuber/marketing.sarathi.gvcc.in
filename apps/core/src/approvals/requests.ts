@@ -3,6 +3,15 @@ import { enqueueNotification } from '../notify/notifications.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify/recipients.ts'
 
+// THE lock order of the service, for every path that takes more than one of these (tests: lock-order.test.ts):
+//   1. the brand row (a release takes it FOR UPDATE; job creation, a result post and this tick take it FOR SHARE)
+//   2. job_input   3. run   4. content rows (item, version, state)   5. approval_request   6. the audit chain
+// A path takes the locks it needs in that order and never goes back. The tick below takes the brand row first,
+// then locks request rows, then writes audit entries and notifications (a notification's brand reference
+// would otherwise ask for the brand row after the audit chain is held, against a release that holds the
+// brand row and asks for the chain). A result handler that moves a version to awaiting_approval reaches
+// approval_request (5) after job_input and run; a kill-switch release writes its own entry (6) last.
+//
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 
 // A version has at most one request, ever (a full unique on the version), so opening twice changes nothing.
@@ -76,6 +85,9 @@ export async function tick(
     const mine = { reminded: 0, overdue: 0, escalated: 0 }
     try {
       await withBrand(pool, brandId, async (client) => {
+        // Lock order, step 1: the brand row, shared like job creation takes it, so a release (FOR UPDATE)
+        // finishes first and this brand's tick never holds a later lock while waiting for it.
+        await client.query('select 1 from app.brand where id = $1 for share', [brandId])
         const open = await client.query<OpenRow>(
           `select r.id, r.content_version_id, r.escalated_to,
                 (r.reminders_sent < s.reminder_count

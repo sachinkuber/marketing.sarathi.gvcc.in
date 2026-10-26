@@ -1,5 +1,6 @@
 import type { Pool } from '@mkt/db'
 import type { Router } from 'express'
+import type { Logger } from 'pino'
 import { RouteTable } from './access/routes.ts'
 import { principalOf } from './auth/session.ts'
 import type { AttemptLimiter } from './auth/limiter.ts'
@@ -16,10 +17,16 @@ import { registerKillSwitchRoutes } from './routes/killswitch.ts'
 import { releaseHeldJobs } from './killswitch/release.ts'
 import { registerContentRoutes } from './routes/content.ts'
 import { registerInviteRoutes } from './routes/invites.ts'
+import { registerAgentReadRoutes, registerAgentRoutes } from './routes/agents.ts'
 import { registerJobRoutes } from './routes/jobs.ts'
+import { registerAuditRoutes, type OwnerView } from './routes/audit.ts'
+import { registerHomeRoutes } from './routes/home.ts'
+import { registerStatusRoutes } from './routes/status.ts'
 import { registerUserRoutes } from './routes/users.ts'
 import { registerWorkerRoutes } from './routes/worker.ts'
 import type { JobsDeps } from './jobs/service.ts'
+import type { TriggerDeps } from './access/trigger-auth.ts'
+import { registerTriggerRoutes, type DailyTrigger } from './routes/triggers.ts'
 
 export interface ApiDeps {
   auth: Auth
@@ -35,6 +42,16 @@ export interface ApiDeps {
   jobs?: JobsDeps
   // Notification and alert delivery; the reconciliation timer route runs it.
   notify?: NotifyDeps
+  // Signed calls from n8n; unset, no trigger route is declared.
+  triggers?: TriggerDeps
+  // The daily duties behind POST /triggers/daily; unset, that route is not declared.
+  daily?: DailyTrigger
+  // The owner-view pool and the export store: the audit screens and the run detail read the log through them.
+  // Unset, the routes that read the audit log are not declared.
+  ownerView?: OwnerView
+  // The service's clock, for "this month" and the time of a verify. Unset: the system clock.
+  now?: () => Date
+  logger?: Logger
 }
 
 export interface ApiContext {
@@ -97,12 +114,28 @@ export function createApi(
   })
   registerAlertRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerOverdueRoutes(table, { pool: deps.pool, audit: deps.audit })
+  const now = deps.now ?? (() => new Date())
+  registerStatusRoutes(table, { pool: deps.pool })
+  registerHomeRoutes(table, { pool: deps.pool, now })
+  registerAgentReadRoutes(table, {
+    pool: deps.pool,
+    now,
+    audit: deps.ownerView ? { ownerView: deps.ownerView, sink: deps.audit } : undefined,
+  })
+  if (deps.ownerView)
+    registerAuditRoutes(table, { ownerView: deps.ownerView, audit: deps.audit, now, logger: deps.logger })
 
   if (deps.jobs) {
     registerWorkerRoutes(table, deps.jobs, deps.notify)
     registerJobRoutes(table, deps.jobs)
+    registerAgentRoutes(table, deps.jobs)
   }
 
+  if (deps.triggers) registerTriggerRoutes(table, { audit: deps.audit, daily: deps.daily })
+
   extra?.(table, { auth: deps.auth, pool: deps.pool })
-  return { router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs }), table }
+  return {
+    router: table.build({ auth: deps.auth, pool: deps.pool, jobs: deps.jobs, triggers: deps.triggers }),
+    table,
+  }
 }

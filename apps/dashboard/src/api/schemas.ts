@@ -1,0 +1,450 @@
+import { z } from 'zod'
+
+// The shapes of the core's read replies, one schema per route, named after the reply. The core's contract
+// test (apps/core/test/dashboard-contract.test.ts) parses its real replies with these, so a change on either
+// side that breaks the other fails there. Objects are strict: a field the screen does not know is an error.
+//
+// Money is a string of millionths (bigint-safe); it is never a number.
+
+const iso = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/)
+const micros = z.string().regex(/^\d+$/)
+
+export const money = z.strictObject({ usdMicros: micros, inrMicros: micros })
+
+// --- status ---------------------------------------------------------------------------------------------
+
+export const statusReply = z.strictObject({
+  killSwitch: z.strictObject({
+    active: z.boolean(),
+    scopes: z.array(
+      z.strictObject({ scope: z.enum(['brand', 'channel', 'agent']), target: z.string().nullable() }),
+    ),
+  }),
+  shadowMode: z.boolean(),
+  canApprove: z.boolean(),
+  canStop: z.boolean(),
+})
+
+// --- runs -----------------------------------------------------------------------------------------------
+
+export const runState = z.enum([
+  'created',
+  'running',
+  'succeeded',
+  'failed',
+  'needs_manual',
+  'cancelled',
+  'held',
+])
+
+export const runSummary = z.strictObject({
+  id: z.uuid(),
+  agent: z.string(),
+  state: runState,
+  startedByKind: z.enum(['user', 'agent', 'system', 'n8n']),
+  startedAt: iso,
+  finishedAt: iso.nullable(),
+  cost: money,
+})
+
+// --- home -----------------------------------------------------------------------------------------------
+
+export const homeReply = z.strictObject({
+  results: z
+    .strictObject({
+      runsThisMonth: z.number().int().nonnegative(),
+      costThisMonth: money,
+      lastRuns: z.array(runSummary),
+    })
+    .nullable(),
+  progress: z
+    .strictObject({
+      jobs: z.strictObject({
+        waiting: z.number().int().nonnegative(),
+        running: z.number().int().nonnegative(),
+        held: z.number().int().nonnegative(),
+        dead: z.number().int().nonnegative(),
+        finished: z.number().int().nonnegative(),
+      }),
+    })
+    .nullable(),
+  waiting: z
+    .strictObject({
+      awaitingApproval: z.number().int().nonnegative(),
+      oldestWaitingSince: iso.nullable(),
+    })
+    .nullable(),
+  problems: z.strictObject({
+    deadJobs: z.number().int().nonnegative(),
+    openAlerts: z.number().int().nonnegative(),
+    reviewCalls: z.number().int().nonnegative(),
+  }),
+})
+
+// --- agents ---------------------------------------------------------------------------------------------
+
+export const agentsReply = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      agent: z.string(),
+      version: z.number().int().positive(),
+      model: z.string(),
+      effort: z.string(),
+      state: z.enum(['running', 'blocked', 'idle']),
+      costThisMonth: money,
+    }),
+  ),
+})
+
+// --- runs list and detail -------------------------------------------------------------------------------
+
+export const runsReply = z.strictObject({
+  items: z.array(runSummary),
+  nextCursor: z.string().nullable(),
+})
+
+export const modelCall = z.strictObject({
+  id: z.uuid(),
+  runId: z.uuid(),
+  jobId: z.uuid(),
+  step: z.string(),
+  model: z.string(),
+  status: z.enum(['started', 'succeeded', 'failed', 'unknown']),
+  possibleDuplicate: z.boolean(),
+  inputTokens: z.number().int().nullable(),
+  outputTokens: z.number().int().nullable(),
+  cacheReadTokens: z.number().int().nullable(),
+  cacheWriteTokens: z.number().int().nullable(),
+  cost: money.nullable(),
+  startedAt: iso,
+  finishedAt: iso.nullable(),
+})
+
+export const auditEntry = z.strictObject({
+  seq: z.number().int().positive(),
+  at: iso,
+  actorKind: z.enum(['user', 'agent', 'system', 'n8n']),
+  actorId: z.uuid().nullable(),
+  action: z.string(),
+  outcome: z.enum(['success', 'failure']),
+  subject: z.string().nullable(),
+  detail: z.unknown(),
+  hash: z.string(),
+})
+
+export const runDetailReply = z.strictObject({
+  run: runSummary,
+  jobs: z.array(
+    z.strictObject({
+      id: z.uuid(),
+      jobClass: z.enum(['interactive', 'publishing', 'production', 'bulk']),
+      state: z.enum(['waiting', 'running', 'held', 'dead', 'finished']),
+      expectedResultType: z.string(),
+      resultType: z.string().nullable(),
+      createdAt: iso,
+      finishedAt: iso.nullable(),
+      attempts: z.array(
+        z.strictObject({
+          number: z.number().int().positive(),
+          workerId: z.string(),
+          state: z.enum(['active', 'succeeded', 'failed', 'superseded']),
+          startedAt: iso,
+          endedAt: iso.nullable(),
+        }),
+      ),
+    }),
+  ),
+  modelCalls: z.array(modelCall),
+  cost: money,
+  audit: z.array(auditEntry),
+  // True when the scan of the audit chain stopped at its cap before reaching the run's start.
+  auditTruncated: z.boolean(),
+})
+
+// --- model-call review ----------------------------------------------------------------------------------
+
+export const modelCallReviewReply = z.strictObject({
+  // True when more calls need review than the list holds.
+  truncated: z.boolean(),
+  items: z.array(
+    modelCall.extend({
+      reason: z.enum(['unknown', 'possible_duplicate', 'no_cost']),
+    }),
+  ),
+})
+
+// --- audit ----------------------------------------------------------------------------------------------
+
+export const auditReply = z.strictObject({
+  items: z.array(auditEntry),
+  nextBefore: z.number().int().positive().nullable(),
+})
+
+export const auditVerifyReply = z.strictObject({
+  ok: z.boolean(),
+  checkedAt: iso,
+  findings: z.array(
+    z.strictObject({
+      kind: z.enum(['broken_chain', 'export_mismatch', 'log_shorter_than_export', 'chain_missing']),
+      seq: z.number().int().positive().nullable(),
+    }),
+  ),
+  lastExport: z.strictObject({ throughSeq: z.number().int().positive(), exportedAt: iso }).nullable(),
+})
+
+// --- session, brands, overdue approvals (Task 11) -------------------------------------------------------------
+
+// A membership role as the core reports it. A platform owner has no membership role; `platformOwner` says so.
+export const membershipRole = z.enum(['brand_admin', 'approver', 'sales_contact', 'viewer'])
+
+export const sessionReply = z.strictObject({
+  user: z.strictObject({ id: z.string(), email: z.string(), name: z.string() }),
+  twoFactorEnabled: z.boolean(),
+  needsSecondFactor: z.boolean(),
+  enrolmentRequired: z.boolean(),
+  platformOwner: z.boolean(),
+  memberships: z.array(z.strictObject({ brandId: z.string(), role: membershipRole })),
+  csrfToken: z.string().min(1),
+})
+
+export const brandSummary = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  status: z.string(),
+  role: z.string(),
+})
+
+export const brandsReply = z.strictObject({ brands: z.array(brandSummary) })
+
+export const brandReply = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  status: z.string(),
+  shadowMode: z.boolean(),
+  role: z.string(),
+})
+
+export const overdueItem = z.strictObject({
+  contentItemId: z.string(),
+  versionId: z.string(),
+  title: z.string().optional(),
+  overdueSince: iso,
+  requestedAt: iso,
+})
+
+export const overdueReply = z.strictObject({
+  items: z.array(overdueItem),
+  count: z.number().int().nonnegative(),
+  popup: z.strictObject({ due: z.boolean() }),
+})
+
+export const overdueAckReply = z.strictObject({
+  choice: z.enum(['review_now', 'later']),
+  acknowledged: z.number().int().nonnegative(),
+})
+
+// --- sign-in and invites --------------------------------------------------------------------------------------
+
+export const inviteLookupReply = z.strictObject({
+  email: z.string(),
+  role: membershipRole,
+  brandName: z.string(),
+})
+
+export const inviteAcceptReply = z.strictObject({ userId: z.string() })
+
+// --- content, approvals, approval settings, alerts (Task 12) --------------------------------------------------
+
+export const versionState = z.enum([
+  'draft',
+  'in_checks',
+  'check_failed',
+  'awaiting_approval',
+  'approved',
+  'rejected',
+  'superseded',
+  'invalidated',
+  'scheduled',
+  'publish_unknown',
+  'published',
+  'withdrawn',
+])
+
+// GET /brands/:brandId/content: newest first; an item without a version has nulls in the version's fields.
+export const contentListItem = z.strictObject({
+  id: z.uuid(),
+  kind: z.string(),
+  currentVersionId: z.uuid().nullable(),
+  number: z.number().int().positive().nullable(),
+  state: versionState.nullable(),
+  title: z.string().nullable(),
+  overdue: z.boolean(),
+  requestedAt: iso.nullable(),
+  createdAt: iso.nullable(),
+})
+
+export const contentListReply = z.strictObject({ items: z.array(contentListItem) })
+
+// The stored payload is the content itself, not a reply envelope: the screen reads the fields it renders and
+// keeps the rest untouched (an edit sends them back), so it is a loose object.
+export const contentPayload = z.looseObject({
+  kind: z.string().optional(),
+  title: z.string().optional(),
+  summary: z.string().optional(),
+  body: z.array(z.looseObject({ type: z.string() })).optional(),
+  hashtags: z.array(z.string()).optional(),
+})
+
+export const checkResult = z.strictObject({
+  name: z.string(),
+  kind: z.enum(['blocking', 'score']),
+  passed: z.boolean().nullable(),
+  detail: z.unknown(),
+  at: iso,
+})
+
+export const contentVersion = z.strictObject({
+  id: z.uuid(),
+  number: z.number().int().positive(),
+  state: versionState,
+  stateChangedAt: iso,
+  hash: z.string(),
+  hashScheme: z.string(),
+  payload: contentPayload,
+  createdBy: z.strictObject({
+    kind: z.enum(['user', 'agent', 'system', 'n8n']),
+    userId: z.string().nullable(),
+    runId: z.string().nullable(),
+  }),
+  createdAt: iso,
+  checks: z.array(checkResult),
+})
+
+export const contentItemReply = z.strictObject({
+  id: z.uuid(),
+  kind: z.string(),
+  currentVersionId: z.uuid().nullable(),
+  createdAt: iso,
+  versions: z.array(contentVersion),
+})
+
+export const decisionReply = z.strictObject({ approvalId: z.string() })
+export const commentReply = z.strictObject({ ok: z.literal(true) })
+export const versionCreatedReply = z.strictObject({
+  versionId: z.uuid(),
+  number: z.number().int().positive(),
+  hash: z.string(),
+})
+
+// Whole minutes, as the core speaks them; the screen shows hours.
+export const approvalSettingsReply = z.strictObject({
+  firstReminderAfterMinutes: z.number().int().positive(),
+  reminderGapMinutes: z.number().int().positive(),
+  reminderCount: z.number().int().min(1).max(5),
+})
+
+export const alert = z.strictObject({
+  id: z.uuid(),
+  severity: z.number().int(),
+  kind: z.string(),
+  detail: z.unknown(),
+  raisedAt: iso,
+  acknowledgedBy: z.string().nullable(),
+  acknowledgedAt: iso.nullable(),
+  resolvedAt: iso.nullable(),
+  delivered: z.boolean(),
+  deliveryAttempts: z.number().int().nonnegative(),
+  deliveryStalled: z.boolean(),
+  deliveryIssue: z.string().nullable(),
+})
+
+export const alertsReply = z.strictObject({ alerts: z.array(alert) })
+
+// --- agent start, dead letters, users, kill switch (Task 13) ---------------------------------------------------
+
+// A write the core answers with 204 and no body.
+export const noContent = z.null()
+
+export const runStartedReply = z.strictObject({ runId: z.uuid(), jobId: z.uuid() })
+
+// GET /brands/:brandId/jobs/dead: a bare list, newest death first.
+export const deadJobsReply = z.array(
+  z.strictObject({
+    jobId: z.uuid(),
+    runId: z.uuid(),
+    jobClass: z.enum(['interactive', 'publishing', 'production', 'bulk']),
+    deadAt: iso,
+    attempts: z.number().int().nonnegative(),
+  }),
+)
+
+export const member = z.strictObject({
+  userId: z.uuid(),
+  email: z.string(),
+  name: z.string(),
+  role: membershipRole,
+  twoFactorEnabled: z.boolean(),
+  since: iso,
+})
+
+export const usersReply = z.strictObject({
+  members: z.array(member),
+  pendingInvites: z.array(
+    z.strictObject({
+      id: z.uuid(),
+      email: z.string(),
+      role: membershipRole,
+      expiresAt: iso,
+      expired: z.boolean(),
+    }),
+  ),
+})
+
+export const inviteCreatedReply = z.strictObject({ id: z.uuid(), expiresAt: iso })
+// `changed` is false when the person already had that role.
+export const roleChangedReply = z.strictObject({
+  userId: z.uuid(),
+  role: membershipRole,
+  changed: z.boolean(),
+})
+
+export const killScope = z.enum(['brand', 'channel', 'agent'])
+
+export const killSwitch = z.strictObject({
+  id: z.uuid(),
+  scope: killScope,
+  target: z.string().nullable(),
+  active: z.boolean(),
+  setBy: z.uuid(),
+  setAt: iso,
+})
+
+export const killSwitchReply = z.strictObject({ switches: z.array(killSwitch), shadowMode: z.boolean() })
+// `held`: how many waiting jobs the switch held; `created` is false when the same switch was already on.
+export const switchSetReply = z.strictObject({
+  switch: killSwitch,
+  held: z.number().int().nonnegative(),
+  created: z.boolean(),
+})
+export const switchReleasedReply = z.strictObject({
+  released: z.boolean(),
+  unheld: z.number().int().nonnegative(),
+})
+export const shadowModeReply = z.strictObject({ shadowMode: z.boolean() })
+
+// GET /overdue: per brand the caller may approve in, what is overdue and whether the pop-up is due.
+export const overdueAllReply = z.strictObject({
+  brands: z.array(
+    z.strictObject({
+      brandId: z.string(),
+      brandName: z.string(),
+      count: z.number().int().positive(),
+      popupDue: z.boolean(),
+      firstRequestId: z.string(),
+      firstItemId: z.string(),
+      items: z.array(overdueItem),
+    }),
+  ),
+})

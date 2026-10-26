@@ -18,7 +18,9 @@ import type { Role } from '../src/auth/session.ts'
 import type { AuditSink, MailMessage } from '../src/ports.ts'
 import type { JobsDeps } from '../src/jobs/service.ts'
 import type { AlertChannel, Clock } from '../src/notify/ports.ts'
-import { MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
+import { HangingMailer, MemoryAudit, MemoryMailer, ThrowingMailer } from '../src/testing.ts'
+import type { ExportStore } from '../src/audit/store.ts'
+import type { FxSource } from '../src/triggers/fx.ts'
 
 export interface TestServer {
   url: string
@@ -41,15 +43,19 @@ export async function startTestServer(app: Express): Promise<TestServer> {
 }
 
 export const ORIGIN = 'https://app.example.test'
+// A throwaway value for the tests; no real deployment uses it.
+export const TRIGGER_SECRET = 'trigger-secret-'.padEnd(48, 't')
 
 export interface Stack {
   db: TestDatabase
   appPool: Pool
   authPool: Pool
-  mailer: MemoryMailer | ThrowingMailer
+  mailer: MemoryMailer | ThrowingMailer | HangingMailer
   audit: MemoryAudit
   // The pool behind the database audit sink; null unless the stack was built with realAudit.
   auditPool: Pool | null
+  // The owner-view pool behind the daily duties; null unless the stack was built with `daily`.
+  ownerViewPool: Pool | null
   limiter: AttemptLimiter
   core: ReturnType<typeof buildCore>
   // The work engine's dependencies; null unless the stack was built with withQueue.
@@ -64,7 +70,7 @@ export interface Stack {
 export async function createStack(
   options: {
     now?: () => number
-    mailer?: MemoryMailer | ThrowingMailer
+    mailer?: MemoryMailer | ThrowingMailer | HangingMailer
     audit?: MemoryAudit
     // Give the core the database audit sink over an audit-writer pool instead of the in-memory one;
     // `stack.audit` is then unused.
@@ -80,6 +86,8 @@ export async function createStack(
     // The second alert channel and the clock the core's delivery uses (default: always failing, system).
     alertChannel?: AlertChannel
     clock?: Clock
+    // Declare the daily trigger route, with this exchange-rate source and export store (null: none configured).
+    daily?: { fx: FxSource; store: ExportStore | null; dutyBudgetMs?: number; verifyTimeoutMs?: number }
   } = {},
 ): Promise<Stack> {
   await requireDatabase()
@@ -88,8 +96,9 @@ export async function createStack(
   const authPool = createPool(db.urlFor('app'), { searchPath: 'auth' })
   const mailer = options.mailer ?? new MemoryMailer()
   const audit = options.audit ?? new MemoryAudit()
-  const auditPool = options.realAudit ? createPool(db.urlFor('audit_writer')) : null
-  const sink: AuditSink = auditPool ? new DbAudit(auditPool) : audit
+  const auditPool = options.realAudit || options.daily ? createPool(db.urlFor('audit_writer')) : null
+  const ownerViewPool = options.daily ? createPool(db.urlFor('owner_view')) : null
+  const sink: AuditSink = options.realAudit && auditPool ? new DbAudit(auditPool) : audit
   const logs: string[] = []
   const limiter = new AttemptLimiter({
     maxFailures: LOCK_MAX_FAILURES,
@@ -102,12 +111,15 @@ export async function createStack(
     port: 0,
     databaseUrl: db.urlFor('app'),
     auditDatabaseUrl: db.urlFor('audit_writer'),
+    ownerViewDatabaseUrl: db.urlFor('owner_view'),
     queueDatabaseUrl: db.urlFor('queue'),
     authSecret: 'test-secret-'.padEnd(48, 'x'),
     workerSecret: 'worker-secret-'.padEnd(48, 'w'),
     attemptTokenSecret: 'attempt-secret-'.padEnd(48, 'a'),
+    triggerSecret: TRIGGER_SECRET,
     queueBacklogLimit: options.backlogLimit ?? 2000,
     publicOrigin: ORIGIN,
+    n8nHeartbeatExpected: false,
     logLevel: 'silent',
   }
   const queue = options.withQueue ? await openQueue(db.urlFor('queue')) : null
@@ -133,6 +145,17 @@ export async function createStack(
     jobs: jobs ?? undefined,
     alertChannel: options.alertChannel,
     clock: options.clock,
+    daily:
+      options.daily && ownerViewPool && auditPool
+        ? {
+            ownerViewPool,
+            auditWriterPool: auditPool,
+            store: options.daily.store,
+            fx: options.daily.fx,
+            dutyBudgetMs: options.daily.dutyBudgetMs,
+            verifyTimeoutMs: options.daily.verifyTimeoutMs,
+          }
+        : undefined,
     limiter,
     authLogger: options.libraryLog ? undefined : { disabled: true },
     extraRoutes: options.extraRoutes,
@@ -145,6 +168,7 @@ export async function createStack(
     mailer,
     audit,
     auditPool,
+    ownerViewPool,
     limiter,
     core,
     jobs,
@@ -157,18 +181,19 @@ export async function createStack(
       await appPool.end()
       await authPool.end()
       await auditPool?.end()
+      await ownerViewPool?.end()
       await db.drop()
     },
   }
 }
 
-export async function addBrand(stack: Stack, slug: string): Promise<string> {
+export async function addBrand(stack: Pick<Stack, 'db'>, slug: string): Promise<string> {
   const result = await stack.db.admin.query('select app.create_brand($1, $1) as id', [slug])
   return result.rows[0].id as string
 }
 
 export async function addUser(
-  stack: Stack,
+  stack: Pick<Stack, 'core' | 'db'>,
   options: { email: string; password: string; role?: Role; brandId?: string; platformOwner?: boolean },
 ): Promise<string> {
   const { id } = await createUserWithPassword(stack.core.auth, {

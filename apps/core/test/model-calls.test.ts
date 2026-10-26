@@ -686,3 +686,45 @@ describe('checkpoint rules and cost edge cases', () => {
     ).toEqual({ outcome: 'use_checkpoint', output: { late: true } })
   })
 })
+
+describe('a reply that did not finish its turn', () => {
+  it('is completed and costed, saves no step, and the retry asks again without being a duplicate', async () => {
+    const { jobId, claims } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, {
+      step: 'draft',
+      requestHash: 'hs',
+      model: 'test-model',
+    })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const saved = await saveCheckpoint(jobs, claims, {
+      callId: reg.callId,
+      step: 'draft',
+      output: null,
+      stopped: true,
+      model: 'test-model',
+      providerMessageId: 'msg_stop',
+      providerRequestId: null,
+      usage: USAGE,
+    })
+    expect(saved).toEqual({ costed: true })
+    const call = await stack.db.admin.query('select status, usd_micros from app.model_call where id = $1', [
+      reg.callId,
+    ])
+    expect(call.rows[0]).toEqual({ status: 'succeeded', usd_micros: '14000' })
+    const ledger = await stack.db.admin.query('select 1 from app.cost_ledger where model_call_id = $1', [
+      reg.callId,
+    ])
+    expect(ledger.rowCount).toBe(1)
+    const steps = await stack.db.admin.query('select saved_steps from app.job_input where job_id = $1', [
+      jobId,
+    ])
+    expect(steps.rows[0].saved_steps).toEqual([])
+
+    const again = await registerModelCall(jobs, claims, {
+      step: 'draft',
+      requestHash: 'hs',
+      model: 'test-model',
+    })
+    expect(again).toMatchObject({ outcome: 'send', possibleDuplicate: false })
+  })
+})

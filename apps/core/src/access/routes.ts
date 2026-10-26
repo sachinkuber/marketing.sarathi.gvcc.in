@@ -5,6 +5,7 @@ import { enrolmentGate, loadPrincipal, principalOf } from '../auth/session.ts'
 import { AppError } from '../errors.ts'
 import type { JobsDeps } from '../jobs/service.ts'
 import { brandAccess } from './brand-access.ts'
+import { triggerAuth, type TriggerDeps } from './trigger-auth.ts'
 import { attemptAuth, workerAuth } from './worker-auth.ts'
 import type { PermissionKey } from './permissions.ts'
 
@@ -18,6 +19,7 @@ export type Access =
   | { kind: 'permission'; permission: PermissionKey }
   | { kind: 'worker' } // the worker credential only
   | { kind: 'attempt' } // the worker credential and an attempt token
+  | { kind: 'trigger' } // a signed call from n8n
 
 export type Method = 'get' | 'post' | 'patch' | 'delete'
 
@@ -63,6 +65,12 @@ export class RouteTable {
       if (segment.toLowerCase() === 'brands' && segment !== 'brands') {
         throw new Error(`${where}: the brands segment must be spelled in lowercase`)
       }
+      // The same for the machine prefixes: /Triggers/... would serve /triggers/... and the guard's exemptions.
+      for (const prefix of ['triggers', 'worker']) {
+        if (segment.toLowerCase() === prefix && segment !== prefix) {
+          throw new Error(`${where}: the ${prefix} segment must be spelled in lowercase`)
+        }
+      }
     }
     // Only literal segments and plain :name parameters. path-to-regexp (Express 5) also reads {optional},
     // *wildcard, (regex), ? and escapes, any of which can match a brand URL without the rules here seeing it.
@@ -90,6 +98,12 @@ export class RouteTable {
     if (!machine && segments[0] === 'worker') {
       throw new Error(`${where}: only a worker or attempt route may live under /worker`)
     }
+    if (route.access.kind === 'trigger' && segments[0] !== 'triggers') {
+      throw new Error(`${where}: a trigger route must live under /triggers`)
+    }
+    if (route.access.kind !== 'trigger' && segments[0] === 'triggers') {
+      throw new Error(`${where}: only a trigger route may live under /triggers`)
+    }
     if (route.handlers.length === 0) throw new Error(`${where}: no handler`)
     if (route.summary.trim() === '') throw new Error(`${where}: a summary is required`)
     if (this.routes.some((r) => r.method === route.method && r.path === route.path)) {
@@ -102,7 +116,7 @@ export class RouteTable {
     return this.routes
   }
 
-  build(deps: { auth: Auth; pool: Pool; jobs?: JobsDeps }): Router {
+  build(deps: { auth: Auth; pool: Pool; jobs?: JobsDeps; triggers?: TriggerDeps }): Router {
     const router = Router()
     const principal = loadPrincipal(deps.auth, deps.pool)
     for (const route of this.routes) {
@@ -134,6 +148,11 @@ export class RouteTable {
           if (!deps.jobs)
             throw new Error(`${route.method} ${route.path}: worker routes need the jobs dependencies`)
           chain.push(workerAuth(deps.jobs.workerSecret), attemptAuth(deps.jobs))
+          break
+        case 'trigger':
+          if (!deps.triggers)
+            throw new Error(`${route.method} ${route.path}: trigger routes need the trigger dependencies`)
+          chain.push(triggerAuth(deps.triggers))
           break
       }
       router[route.method](route.path, ...chain, ...route.handlers)

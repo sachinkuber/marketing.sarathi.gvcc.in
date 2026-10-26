@@ -2,7 +2,9 @@ import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { z } from 'zod'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
+import { grantFor, type Actor } from '../access/permissions.ts'
 import { principalOf } from '../auth/session.ts'
+import { visibleBrands } from './brands.ts'
 import type { AuditSink } from '../ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
@@ -33,7 +35,12 @@ interface OverdueRow {
 // `shown` is whether this person has already answered the pop-up for this request in this sign-in: a popup_ack
 // row of theirs for the request made at or after the session began. Both times are taken on the application
 // host, never from the database clock.
-async function overdueFor(client: PoolClient, brandId: string, userId: string, sessionStartedAt: Date) {
+export async function overdueFor(
+  client: PoolClient,
+  brandId: string,
+  userId: string,
+  sessionStartedAt: Date,
+) {
   const found = await client.query<OverdueRow>(
     `select r.id as request_id, v.content_item_id, r.content_version_id,
             v.payload_canonical::jsonb ->> 'title' as title,
@@ -54,6 +61,47 @@ async function overdueFor(client: PoolClient, brandId: string, userId: string, s
 }
 
 export function registerOverdueRoutes(table: RouteTable, deps: OverdueRouteDeps): void {
+  // One read across the caller's brands, so the pop-up can open on any screen without a poll per brand. Only
+  // brands where the caller may approve are looked at (a member with approve_content; the platform owner for
+  // every brand), and only those with something overdue are listed. Each brand is read inside withBrand with
+  // that brand's own rule, so one brand's items can never appear under another.
+  table.add({
+    method: 'get',
+    path: '/overdue',
+    access: { kind: 'enrolled' },
+    summary: 'Overdue approval requests across the brands the caller may approve in, with the pop-up state',
+    handlers: [
+      async (_req, res) => {
+        const principal = principalOf(res)
+        const brands: Array<Record<string, unknown>> = []
+        for (const brand of await visibleBrands(deps.pool, principal)) {
+          if (!grantFor(brand.role as Actor, 'approve_content')) continue
+          const rows = await withBrand(deps.pool, brand.id, (client) =>
+            overdueFor(client, brand.id, principal.userId, principal.sessionStartedAt),
+          )
+          const first = rows[0]
+          if (!first) continue
+          brands.push({
+            brandId: brand.id,
+            brandName: brand.name,
+            count: rows.length,
+            popupDue: rows.some((r) => !r.shown),
+            firstRequestId: first.request_id,
+            firstItemId: first.content_item_id,
+            items: rows.map((r) => ({
+              contentItemId: r.content_item_id,
+              versionId: r.content_version_id,
+              title: r.title ?? undefined,
+              overdueSince: r.overdue_since,
+              requestedAt: r.requested_at,
+            })),
+          })
+        }
+        res.json({ brands })
+      },
+    ],
+  })
+
   table.add({
     method: 'get',
     path: '/brands/:brandId/approvals/overdue',

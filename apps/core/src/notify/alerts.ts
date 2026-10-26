@@ -150,8 +150,12 @@ const KINDS: Record<string, { kind: string; severity: 1 | 2 | 3 }> = {
   unknown_model_call: { kind: 'unknown_model_call', severity: 3 },
 }
 
+// n8n calls the daily trigger every day; a heartbeat older than this means it has stopped.
+export const HEARTBEAT_STALE_MS = 26 * 60 * 60 * 1000
+
 // Dead jobs, long-waiting jobs and unknown model calls become brand alerts, deduped by the job or call id.
-// Returns how many alerts it created.
+// When the daily workflow is expected, a missing or stale heartbeat becomes one platform alert. Returns how
+// many alerts it created.
 export async function alertOnOperationalFindings(
   pool: Pool,
   deps: NotifyDeps,
@@ -175,6 +179,22 @@ export async function alertOnOperationalFindings(
       detail: { id: row.ref },
     })
     if (result.created) created += 1
+  }
+  if (deps.heartbeatExpected && !overBudget(deps, startedAt)) {
+    const latest = await pool.query<{ at: Date | null }>(
+      "select max(finished_at) as at from app.duty_run where duty = 'n8n_heartbeat' and state = 'done'",
+    )
+    const at = latest.rows[0]?.at ?? null
+    if (at === null || deps.clock.now().getTime() - at.getTime() > HEARTBEAT_STALE_MS) {
+      const result = await raiseAlert(pool, deps, {
+        brandId: null,
+        severity: 2,
+        kind: 'n8n_heartbeat_missing',
+        ref: 'n8n_heartbeat',
+        detail: { lastHeartbeat: at?.toISOString() ?? null },
+      })
+      if (result.created) created += 1
+    }
   }
   return created
 }

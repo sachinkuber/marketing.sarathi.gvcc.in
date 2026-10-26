@@ -5,7 +5,7 @@ import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
 export default defineConfig(
-  globalIgnores(['**/node_modules/**', '**/dist/**', '**/coverage/**', 'docs/**']),
+  globalIgnores(['**/node_modules/**', '**/dist/**', '**/coverage/**', '**/.next/**', 'docs/**']),
   js.configs.recommended,
   tseslint.configs.recommended,
   { languageOptions: { globals: { ...globals.node } } },
@@ -54,6 +54,51 @@ export default defineConfig(
               message: 'The worker reaches the platform only through the core client and @mkt/queue.',
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // The dashboard runs in the browser and talks to the core over HTTP only: no workspace package, no
+    // database client, and never next/og (16.3.4 has a critical advisory in it; plan decision 4). This rule
+    // replaces the earlier no-restricted-imports one for these files, so it repeats those paths.
+    files: ['apps/dashboard/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...['pg', 'kysely', 'pg-boss'].map((name) => ({
+              name,
+              message: 'Business data is reached only through the core API.',
+            })),
+            { name: 'next/og', message: 'next/og is never imported (advisory fixed in 16.3.8).' },
+          ],
+          patterns: [
+            {
+              group: ['@mkt/*'],
+              message: 'The dashboard imports no workspace package; it calls the core API.',
+            },
+            { group: ['next/og/*'], message: 'next/og is never imported (advisory fixed in 16.3.8).' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The browser checks start the whole stack in one Node process (like the core's tests do), so unlike the
+    // dashboard's own code they may import the workspace packages. The database clients stay banned.
+    files: ['apps/dashboard/e2e/**/*.ts'],
+    languageOptions: { globals: { ...globals.node } },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['pg', 'kysely', 'pg-boss'].map((name) => ({
+            name,
+            message: 'Business data is reached only through @mkt/db.',
+          })),
         },
       ],
     },

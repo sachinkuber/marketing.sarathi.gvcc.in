@@ -4,6 +4,8 @@ export interface ModelRequest {
   messages: { role: 'user' | 'assistant'; content: string }[]
   maxTokens: number
   effort?: 'low' | 'medium' | 'high'
+  // A JSON schema the reply must follow (structured output).
+  outputSchema?: Record<string, unknown>
 }
 export interface ModelUsage {
   inputTokens: number
@@ -15,6 +17,8 @@ export interface ModelReply {
   text: string
   messageId: string
   requestId: string | null
+  // Why the provider stopped: 'end_turn' is a finished reply; anything else (max_tokens, refusal) is not.
+  stopReason: string | null
   usage: ModelUsage
 }
 export interface ModelClient {
@@ -28,6 +32,17 @@ export class ModelRefusedError extends Error {
   constructor(status: number, message: string) {
     super(message)
     this.status = status
+  }
+}
+
+// The reply stopped for a reason other than finishing its turn (cut off at the token limit, a refusal). The
+// text is not kept in the error: it may be part of a brief or of a half-written result.
+export class ModelStopped extends Error {
+  readonly stopReason: string | null
+  constructor(stopReason: string | null) {
+    super(`The model stopped before finishing (${stopReason ?? 'no reason given'}).`)
+    this.name = 'ModelStopped'
+    this.stopReason = stopReason
   }
 }
 

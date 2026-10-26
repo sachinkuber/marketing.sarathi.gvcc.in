@@ -20,6 +20,17 @@ export class ThrowingMailer implements Mailer {
   }
 }
 
+// A mail transport that never answers (a hung server): every send stays pending for good.
+export class HangingMailer implements Mailer {
+  readonly sent: MailMessage[] = []
+  attempts = 0
+  send(message: MailMessage): Promise<SendReceipt> {
+    void message // the message is never answered
+    this.attempts += 1
+    return new Promise<SendReceipt>(() => undefined)
+  }
+}
+
 export class MemoryAudit implements AuditSink {
   readonly entries: AuditEntry[] = []
   // Parallel to entries: true where the call carried a transaction, so a test can see which entries were

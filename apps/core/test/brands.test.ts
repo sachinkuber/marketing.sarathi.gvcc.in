@@ -57,12 +57,48 @@ describe('brands', () => {
     expect((await viewer.request('GET', `/api/v1/brands/${brandB}`)).status).toBe(404)
   })
 
-  it('lets the platform owner read any brand, as platform_owner, and lists no brand it has no membership in', async () => {
+  it('lets the platform owner read any brand, and lists every brand for one with no membership, each as platform_owner', async () => {
     const { client } = await enrolledClient(stack, 'owner@example.test', PASSWORD)
     const read = await client.request('GET', `/api/v1/brands/${brandB}`)
     expect(read.status).toBe(200)
     expect(read.json.role).toBe('platform_owner')
-    expect((await client.request('GET', '/api/v1/brands')).json.brands).toEqual([])
+    const listed = await client.request('GET', '/api/v1/brands')
+    expect(listed.status).toBe(200)
+    expect(listed.json.brands).toEqual([
+      { id: brandA, name: 'brand-a', slug: 'brand-a', status: 'onboarding', role: 'platform_owner' },
+      { id: brandB, name: 'brand-b', slug: 'brand-b', status: 'onboarding', role: 'platform_owner' },
+    ])
+  })
+
+  it('still lists only their own brand for an admin of one brand, and none for a stranger', async () => {
+    await addUser(stack, {
+      email: 'admin-a@example.test',
+      password: PASSWORD,
+      role: 'brand_admin',
+      brandId: brandA,
+    })
+    await addUser(stack, { email: 'stranger@example.test', password: PASSWORD })
+    const { client: admin } = await enrolledClient(stack, 'admin-a@example.test', PASSWORD)
+    expect((await admin.request('GET', '/api/v1/brands')).json.brands).toEqual([
+      { id: brandA, name: 'brand-a', slug: 'brand-a', status: 'onboarding', role: 'brand_admin' },
+    ])
+    const { client: stranger } = await enrolledClient(stack, 'stranger@example.test', PASSWORD)
+    expect((await stranger.request('GET', '/api/v1/brands')).json.brands).toEqual([])
+  })
+
+  it('does not let the owner-only function answer for anyone else', async () => {
+    const owner = await stack.db.admin.query(`select id from auth."user" where email = 'owner@example.test'`)
+    const stranger = await stack.db.admin.query(
+      `select id from auth."user" where email = 'viewer@example.test'`,
+    )
+    const asOwner = await stack.appPool.query('select * from app.brands_for_platform_owner($1)', [
+      owner.rows[0].id,
+    ])
+    expect(asOwner.rowCount).toBe(2)
+    const asViewer = await stack.appPool.query('select * from app.brands_for_platform_owner($1)', [
+      stranger.rows[0].id,
+    ])
+    expect(asViewer.rowCount).toBe(0)
   })
 
   it('needs a session', async () => {

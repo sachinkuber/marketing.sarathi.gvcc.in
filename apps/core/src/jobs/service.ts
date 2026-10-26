@@ -253,6 +253,38 @@ export async function requireCurrentAttempt(
   throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
 }
 
+// A worker ends its own attempt because the job is held. The job's row lock is taken first (the lock
+// order is job_input, then run; nothing here needs the run), so this cannot interleave with a supersede.
+// Only the job's latest attempt, the one in the token, may end: an older token is refused and recorded
+// like any other stale attempt. An attempt that has already ended (a repeat) is left as it is. The state is
+// 'failed' (the enum has no 'held'); nothing is audited, as a hold is not an event of the attempt's own.
+export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise<void> {
+  await withBrand(deps.pool, claims.brandId, async (client) => {
+    await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
+    const { rows } = await client.query<{ id: string; state: string }>(
+      `select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1`,
+      [claims.jobId],
+    )
+    const latest = rows[0]
+    if (!latest) throw new AppError(404, 'job_not_found', 'No such job.')
+    if (latest.id !== claims.attemptId) {
+      await deps.audit.record({
+        action: 'worker.attempt_refused',
+        actor: null,
+        brandId: claims.brandId,
+        subject: claims.jobId,
+        outcome: 'failure',
+        detail: { reason: 'attempt_superseded', jobId: claims.jobId, attemptId: claims.attemptId },
+      })
+      throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
+    }
+    await client.query(
+      `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
+      [claims.attemptId],
+    )
+  })
+}
+
 // The cancel flag and whether the job is held. Held is the job's own flag OR an active kill switch that covers
 // it (brand scope, or agent scope naming the run's agent; channel scope covers no job). When a switch holds a
 // job whose flag is still false, the flag is set here in the same transaction, so the flag always tells the
@@ -377,6 +409,9 @@ export interface CheckpointInput {
   callId: string
   step: string
   output: unknown
+  // The provider answered but the reply did not finish its turn: the call is completed and costed, and no
+  // step is saved, so a retry asks again (it is not a duplicate: this call has an outcome).
+  stopped?: true
   model: string
   providerMessageId: string
   providerRequestId: string | null
@@ -503,6 +538,7 @@ export async function saveCheckpoint(
         ],
       )
     }
+    if (input.stopped) return { costed }
     const steps: SavedStep[] = [
       ...job.rows[0]!.saved_steps.filter((s) => !(s.step === row.step && s.requestHash === row.request_hash)),
       { step: row.step, requestHash: row.request_hash, output: input.output, callId: input.callId },
@@ -563,6 +599,10 @@ export async function postResult(
   posted: PostedResult,
 ): Promise<ResultAnswer> {
   return withBrand(deps.pool, claims.brandId, async (client) => {
+    // Lock order, step 1 (approvals/requests.ts): the brand row, shared, before the job's row. A handler
+    // writes rows that reference the brand (a content item, the next job), which would ask for it after
+    // job_input and run are held, against a release that holds the brand row and asks for the job's row.
+    await client.query('select 1 from app.brand where id = $1 for share', [claims.brandId])
     await requireCurrentAttempt(client, deps, claims)
     const found = await client.query<{
       run_id: string
@@ -608,6 +648,44 @@ export async function postResult(
   })
 }
 
+// How a run ends (plan decision 15), called by applyResult and by cancelJob with the run row locked by the
+// caller, after the job's own change is written. A job is open when it is neither finished nor cancelled.
+// - Any open job that is dead: the run stays as it is (failed), never succeeded.
+// - Otherwise, an open job left: a run that a dead job failed runs again (its dead jobs were cancelled or
+//   requeued since), so the later finish can end it.
+// - Otherwise every job is finished or cancelled: succeeded when at least one finished, else cancelled.
+// Only a run that is still going (created, running, or failed by a dead job) is moved: a run someone
+// cancelled, or one held or needing manual work, keeps its state. The run row is locked, so a sibling
+// finishing at the same moment waits for the caller and reads its job's end once it commits: one of the two
+// always sees the run complete.
+export async function finaliseRun(client: PoolClient, runId: string): Promise<void> {
+  const { rows } = await client.query<{ state: string; finished: number; open: number; dead: number }>(
+    `select r.state,
+            count(*) filter (where i.finished_at is not null)::int as finished,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested)::int as open,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null)::int as dead
+       from app.run r
+       join app.job_input i on i.run_id = r.id
+       join app.job_control c on c.job_id = i.job_id
+      where r.id = $1
+      group by r.state`,
+    [runId],
+  )
+  const run = rows[0]
+  if (!run || !['created', 'running', 'failed'].includes(run.state)) return
+  if (run.dead > 0) return
+  if (run.open > 0) {
+    if (run.state === 'failed') {
+      await client.query(`update app.run set state = 'running', finished_at = null where id = $1`, [runId])
+    }
+    return
+  }
+  await client.query(`update app.run set state = $2, finished_at = now() where id = $1`, [
+    runId,
+    run.finished > 0 ? 'succeeded' : 'cancelled',
+  ])
+}
+
 // A result posted while the job was held (job_input.held_result), with the attempt that posted it.
 export interface HeldResult {
   type: string
@@ -647,16 +725,7 @@ export async function applyResult(
   await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
     input.attemptId,
   ])
-  // The run succeeds when none of its jobs is left unfinished. The run row is already locked (above), so a
-  // sibling finishing at the same moment waited for us and re-reads this job's finished_at once we commit:
-  // one of the two always sees the run complete. Only a run that is still going is moved; a failed,
-  // cancelled, held or needs_manual run keeps its state.
-  await client.query(
-    `update app.run set state = 'succeeded', finished_at = now()
-      where id = $1 and state in ('created', 'running')
-        and not exists (select 1 from app.job_input where run_id = $1 and finished_at is null)`,
-    [input.runId],
-  )
+  await finaliseRun(client, input.runId)
   // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
   return JSON.parse(JSON.stringify(outcome ?? null)) as unknown
 }

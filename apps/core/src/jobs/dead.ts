@@ -1,7 +1,7 @@
 import { withBrand, type PoolClient } from '@mkt/db'
 import { CLASS_SETTINGS, JOB_CLASSES, type JobClass } from '@mkt/queue'
 import { AppError } from '../errors.ts'
-import { currentQueueId, type JobsDeps } from './service.ts'
+import { currentQueueId, finaliseRun, type JobsDeps } from './service.ts'
 
 export interface DeadJob {
   jobId: string
@@ -203,13 +203,7 @@ export async function cancelJob(
       'update app.job_control set cancel_requested = true, dead_at = null, updated_at = now() where job_id = $1',
       [jobId],
     )
-    await client.query(
-      `update app.run set state = 'cancelled', finished_at = now()
-        where id = $1 and state in ('created', 'running', 'failed') and not exists (
-          select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-           where i.run_id = $1 and i.finished_at is null and not c.cancel_requested)`,
-      [runId],
-    )
+    await finaliseRun(client, runId)
     await deps.audit.record(
       { action: 'jobs.cancelled', actor, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
       client,

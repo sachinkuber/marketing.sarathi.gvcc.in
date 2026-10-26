@@ -103,4 +103,26 @@ describe('the HTTP core client', () => {
       { url: 'http://core.test/api/v1/worker/approvals/tick', method: 'POST', auth: 'Worker secret' },
     ])
   })
+
+  it('ends a held attempt with the attempt token', async () => {
+    const seen: { url: string; method?: string; token?: string; body?: unknown }[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({
+        url,
+        method: init.method,
+        token: (init.headers as Record<string, string>)['x-attempt-token'],
+        body: JSON.parse(init.body as string),
+      })
+      return new Response(null, { status: 204 })
+    })
+    await httpCoreClient('http://core.test', 'secret').endAttempt('j1', 'tok', 'held')
+    expect(seen).toEqual([
+      {
+        url: 'http://core.test/api/v1/worker/jobs/j1/attempt/end',
+        method: 'POST',
+        token: 'tok',
+        body: { reason: 'held' },
+      },
+    ])
+  })
 })

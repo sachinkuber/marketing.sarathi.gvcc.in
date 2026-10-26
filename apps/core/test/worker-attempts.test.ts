@@ -314,3 +314,103 @@ describe('the attempt must be the current one when it acts', () => {
     expect((await refusals()).some((r) => r.reason === 'attempt_superseded' && r.jobId === jobId)).toBe(true)
   })
 })
+
+describe('ending an attempt that stopped because its job is held', () => {
+  async function begin(jobId: string): Promise<{ token: string; attemptId: string }> {
+    await markActive(jobId)
+    return (await call('POST', `/worker/jobs/${jobId}/attempts`, { body: { workerId: 'w1' } })).json()
+  }
+  const end = (jobId: string, token?: string) =>
+    call('POST', `/worker/jobs/${jobId}/attempt/end`, {
+      ...(token ? { token } : {}),
+      body: { reason: 'held' },
+    })
+  const states = async (jobId: string) =>
+    (
+      await stack.db.admin.query<{ state: string; ended: boolean }>(
+        'select state, ended_at is not null as ended from app.job_attempt where job_id = $1 order by attempt_number',
+        [jobId],
+      )
+    ).rows
+  const logged = async () =>
+    (await stack.db.admin.query(`select 1 from audit.log where action like 'worker.attempt%'`)).rowCount
+
+  it('ends the current attempt as failed, with an end time, and audits nothing', async () => {
+    const jobId = await makeJob(brandA)
+    const started = await begin(jobId)
+    const before = await logged()
+    expect((await end(jobId, started.token)).status).toBe(204)
+    expect(await states(jobId)).toEqual([{ state: 'failed', ended: true }])
+    expect(await logged()).toBe(before)
+  })
+
+  it('is harmless when repeated', async () => {
+    const jobId = await makeJob(brandA)
+    const started = await begin(jobId)
+    expect((await end(jobId, started.token)).status).toBe(204)
+    const first = await stack.db.admin.query('select ended_at from app.job_attempt where job_id = $1', [
+      jobId,
+    ])
+    expect((await end(jobId, started.token)).status).toBe(204)
+    const second = await stack.db.admin.query('select ended_at from app.job_attempt where job_id = $1', [
+      jobId,
+    ])
+    expect(second.rows).toEqual(first.rows)
+    expect(await states(jobId)).toEqual([{ state: 'failed', ended: true }])
+  })
+
+  it('refuses a superseded attempt and leaves the newer one running', async () => {
+    const jobId = await makeJob(brandA)
+    const old = await begin(jobId)
+    await call('POST', `/worker/jobs/${jobId}/attempts`, { body: { workerId: 'w2' } })
+    expect((await end(jobId, old.token)).status).toBe(403)
+    expect(await states(jobId)).toEqual([
+      { state: 'superseded', ended: true },
+      { state: 'active', ended: false },
+    ])
+    expect((await refusals()).some((r) => r.reason === 'attempt_superseded' && r.jobId === jobId)).toBe(true)
+  })
+
+  it('refuses a missing token, a token for another job, and an unknown job', async () => {
+    const jobId = await makeJob(brandA)
+    const started = await begin(jobId)
+    expect((await end(jobId)).status).toBe(403)
+    expect((await end(randomUUID(), started.token)).status).toBe(403)
+    expect(await states(jobId)).toEqual([{ state: 'active', ended: false }])
+
+    const ghost = randomUUID()
+    const claims = JSON.parse(
+      Buffer.from(started.token.split('.')[1]!, 'base64url').toString(),
+    ) as AttemptClaims
+    const forged = signAttemptToken(jobs.attemptTokenSecret, { ...claims, jobId: ghost })
+    expect((await end(ghost, forged)).status).toBe(404)
+  })
+
+  it('lets a fresh attempt start afterwards, and the old token is then refused', async () => {
+    const jobId = await makeJob(brandA)
+    const old = await begin(jobId)
+    expect((await end(jobId, old.token)).status).toBe(204)
+    const next = await (
+      await call('POST', `/worker/jobs/${jobId}/attempts`, { body: { workerId: 'w2' } })
+    ).json()
+    expect(next.attemptNumber).toBe(2)
+    expect(await states(jobId)).toEqual([
+      { state: 'failed', ended: true },
+      { state: 'active', ended: false },
+    ])
+    expect((await call('GET', `/worker/jobs/${jobId}/control`, { token: old.token })).status).toBe(403)
+    expect((await end(jobId, old.token)).status).toBe(403)
+    expect((await call('GET', `/worker/jobs/${jobId}/control`, { token: next.token })).status).toBe(200)
+  })
+
+  it('does not take a reason other than held', async () => {
+    const jobId = await makeJob(brandA)
+    const started = await begin(jobId)
+    const res = await call('POST', `/worker/jobs/${jobId}/attempt/end`, {
+      token: started.token,
+      body: { reason: 'cancelled' },
+    })
+    expect(res.status).toBe(400)
+    expect(await states(jobId)).toEqual([{ state: 'active', ended: false }])
+  })
+})

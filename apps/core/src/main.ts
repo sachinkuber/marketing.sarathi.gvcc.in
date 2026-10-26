@@ -1,8 +1,8 @@
 import { createPool } from '@mkt/db'
 import { DbAudit } from './audit/db-audit.ts'
-import { UnconfiguredMailer } from './adapters.ts'
 import { loadConfig } from './config.ts'
 import { createLogger } from './logger.ts'
+import { mailerFromConfig } from './notify/smtp.ts'
 import { startServer } from './server.ts'
 
 const config = loadConfig(process.env)
@@ -11,7 +11,7 @@ const auditPool = createPool(config.auditDatabaseUrl)
 auditPool.on('error', (error) => logger.error({ err: error, pool: 'audit' }, 'idle database client error'))
 const server = await startServer(config, {
   logger,
-  mailer: new UnconfiguredMailer(),
+  mailer: mailerFromConfig(config),
   audit: new DbAudit(auditPool),
 })
 logger.info({ url: server.url }, 'core service started')

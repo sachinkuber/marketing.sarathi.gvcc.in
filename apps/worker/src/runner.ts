@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { JobClass } from '@mkt/queue'
 import { CoreError, type CoreClient } from './core-client.ts'
-import { isDefiniteRefusal, type ModelClient, type ModelRequest } from './model.ts'
+import { isDefiniteRefusal, ModelStopped, type ModelClient, type ModelRequest } from './model.ts'
 
 export class JobStopped extends Error {
   readonly why: 'cancelled' | 'held'
@@ -16,7 +16,7 @@ export interface JobContext {
   jobClass: JobClass
   input: unknown
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
-  modelStep(step: string, request: ModelRequest): Promise<{ text: string }>
+  modelStep(step: string, request: ModelRequest): Promise<{ text: string; stopReason?: string | null }>
   // Called between steps: throws JobStopped when the job was cancelled or held.
   // `allowHeld`: stop only for a cancel (used before the result is posted, when a held job still posts so
   // the core keeps the paid-for result).
@@ -52,6 +52,7 @@ function requestHash(request: ModelRequest): string {
     messages: request.messages.map((m) => [m.role, m.content]),
     maxTokens: request.maxTokens,
     effort: request.effort ?? null,
+    outputSchema: request.outputSchema ?? null,
   }
   return createHash('sha256').update(JSON.stringify(ordered)).digest('hex')
 }
@@ -84,7 +85,8 @@ export async function runJob(
         requestHash: requestHash(request),
         model: request.model,
       })
-      if (registered.outcome === 'use_checkpoint') return registered.output as { text: string }
+      if (registered.outcome === 'use_checkpoint')
+        return registered.output as { text: string; stopReason?: string | null }
       if (registered.outcome === 'cancelled' || registered.outcome === 'held') {
         throw new JobStopped(registered.outcome)
       }
@@ -113,10 +115,15 @@ export async function runJob(
         }
         throw error
       }
-      const output = { text: reply.text }
+      const stopped = reply.stopReason !== 'end_turn'
+      // A reply that did not end its turn was still paid for: the call is completed and costed (no step is
+      // saved, so a retry asks again), and only then does the job stop. It is not failCall: that means the
+      // provider refused and did no work.
+      const output = stopped ? null : { text: reply.text, stopReason: reply.stopReason }
       const body = {
         step,
         output,
+        ...(stopped ? { stopped: true as const } : {}),
         model: request.model,
         providerMessageId: reply.messageId,
         providerRequestId: reply.requestId,
@@ -133,7 +140,8 @@ export async function runJob(
           delay *= 2
         }
       }
-      return output
+      if (stopped) throw new ModelStopped(reply.stopReason)
+      return output as { text: string; stopReason: string | null }
     },
   }
 
@@ -145,7 +153,18 @@ export async function runJob(
     await deps.core.postResult(job.id, started.token, outcome)
   } catch (error) {
     // A cancelled or held job ends here without a retry: the core already knows.
-    if (error instanceof JobStopped) return
+    if (error instanceof JobStopped) {
+      // A held job's attempt is ended, so a release starts a fresh attempt instead of finding a live one. A
+      // failure to say so is not worth failing the stop for: the next attempt supersedes this one anyway.
+      if (error.why === 'held') {
+        try {
+          await deps.core.endAttempt(job.id, started.token, 'held')
+        } catch {
+          // Nothing to add: the attempt stays active until the next one supersedes it.
+        }
+      }
+      return
+    }
     // The cancel can also arrive between the check and the post: the core refuses the result with 409.
     if (error instanceof CoreError && error.status === 409 && error.code === 'job_cancelled') return
     throw error

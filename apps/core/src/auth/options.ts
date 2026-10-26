@@ -37,7 +37,11 @@ async function safeSend(deps: AuthDeps, message: MailMessage): Promise<void> {
   try {
     await deps.mailer.send(message)
   } catch (error) {
-    deps.onMailFailure?.(error)
+    try {
+      deps.onMailFailure?.(error)
+    } catch {
+      // A reporter that fails must not become an unhandled rejection.
+    }
   }
 }
 
@@ -120,8 +124,10 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
       maxPasswordLength: PASSWORD_MAX,
       resetPasswordTokenExpiresIn: RESET_LINK_SECONDS,
       revokeSessionsOnPasswordReset: true,
+      // Not awaited: the answer must not wait for the mail, or its timing would tell a person whether an
+      // address has an account. A failure is reported by safeSend (by name only).
       sendResetPassword: async ({ user, token }) => {
-        await safeSend(deps, {
+        void safeSend(deps, {
           to: user.email,
           subject: 'Reset your password',
           text: `Open this link to choose a new password:\n${deps.baseURL}/reset-password?token=${token}\nThe link works once and expires in 30 minutes. You will still be asked for your second factor when you sign in.`,

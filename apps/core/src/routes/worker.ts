@@ -5,6 +5,7 @@ import { claimsOf } from '../access/worker-auth.ts'
 import type { RouteTable } from '../access/routes.ts'
 import { markDead, sweepModelCalls, unmarkedDead } from '../jobs/dead.ts'
 import {
+  endAttempt,
   failModelCall,
   postResult,
   readControl,
@@ -44,6 +45,7 @@ const registerBody = z.strictObject({
 const checkpointBody = z.strictObject({
   step: text(200),
   output: z.json().refine(noNul, 'must not contain U+0000'),
+  stopped: z.literal(true).optional(),
   model: text(200),
   providerMessageId: text(200),
   providerRequestId: z.string().max(200).refine(noNul, 'must not contain U+0000').nullable(),
@@ -59,6 +61,7 @@ const resultBody = z.strictObject({
   result: z.json().refine(noNul, 'must not contain U+0000'),
 })
 const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
+const endBody = z.strictObject({ reason: z.literal('held') })
 const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
@@ -163,6 +166,20 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
         const { body } = inputOf<{ body: z.infer<typeof resultBody> }>(res)
         const answer = await postResult(deps, claimsOf(res), body)
         res.status(answer.status === 'held' ? 202 : 200).json(answer)
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/worker/jobs/:jobId/attempt/end',
+    access: { kind: 'attempt' },
+    summary: 'A worker ends its current attempt because the job is held, so a release starts a fresh one',
+    handlers: [
+      validate({ params: jobParams, body: endBody }),
+      async (_req, res) => {
+        await endAttempt(deps, claimsOf(res))
+        res.status(204).end()
       },
     ],
   })

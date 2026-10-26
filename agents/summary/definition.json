@@ -1,0 +1,9 @@
+{
+  "agent": "summary",
+  "version": 1,
+  "model": "claude-opus-5-5",
+  "effort": "low",
+  "maxTokens": 1024,
+  "jobClass": "interactive",
+  "resultType": "summary.v1"
+}

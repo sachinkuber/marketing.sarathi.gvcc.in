@@ -1,11 +1,12 @@
 import { openQueue, type JobClass } from '@mkt/queue'
 import { anthropicModel } from './anthropic.ts'
-import { loadWorkerConfig } from './config.ts'
+import { loadWorkerConfig, type WorkerConfig } from './config.ts'
 import { httpCoreClient, type CoreClient } from './core-client.ts'
 import type { ModelClient } from './model.ts'
 import { DEFAULT_MAX_WAIT_SECONDS, startMaintenance } from './maintenance.ts'
 import { runJob, type JobHandler } from './runner.ts'
-import { standInModel } from './standin.ts'
+import { checkHandler } from './agents/check.ts'
+import { summaryHandler } from './agents/summary.ts'
 
 export interface WorkerOptions {
   core: CoreClient
@@ -70,17 +71,24 @@ export async function startWorker(
   }
 }
 
+// The stand-in is accepted by the configuration only under NODE_ENV=test, and is loaded only here, so the
+// production module graph does not contain it.
+export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
+  if (config.modelBackend === 'standin') {
+    return (await import('./standin.ts')).standInModel({ logFile: process.env.MODEL_LOG ?? '/dev/null' })
+  }
+  return anthropicModel(config.anthropicApiKey!)
+}
+
 // The production entry, guarded so importing this module (from a test) starts nothing and reads no
 // environment.
 if (import.meta.main) {
   const config = loadWorkerConfig(process.env)
-  // Phase 1 registers no production handler: the trivial agent (package 13) adds its own.
-  const handlers: Record<string, JobHandler> = {}
-  // The stand-in is accepted by the configuration only under NODE_ENV=test.
-  const model =
-    config.modelBackend === 'standin'
-      ? standInModel({ logFile: process.env.MODEL_LOG ?? '/dev/null' })
-      : anthropicModel(config.anthropicApiKey!)
+  const handlers: Record<string, JobHandler> = {
+    'summary.v1': summaryHandler,
+    'placeholder_check.v1': checkHandler,
+  }
+  const model = await chooseModel(config)
   const worker = await startWorker({
     core: httpCoreClient(config.coreUrl, config.workerSecret),
     model,

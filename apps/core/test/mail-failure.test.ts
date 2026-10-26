@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ThrowingMailer } from '../src/testing.ts'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { HangingMailer, ThrowingMailer } from '../src/testing.ts'
 import { addBrand, addUser, createStack, enrol, type Stack } from './support.ts'
 
 const PASSWORD = 'correct horse battery'
@@ -33,6 +33,8 @@ describe('a mail transport that is down', () => {
     expect(unknown.status).toBe(200)
     expect(unknown.text).toBe(known.text)
     expect(mailer.attempts).toBe(1)
+    // The send is not awaited, so the report follows the answer.
+    await vi.waitFor(() => expect(mailFailures().length - before).toBe(1))
     const reported = mailFailures().slice(before)
     expect(reported).toHaveLength(1)
     expect(reported[0]).not.toContain('known@example.test')
@@ -71,4 +73,34 @@ describe('a mail transport that is down', () => {
     })
     expect(reuse.status).toBe(401)
   })
+})
+
+// The reset mail is sent without waiting for it, so how long the answer takes does not tell a person whether
+// an address has an account (the 2b mail-timing follow-up).
+describe('a mail transport that never answers', () => {
+  let stack: Stack
+  let mailer: HangingMailer
+
+  beforeAll(async () => {
+    mailer = new HangingMailer()
+    stack = await createStack({ mailer })
+    const brand = await addBrand(stack, 'brand-hang')
+    await addUser(stack, { email: 'known@example.test', password: PASSWORD, role: 'viewer', brandId: brand })
+  })
+  afterAll(async () => stack?.close())
+
+  it('does not hold the response to a reset request for a known or an unknown address', async () => {
+    const ask = (email: string) =>
+      Promise.race([
+        stack
+          .newClient()
+          .request('POST', '/api/auth/request-password-reset', { body: { email } })
+          .then((r) => r.status),
+        new Promise<string>((resolve) => setTimeout(() => resolve('held'), 5_000)),
+      ])
+    expect(await ask('known@example.test')).toBe(200)
+    expect(await ask('nobody@example.test')).toBe(200)
+    // Only the known address had mail to send, and it is still pending.
+    expect(mailer.attempts).toBe(1)
+  }, 15_000)
 })

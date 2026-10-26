@@ -21,6 +21,9 @@ const itemParams = z.strictObject({ brandId: z.uuid(), itemId: z.uuid() })
 const listQuery = z.strictObject({
   state: z.enum(VERSION_STATES).optional(),
   overdue: z.enum(['true', 'false']).optional(),
+  // `oldest` lists by how long each item has waited, oldest first, so the row cap drops the newest, not the
+  // oldest; the default is newest first.
+  order: z.enum(['newest', 'oldest']).optional(),
 })
 // What a client may send: the payload without the fields the server owns.
 const editBody = contentPayloadSchema.omit({ schema: true, brand_id: true, content_item_id: true })
@@ -50,9 +53,16 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
               where i.brand_id = $1
                 and ($2::app.version_state is null or s.state = $2)
                 and ($3::boolean is null or coalesce(r.overdue, false) = $3)
-              order by coalesce(v.created_at, i.created_at) desc, i.id
+              order by case when $4::text = 'oldest'
+                            then coalesce(r.requested_at, v.created_at, i.created_at) end,
+                       coalesce(v.created_at, i.created_at) desc, i.id
               limit 200`,
-            [brandId, query.state ?? null, query.overdue === undefined ? null : query.overdue === 'true'],
+            [
+              brandId,
+              query.state ?? null,
+              query.overdue === undefined ? null : query.overdue === 'true',
+              query.order ?? 'newest',
+            ],
           )
           return found.rows
         })
@@ -77,7 +87,7 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
     method: 'get',
     path: '/brands/:brandId/content/:itemId',
     access: { kind: 'permission', permission: 'view_content' },
-    summary: 'One content item with all its versions and their states',
+    summary: 'One content item with all its versions, their states and their check results',
     handlers: [
       validate({ params: itemParams }),
       async (_req, res) => {
@@ -98,9 +108,27 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
               order by v.number`,
             [brandId, params.itemId],
           )
-          return { item: item.rows[0], versions: versions.rows }
+          const checks = await client.query(
+            `select c.content_version_id, c.check_name, c.kind, c.passed, c.detail, c.created_at
+               from app.check_result c
+               join app.content_version v on v.id = c.content_version_id
+              where c.brand_id = $1 and v.content_item_id = $2
+              order by c.created_at, c.id`,
+            [brandId, params.itemId],
+          )
+          return { item: item.rows[0], versions: versions.rows, checks: checks.rows }
         })
         if (!result) throw notFound()
+        const checksOf = (versionId: string) =>
+          result.checks
+            .filter((c) => c.content_version_id === versionId)
+            .map((c) => ({
+              name: c.check_name,
+              kind: c.kind,
+              passed: c.passed,
+              detail: c.detail,
+              at: c.created_at,
+            }))
         res.json({
           id: result.item.id,
           kind: result.item.kind,
@@ -116,6 +144,7 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
             payload: JSON.parse(v.payload_canonical as string),
             createdBy: { kind: v.created_by_kind, userId: v.created_by_user, runId: v.created_by_run },
             createdAt: v.created_at,
+            checks: checksOf(v.id as string),
           })),
         })
       },

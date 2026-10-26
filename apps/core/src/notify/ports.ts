@@ -30,6 +30,8 @@ export interface NotifyDeps {
   // Real-time limits (not the Clock): one send, and one timer tick. Defaults below.
   sendTimeoutMs?: number
   tickBudgetMs?: number
+  // True once the daily n8n workflow is live: a heartbeat older than 26 hours then raises an alert.
+  heartbeatExpected?: boolean
 }
 
 export const SEND_TIMEOUT_MS = 10_000
