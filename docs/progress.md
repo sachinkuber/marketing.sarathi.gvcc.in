@@ -438,7 +438,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
   - The remaining milestone 5 minors (listed under milestone 5 Findings) that this milestone did not absorb.
   - `apps/worker` runner.ts checkpoints a schema-invalid `end_turn` reply before validating it, so a retry replays the same bad text; validate before saving the checkpoint.
-  - Dependencies added beyond the decisions' list, needing the owner's sign-off (not removed): `happy-dom` 20.14.5 (plan decision 3 names it, but not as an approved pin) and `@types/nodemailer` 8.0.2.
+  - Dependencies added beyond the decisions' list: `happy-dom` 20.14.5 (plan decision 3 names it, but not as an approved pin) and `@types/nodemailer` 8.0.2. Accepted by the owner on 2026-10-29 ("as per your recommendation"): both stay, `happy-dom` for the interaction tests and `@types/nodemailer` for the type check.
   - Test 41 (load and the canary measurement) and the activation of the n8n workflows: milestone 7.
 - Documents: the schema document `docs/database/2026-10-04-database-schema.md` is updated for migration 0018 (sections 7.1, 7.11, 8.3, 9.3, 11.1, 11.2 and 12). No pin changed, so spec section 3 is unchanged. The `.docx` copy of the schema document was not regenerated: `tools/build-docs` has no script for it, and the renderer `mmdc` is not installed (it needs a headless Chromium, which `tools/build-docs` does not install); the Markdown is canonical.
 
