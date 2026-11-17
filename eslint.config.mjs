@@ -18,7 +18,10 @@ export default defineConfig(
   },
   {
     files: ['apps/**/*.ts', 'packages/**/*.ts'],
+    // apps/ops runs at deployment as the database superuser (migrations, role passwords, queue install),
+    // never at run time, so it reaches the database directly like packages/db does.
     ignores: [
+      'apps/ops/**',
       'packages/db/**',
       'packages/queue/**',
       'packages/queue-contract/**',

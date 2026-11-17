@@ -1,0 +1,18 @@
+{
+  "name": "@mkt/ops",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy:prepare": "node src/prepare.ts"
+  },
+  "dependencies": {
+    "@mkt/db": "*",
+    "@mkt/queue": "*",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@mkt/test-support": "*",
+    "@types/pg": "8.23.1"
+  }
+}
