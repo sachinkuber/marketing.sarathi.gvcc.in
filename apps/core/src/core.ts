@@ -129,6 +129,7 @@ export function buildCore(deps: CoreDeps): {
   )
   const app = createApp({
     logger: deps.logger,
+    trustProxy: config.trustProxy,
     ready: async () => {
       await deps.appPool.query('select 1')
     },

@@ -94,7 +94,10 @@ export class StandInFxSource implements FxSource {
   // When true a call never answers on its own; it rejects only when its signal aborts (a hung source).
   hang = false
   aborted = false
-  constructor(private readonly rateMicros: bigint) {}
+  private readonly rateMicros: bigint
+  constructor(rateMicros: bigint) {
+    this.rateMicros = rateMicros
+  }
 
   failNext(times: number): void {
     this.failures = times

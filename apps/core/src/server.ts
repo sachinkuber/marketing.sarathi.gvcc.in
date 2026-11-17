@@ -42,7 +42,7 @@ export async function startServer(
     pool.on('error', (error) => deps.logger.error({ err: error, pool: name }, 'idle database client error'))
   }
   registerSummaryHandlers(results, { audit: deps.audit, queue, backlogLimit: config.queueBacklogLimit })
-  // trustProxy (AppDeps) is set at deployment (package 16) because the invite limiter keys on req.ip.
+  // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,
     logger: deps.logger,

@@ -14,7 +14,7 @@ const pinned: Record<string, string> = {
   express: '5.2.1',
   helmet: '8.3.0',
   kysely: '0.29.5',
-  next: '16.3.4',
+  next: '16.3.8',
   'node-pg-migrate': '8.0.4',
   nodemailer: '9.1.1',
   pg: '8.23.0',

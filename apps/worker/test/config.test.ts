@@ -62,3 +62,43 @@ describe('the model backend choice', () => {
     expect(source.match(/import\(\s*['"]\.\/standin\.ts['"]\s*\)/g)).toHaveLength(1)
   })
 })
+
+describe('production refusals', () => {
+  const production = {
+    ...base,
+    NODE_ENV: 'production',
+    ANTHROPIC_API_KEY: SECRET_KEY,
+    CORE_URL: 'https://core.test',
+  }
+
+  it('refuses CHANGE_ME in any value in production, naming the variable and not the value', () => {
+    for (const key of ['ANTHROPIC_API_KEY', 'WORKER_SECRET', 'QUEUE_DATABASE_URL']) {
+      const env: Record<string, string> = { ...production }
+      env[key] =
+        key === 'QUEUE_DATABASE_URL'
+          ? 'postgres://u:CHANGE_ME@localhost:5432/q'
+          : `${'k'.repeat(40)}CHANGE_ME`
+      let message = ''
+      try {
+        loadWorkerConfig(env)
+      } catch (e) {
+        message = (e as Error).message
+      }
+      expect(message).toContain(key)
+      expect(message).not.toContain('CHANGE_ME')
+    }
+  })
+
+  it('accepts CHANGE_ME outside production', () => {
+    expect(() => loadWorkerConfig({ ...base, ANTHROPIC_API_KEY: 'CHANGE_ME' })).not.toThrow()
+  })
+
+  it('carries the Sentry DSN, and refuses CHANGE_ME in it in production', () => {
+    const dsn = 'https://key@o0.ingest.example.test/1'
+    expect(loadWorkerConfig({ ...production, SENTRY_DSN: dsn }).sentryDsn).toBe(dsn)
+    expect(loadWorkerConfig({ ...production }).sentryDsn).toBeUndefined()
+    expect(() =>
+      loadWorkerConfig({ ...production, SENTRY_DSN: 'https://CHANGE_ME@o0.example.test/1' }),
+    ).toThrow('SENTRY_DSN')
+  })
+})

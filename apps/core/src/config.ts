@@ -28,7 +28,17 @@ const schema = z.object({
   SMTP_URL: z.url().optional(),
   MAIL_FROM: z.string().regex(MAIL_FROM_PATTERN).optional(),
   LOG_LEVEL: z.enum(LEVELS).default('info'),
+  // Proxies in front of the service (0 to 3). Required in production: the limiter keys on the client address.
+  TRUST_PROXY: z
+    .string()
+    .regex(/^[0-3]$/)
+    .optional(),
+  // Error reporting; unset means none. The DSN is a credential, so it is never logged or put in an error.
+  SENTRY_DSN: z.url().optional(),
 })
+
+// Variables where an empty value means unset, so a blank line in a deployment file turns the feature off.
+const BLANK_IS_UNSET = new Set(['SMTP_URL', 'MAIL_FROM', 'SENTRY_DSN'])
 
 export interface Config {
   nodeEnv: 'development' | 'test' | 'production'
@@ -47,6 +57,8 @@ export interface Config {
   smtpUrl?: string
   mailFrom?: string
   logLevel: (typeof LEVELS)[number]
+  trustProxy: number
+  sentryDsn?: string
 }
 
 // Reads only the variables the service knows. A failure names the variables and never prints a value.
@@ -55,7 +67,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   for (const key of Object.keys(schema.shape)) {
     const value = env[key]
     // An empty value is the same as unset, so a blank line in a deployment file turns mail off.
-    if (value !== undefined && !((key === 'SMTP_URL' || key === 'MAIL_FROM') && value === '')) {
+    if (value !== undefined && !(BLANK_IS_UNSET.has(key) && value === '')) {
       picked[key] = value
     }
   }
@@ -65,6 +77,17 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     throw new Error(`Invalid configuration: ${names.join(', ')}`)
   }
   const value = parsed.data
+  if (value.NODE_ENV === 'production') {
+    // Every value, whatever the variable: a template placeholder never reaches a running service. Names only.
+    const refused = Object.entries(picked)
+      .filter(([, v]) => v.includes('CHANGE_ME'))
+      .map(([key]) => key)
+    if (!value.PUBLIC_ORIGIN.startsWith('https://') && !refused.includes('PUBLIC_ORIGIN')) {
+      refused.push('PUBLIC_ORIGIN')
+    }
+    if (value.TRUST_PROXY === undefined) refused.push('TRUST_PROXY')
+    if (refused.length > 0) throw new Error(`Invalid configuration: ${refused.join(', ')}`)
+  }
   // Four secrets, four purposes: one leaking must not open the others.
   const secrets = [value.AUTH_SECRET, value.WORKER_SECRET, value.ATTEMPT_TOKEN_SECRET, value.TRIGGER_SECRET]
   if (new Set(secrets).size !== secrets.length) {
@@ -89,5 +112,7 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     smtpUrl: value.SMTP_URL,
     mailFrom: value.MAIL_FROM,
     logLevel: value.LOG_LEVEL,
+    trustProxy: Number(value.TRUST_PROXY ?? '0'),
+    sentryDsn: value.SENTRY_DSN,
   }
 }

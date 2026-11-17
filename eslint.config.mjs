@@ -9,6 +9,8 @@ export default defineConfig(
   js.configs.recommended,
   tseslint.configs.recommended,
   { languageOptions: { globals: { ...globals.node } } },
+  // Plain node strips types only: parameter properties need a transform and fail at start-up.
+  { rules: { '@typescript-eslint/parameter-properties': ['error', { prefer: 'class-property' }] } },
   {
     files: ['tools/build-docs/**/*.js'],
     languageOptions: { sourceType: 'commonjs' },
@@ -60,7 +62,7 @@ export default defineConfig(
   },
   {
     // The dashboard runs in the browser and talks to the core over HTTP only: no workspace package, no
-    // database client, and never next/og (16.3.4 has a critical advisory in it; plan decision 4). This rule
+    // database client, and never next/og (16.3.4 had a critical advisory in it, fixed in 16.3.8; plan decision 4). This rule
     // replaces the earlier no-restricted-imports one for these files, so it repeats those paths.
     files: ['apps/dashboard/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
