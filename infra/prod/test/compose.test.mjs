@@ -144,7 +144,8 @@ test('the worker is not on app', () => {
   const services = config(['ops']).services
   const worker = Object.keys(services.worker.networks ?? {})
   assert.ok(!worker.includes('app'))
-  // Its only way out is its own egress network, to the model provider; nothing else is on it.
+  // Its only way out is its own egress network, with nothing else on it. That network is not restricted here
+  // (any outbound address); the host firewall limits it to the model provider (Task 7).
   assert.deepEqual(worker.sort(), ['data', 'worker', 'worker_egress'])
   for (const [name, service] of Object.entries(services)) {
     if (name !== 'worker') assert.ok(!Object.keys(service.networks ?? {}).includes('worker_egress'), name)

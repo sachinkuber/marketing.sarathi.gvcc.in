@@ -13,7 +13,10 @@
 #   app            core and dashboard: the only services a proxy reaches, and the only published ports.
 #   worker         core and worker; internal (no route out).
 #   data           postgres, core, worker and ops; internal. Postgres publishes no port.
-#   worker_egress  the worker alone: its way out to the model provider. It reaches the core only on `worker`.
+#   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge, so for now it gives
+#                  unrestricted outbound access (any internet address, and the host's published ports via its
+#                  public address); limiting it to the model provider is the host firewall's job (Task 7). The
+#                  worker reaches the core only on `worker`.
 # Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. Joining
 # a proxy that runs in Docker instead is decided in Task 7.
 name: mkt
@@ -154,4 +157,5 @@ networks:
     internal: true
   data:
     internal: true
+  # Unrestricted outbound until the host firewall (Task 7) limits this subnet to the model provider.
   worker_egress:
