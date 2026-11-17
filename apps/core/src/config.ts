@@ -37,10 +37,37 @@ const schema = z.object({
   SENTRY_DSN: z.url().optional(),
   // The build or version label attached to error reports; unset means 'dev'.
   RELEASE: z.string().min(1).max(200).optional(),
+  // Write-once audit copies in an S3-compatible bucket: URL, BUCKET, KEY_ID and SECRET together or not at all.
+  // The key and secret are credentials, so they are never logged or put in an error.
+  AUDIT_STORE_URL: z.url().optional(),
+  AUDIT_STORE_BUCKET: z.string().min(3).max(63).optional(),
+  AUDIT_STORE_KEY_ID: z.string().min(1).optional(),
+  AUDIT_STORE_SECRET: z.string().min(1).optional(),
+  AUDIT_STORE_RETENTION_DAYS: z.coerce.number().int().min(1).max(36500).default(400),
+  // true when the bucket has Object Lock (the objects are then sent with a compliance-mode retention date); false
+  // for a store that holds retention in a bucket rule (R2).
+  AUDIT_STORE_OBJECT_LOCK: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
 })
 
 // Variables where an empty value means unset, so a blank line in a deployment file turns the feature off.
-const BLANK_IS_UNSET = new Set(['SMTP_URL', 'MAIL_FROM', 'SENTRY_DSN'])
+const BLANK_IS_UNSET = new Set([
+  'SMTP_URL',
+  'MAIL_FROM',
+  'SENTRY_DSN',
+  'AUDIT_STORE_URL',
+  'AUDIT_STORE_BUCKET',
+  'AUDIT_STORE_KEY_ID',
+  'AUDIT_STORE_SECRET',
+])
+const AUDIT_STORE_GROUP = [
+  'AUDIT_STORE_URL',
+  'AUDIT_STORE_BUCKET',
+  'AUDIT_STORE_KEY_ID',
+  'AUDIT_STORE_SECRET',
+] as const
 
 export interface Config {
   nodeEnv: 'development' | 'test' | 'production'
@@ -62,6 +89,14 @@ export interface Config {
   trustProxy: number
   sentryDsn?: string
   release?: string
+  auditStore?: {
+    url: string
+    bucket: string
+    keyId: string
+    secret: string
+    retentionDays: number
+    objectLock: boolean
+  }
 }
 
 // Reads only the variables the service knows. A failure names the variables and never prints a value.
@@ -98,6 +133,12 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
   }
   if (value.SMTP_URL && !value.MAIL_FROM) throw new Error('Invalid configuration: MAIL_FROM')
   if (value.MAIL_FROM && !value.SMTP_URL) throw new Error('Invalid configuration: SMTP_URL')
+  // The audit store: all four or none. Names the missing variables and prints no value.
+  const storeMissing = AUDIT_STORE_GROUP.filter((key) => value[key] === undefined)
+  const storeSet = storeMissing.length < AUDIT_STORE_GROUP.length
+  if (storeMissing.length > 0 && storeSet) {
+    throw new Error(`Invalid configuration: ${storeMissing.join(', ')}`)
+  }
   return {
     nodeEnv: value.NODE_ENV,
     port: value.PORT,
@@ -118,5 +159,19 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     trustProxy: Number(value.TRUST_PROXY ?? '0'),
     sentryDsn: value.SENTRY_DSN,
     release: value.RELEASE,
+    auditStore:
+      value.AUDIT_STORE_URL &&
+      value.AUDIT_STORE_BUCKET &&
+      value.AUDIT_STORE_KEY_ID &&
+      value.AUDIT_STORE_SECRET
+        ? {
+            url: value.AUDIT_STORE_URL,
+            bucket: value.AUDIT_STORE_BUCKET,
+            keyId: value.AUDIT_STORE_KEY_ID,
+            secret: value.AUDIT_STORE_SECRET,
+            retentionDays: value.AUDIT_STORE_RETENTION_DAYS,
+            objectLock: value.AUDIT_STORE_OBJECT_LOCK,
+          }
+        : undefined,
   }
 }

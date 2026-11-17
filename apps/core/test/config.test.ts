@@ -195,3 +195,86 @@ describe('the owner-view pool is not optional', () => {
     expect(() => loadConfig(rest)).toThrow(/OWNER_VIEW_DATABASE_URL/)
   })
 })
+
+describe('the write-once audit store settings', () => {
+  const store = {
+    AUDIT_STORE_URL: 'https://acct.r2.example.test',
+    AUDIT_STORE_BUCKET: 'audit',
+    AUDIT_STORE_KEY_ID: 'key-id',
+    AUDIT_STORE_SECRET: 'store-secret',
+  }
+
+  it('is absent when none are set, and blank counts as unset', () => {
+    expect(loadConfig(base).auditStore).toBeUndefined()
+    const blank = {
+      AUDIT_STORE_URL: '',
+      AUDIT_STORE_BUCKET: '',
+      AUDIT_STORE_KEY_ID: '',
+      AUDIT_STORE_SECRET: '',
+    }
+    expect(loadConfig({ ...base, ...blank }).auditStore).toBeUndefined()
+  })
+
+  it('carries the settings with 400 days and no object lock by default', () => {
+    expect(loadConfig({ ...base, ...store }).auditStore).toEqual({
+      url: 'https://acct.r2.example.test',
+      bucket: 'audit',
+      keyId: 'key-id',
+      secret: 'store-secret',
+      retentionDays: 400,
+      objectLock: false,
+    })
+    const config = loadConfig({
+      ...base,
+      ...store,
+      AUDIT_STORE_RETENTION_DAYS: '30',
+      AUDIT_STORE_OBJECT_LOCK: 'true',
+    })
+    expect(config.auditStore).toMatchObject({ retentionDays: 30, objectLock: true })
+  })
+
+  it('needs all of URL, BUCKET, KEY_ID and SECRET or none, naming the missing ones and no value', () => {
+    for (const key of Object.keys(store)) {
+      const partial: Record<string, string> = { ...base, ...store }
+      delete partial[key]
+      let message = ''
+      try {
+        loadConfig(partial)
+      } catch (error) {
+        message = (error as Error).message
+      }
+      expect(message).toContain(key)
+      expect(message).not.toContain('store-secret')
+    }
+    // The tuning values alone (as in a deployment file with the store left blank) are harmless.
+    expect(
+      loadConfig({ ...base, AUDIT_STORE_RETENTION_DAYS: '400', AUDIT_STORE_OBJECT_LOCK: 'false' }).auditStore,
+    ).toBeUndefined()
+  })
+
+  it('rejects a bad retention or lock value', () => {
+    expect(() => loadConfig({ ...base, ...store, AUDIT_STORE_RETENTION_DAYS: '0' })).toThrow(
+      'AUDIT_STORE_RETENTION_DAYS',
+    )
+    expect(() => loadConfig({ ...base, ...store, AUDIT_STORE_OBJECT_LOCK: 'yes' })).toThrow(
+      'AUDIT_STORE_OBJECT_LOCK',
+    )
+  })
+
+  it('refuses AUDIT_STORE_SECRET=CHANGE_ME in production, naming the variable and not the value', () => {
+    let message = ''
+    try {
+      loadConfig({
+        ...base,
+        ...store,
+        NODE_ENV: 'production',
+        TRUST_PROXY: '1',
+        AUDIT_STORE_SECRET: 'CHANGE_ME',
+      })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain('AUDIT_STORE_SECRET')
+    expect(message).not.toContain('CHANGE_ME')
+  })
+})

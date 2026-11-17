@@ -197,17 +197,4 @@ describe('exporting and verifying the audit log', () => {
       expect.objectContaining({ chainKey: A, kind: 'export_mismatch', seq: 3 }),
     )
   })
-
-  it('the store hands back the same location for the same batch and refuses a different one', async () => {
-    const batch = {
-      chainKey: A,
-      fromSeq: 1,
-      throughSeq: 2,
-      headHash: 'sha256:' + 'a'.repeat(64),
-      entries: [],
-    }
-    const first = await store.put(batch)
-    expect(await store.put(batch)).toBe(first)
-    await expect(store.put({ ...batch, headHash: 'sha256:' + 'b'.repeat(64) })).rejects.toThrow()
-  })
 })

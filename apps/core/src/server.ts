@@ -3,6 +3,7 @@ import { openQueue } from '@mkt/queue'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { Logger } from 'pino'
+import { createS3Client, S3ExportStore } from './audit/s3-store.ts'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
@@ -48,9 +49,20 @@ export async function startServer(
     logger: deps.logger,
     appPool,
     authPool,
-    // No write-once export store exists yet (owner items A4 and A5): the export reports not_configured
-    // and the verify runs its chain-only check.
-    daily: { ownerViewPool, auditWriterPool, store: null, fx: ecbFxSource() },
+    // Without the AUDIT_STORE_* settings the export reports not_configured and the verify runs its chain-only check.
+    daily: {
+      ownerViewPool,
+      auditWriterPool,
+      store: config.auditStore
+        ? new S3ExportStore({
+            client: createS3Client(config.auditStore),
+            bucket: config.auditStore.bucket,
+            retentionDays: config.auditStore.retentionDays,
+            objectLock: config.auditStore.objectLock,
+          })
+        : null,
+      fx: ecbFxSource(),
+    },
     mailer: deps.mailer,
     audit: deps.audit,
     jobs: {
