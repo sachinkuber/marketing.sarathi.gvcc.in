@@ -212,6 +212,36 @@ test("gitleaks finds nothing in any image's exported filesystem", { timeout: 30 
   }
 })
 
+// better-auth lists next, react and react-dom as optional peers, and npm's workspace filter follows those edges,
+// so `npm ci --workspace @mkt/core` installed the dashboard's framework (and its 93 MB compiler) into the core.
+const DASHBOARD_ONLY = ['next', '@next', 'react', 'react-dom', 'playwright-core', 'happy-dom']
+
+test('core, worker and ops carry none of the dashboard framework', () => {
+  for (const target of ['core', 'worker', 'ops']) {
+    const name = container(`mkt-m7test-modules-${target}-${process.pid}`)
+    const present = docker([
+      'run',
+      '--pull',
+      'never',
+      '--rm',
+      '--name',
+      name,
+      ...LIMITS,
+      '--network',
+      'none',
+      '--entrypoint',
+      'sh',
+      tag(target),
+      '-c',
+      'for p in "$@"; do [ -e "node_modules/$p" ] && echo "$p"; done; true',
+      'sh',
+      ...DASHBOARD_ONLY,
+    ])
+    removeContainer(name)
+    assert.deepEqual(present.split('\n').filter(Boolean), [], target)
+  }
+})
+
 test('core and worker run as uid 1000 (node)', () => {
   // The dashboard and ops images run as node too.
   for (const target of TARGETS) {

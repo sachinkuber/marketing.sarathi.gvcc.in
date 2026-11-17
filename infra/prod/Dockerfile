@@ -28,16 +28,22 @@ COPY packages/queue-contract/package.json packages/queue-contract/
 COPY packages/shared/package.json packages/shared/
 COPY packages/stack-check/package.json packages/stack-check/
 COPY packages/test-support/package.json packages/test-support/
+COPY infra/prod/prune-optional-peers.mjs /tmp/
 
-# ---- production dependencies of each target, no dev dependencies and no install scripts.
+# ---- production dependencies of each target, no dev dependencies and no install scripts. npm's workspace filter
+# also installs optional peers (better-auth's next, react, vitest, playwright...); the prune script removes every
+# package the workspace reaches only through one.
 FROM manifests AS core-deps
-RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/core && rm -rf /root/.npm
+RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/core \
+  && node /tmp/prune-optional-peers.mjs apps/core && rm -rf /root/.npm
 
 FROM manifests AS worker-deps
-RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/worker && rm -rf /root/.npm
+RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/worker \
+  && node /tmp/prune-optional-peers.mjs apps/worker && rm -rf /root/.npm
 
 FROM manifests AS ops-deps
-RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/ops && rm -rf /root/.npm
+RUN npm ci --omit=dev --ignore-scripts --workspace @mkt/ops \
+  && node /tmp/prune-optional-peers.mjs apps/ops && rm -rf /root/.npm
 
 # ---- core
 FROM base AS core
