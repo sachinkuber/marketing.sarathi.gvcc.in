@@ -150,7 +150,7 @@ def main():
         ("Status", "Pick from the list in the cell: " + ", ".join(STATUSES) + "."),
         ("Filtering", "Use the arrows in the header row to show, for example, only Open items or only items needed now."),
         ("Secrets", "Never type a password, API key or token into this file. For those items write 'handed over' and see the 'Secrets' sheet for how."),
-        ("Example", "ID A2 | Status: Done | Sachin's answer: A record added, points to 72.62.195.236 | Date answered: 05-Oct-2026"),
+        ("Example", "ID A2 | Status: Done | Sachin's answer: A record added, points to the shared server | Date answered: 05-Oct-2026"),
         ("Rebuilding", "This file can be rebuilt from docs/sachin-to-provide.md. What you typed in the shaded columns is kept."),
     ]
     for r, (label, text) in enumerate(lines, start=1):

@@ -19,7 +19,7 @@ None of these stops development. All of them stop deployment.
 
 | ID | What I need | Exactly what to provide | Why I need it | Status |
 |---|---|---|---|---|
-| A1 | Access to the shared server (72.62.195.236) | Read access by SSH, or a written note of: processors, memory, free disk, current load, and how n8n and the reverse proxy are installed (Docker or not, which proxy) | To confirm the server has room for the product without slowing the existing n8n workflows, and to fit the product into the existing proxy and TLS setup | Open |
+| A1 | Access to the shared server | Read access by SSH, or a written note of: processors, memory, free disk, current load, and how n8n and the reverse proxy are installed (Docker or not, which proxy) | To confirm the server has room for the product without slowing the existing n8n workflows, and to fit the product into the existing proxy and TLS setup | Open |
 | A2 | DNS record | An A record for `marketing.sarathi.gvcc.in` pointing to the server, or the name of whoever controls the `gvcc.in` DNS | The dashboard cannot be reached or get a TLS certificate without it | Open |
 | A3 | Anthropic API key for the product | A key created for this product only, with a monthly spend limit you choose | Every agent runs on the Claude API. A separate key keeps the product's cost visible and lets it be revoked alone. | Open |
 | A4 | Off-server backup storage | The storage service and bucket to use, and credentials limited to that bucket | One server is one point of failure. Daily encrypted backups must live somewhere else. A restored backup is part of gate 0. | Open |

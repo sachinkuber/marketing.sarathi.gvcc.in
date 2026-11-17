@@ -657,7 +657,7 @@ No dates are given because the deadline is an open question.
 
 - **Platform approvals with long lead times:** Meta business verification and app review for Instagram and Facebook; LinkedIn and YouTube API access; ad-platform developer access for P1; WhatsApp business API if it is added later.
 - **Brand assets:** real photos and footage from Aztek.
-- **Hosting:** `marketing.sarathi.gvcc.in` has no DNS record yet. `n8n.sarathi.gvcc.in` and `sarathi.gvcc.in` both point to 72.62.195.236.
+- **Hosting:** `marketing.sarathi.gvcc.in` has no DNS record yet. `n8n.sarathi.gvcc.in` and `sarathi.gvcc.in` both point to the shared server.
 - **Existing work to build on:** Aztek's live content pipeline and SEO foundation; the n8n instance, where the two existing workflows must not be changed.
 - **Paid tools:** the owner is willing to use paid tools. Tool selection and pricing are settled in the technical specs.
 
