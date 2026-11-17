@@ -1,3 +1,4 @@
+import { initErrorTracking } from '@mkt/shared'
 import { openQueue, type JobClass } from '@mkt/queue'
 import { anthropicModel } from './anthropic.ts'
 import { loadWorkerConfig, type WorkerConfig } from './config.ts'
@@ -85,6 +86,8 @@ export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
 // environment.
 if (import.meta.main) {
   const config = loadWorkerConfig(process.env)
+  // First thing once the DSN is known: the config load is the only earlier step, and it never reports a value.
+  initErrorTracking({ dsn: config.sentryDsn, service: 'worker', release: config.release ?? 'dev' })
   const handlers: Record<string, JobHandler> = {
     'summary.v1': summaryHandler,
     'placeholder_check.v1': checkHandler,

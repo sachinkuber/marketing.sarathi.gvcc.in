@@ -16,6 +16,8 @@ const schema = z.object({
   SUPERVISE_INTERVAL_SECONDS: z.coerce.number().int().positive().optional(),
   // Error reporting; unset means none. A credential: never logged or put in an error.
   SENTRY_DSN: z.url().optional(),
+  // The build or version label attached to error reports; unset means 'dev'.
+  RELEASE: z.string().min(1).max(200).optional(),
 })
 
 export interface WorkerConfig {
@@ -31,6 +33,7 @@ export interface WorkerConfig {
   reconcileIntervalSeconds: number
   superviseIntervalSeconds: number | undefined
   sentryDsn?: string
+  release?: string
 }
 
 export function loadWorkerConfig(env: Record<string, string | undefined>): WorkerConfig {
@@ -76,5 +79,6 @@ export function loadWorkerConfig(env: Record<string, string | undefined>): Worke
     reconcileIntervalSeconds: c.RECONCILE_INTERVAL_SECONDS,
     superviseIntervalSeconds: c.SUPERVISE_INTERVAL_SECONDS,
     sentryDsn: c.SENTRY_DSN,
+    release: c.RELEASE,
   }
 }

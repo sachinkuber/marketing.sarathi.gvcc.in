@@ -35,6 +35,8 @@ const schema = z.object({
     .optional(),
   // Error reporting; unset means none. The DSN is a credential, so it is never logged or put in an error.
   SENTRY_DSN: z.url().optional(),
+  // The build or version label attached to error reports; unset means 'dev'.
+  RELEASE: z.string().min(1).max(200).optional(),
 })
 
 // Variables where an empty value means unset, so a blank line in a deployment file turns the feature off.
@@ -59,6 +61,7 @@ export interface Config {
   logLevel: (typeof LEVELS)[number]
   trustProxy: number
   sentryDsn?: string
+  release?: string
 }
 
 // Reads only the variables the service knows. A failure names the variables and never prints a value.
@@ -114,5 +117,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     logLevel: value.LOG_LEVEL,
     trustProxy: Number(value.TRUST_PROXY ?? '0'),
     sentryDsn: value.SENTRY_DSN,
+    release: value.RELEASE,
   }
 }

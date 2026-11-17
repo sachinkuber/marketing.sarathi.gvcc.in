@@ -1,4 +1,5 @@
 import { createPool } from '@mkt/db'
+import { initErrorTracking } from '@mkt/shared'
 import { DbAudit } from './audit/db-audit.ts'
 import { loadConfig } from './config.ts'
 import { createLogger } from './logger.ts'
@@ -6,6 +7,8 @@ import { mailerFromConfig } from './notify/smtp.ts'
 import { startServer } from './server.ts'
 
 const config = loadConfig(process.env)
+// First thing once the DSN is known: the config load is the only earlier step, and it never reports a value.
+initErrorTracking({ dsn: config.sentryDsn, service: 'core', release: config.release ?? 'dev' })
 const logger = createLogger(config.logLevel)
 const auditPool = createPool(config.auditDatabaseUrl)
 auditPool.on('error', (error) => logger.error({ err: error, pool: 'audit' }, 'idle database client error'))
