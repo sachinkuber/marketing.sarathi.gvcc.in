@@ -73,11 +73,21 @@ export async function startWorker(
   }
 }
 
+// What the stand-in answers when the worker runs it as a process (the compose stack test, the load test): a
+// result the summary contract accepts, so runs finish instead of being retried and dead-lettered.
+const STANDIN_SUMMARY = JSON.stringify({
+  summary: 'A stand-in summary of the brief.',
+  keywords: ['stand-in', 'summary', 'brief'],
+})
+
 // The stand-in is accepted by the configuration only under NODE_ENV=test, and is loaded only here, so the
 // production module graph does not contain it.
 export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
   if (config.modelBackend === 'standin') {
-    return (await import('./standin.ts')).standInModel({ logFile: process.env.MODEL_LOG ?? '/dev/null' })
+    return (await import('./standin.ts')).standInModel({
+      logFile: process.env.MODEL_LOG ?? '/dev/null',
+      replyFor: () => STANDIN_SUMMARY,
+    })
   }
   return anthropicModel(config.anthropicApiKey!)
 }

@@ -1,0 +1,157 @@
+# Production stack (plan, Task 5): postgres, core, worker and dashboard, plus the one-shot `ops` (profile ops).
+# Run from the repository root on the server; the images are built here from infra/prod/Dockerfile:
+#   docker compose -f infra/prod/compose.yaml build                      (one service at a time on a shared host)
+#   docker compose -f infra/prod/compose.yaml --profile ops run --rm ops  (prepare: migrations, roles, queue)
+#   docker compose -f infra/prod/compose.yaml up -d
+# Configuration and every secret come from root-owned 0600 env files in /opt/mkt/secrets (MKT_SECRETS moves
+# the folder, for tests); infra/prod/secrets.example holds one placeholder file for each. Nothing secret is
+# written here, in an image, a build argument or a command line.
+#
+# Limits (plan decision 4; ops excluded, it runs only at deployment): 2.0 processors and 4 GiB in total.
+#   postgres 0.75 / 1.5 GiB, core 0.5 / 1 GiB, worker 0.5 / 1 GiB, dashboard 0.25 / 512 MiB.
+# Networks (plan decision 3, the zones of spec 16), each scoped to the project (mkt_app, mkt_worker...):
+#   app            core and dashboard: the only services a proxy reaches, and the only published ports.
+#   worker         core and worker; internal (no route out).
+#   data           postgres, core, worker and ops; internal. Postgres publishes no port.
+#   worker_egress  the worker alone: its way out to the model provider. It reaches the core only on `worker`.
+# Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. Joining
+# a proxy that runs in Docker instead is decided in Task 7.
+name: mkt
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
+# Node services: no Linux capabilities (they listen above 1024 and run as `node`), no privilege gain.
+x-node-hardening: &node-hardening
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+
+services:
+  postgres:
+    # PostgreSQL 17.11, the digest the tests use.
+    image: postgres@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+    restart: unless-stopped
+    env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/postgres.env']
+    environment:
+      POSTGRES_DB: mkt
+    volumes:
+      - pg:/var/lib/postgresql/data
+    networks: [data]
+    shm_size: 256m
+    stop_grace_period: 60s
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d mkt']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: '0.75', memory: 1536M }
+    logging: *logging
+
+  core:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: core }
+    restart: unless-stopped
+    <<: *node-hardening
+    env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/core.env']
+    ports: ['127.0.0.1:4100:4000']
+    networks: [app, worker, data]
+    depends_on:
+      postgres: { condition: service_healthy }
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/health/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 1G }
+    logging: *logging
+
+  worker:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: worker }
+    restart: unless-stopped
+    <<: *node-hardening
+    env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/worker.env']
+    environment:
+      CORE_URL: http://core:4000
+    networks: [worker, data, worker_egress]
+    depends_on:
+      core: { condition: service_healthy }
+    # Running jobs get 30 s to finish after a stop signal (apps/worker/src/main.ts); this leaves room past that.
+    stop_grace_period: 45s
+    healthcheck:
+      # The worker serves nothing: the check is that its process (PID 1) is alive.
+      test: ['CMD', 'node', '-e', 'process.kill(1, 0)']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 1G }
+    logging: *logging
+
+  dashboard:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: dashboard }
+    restart: unless-stopped
+    <<: *node-hardening
+    env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/dashboard.env']
+    ports: ['127.0.0.1:3100:3000']
+    networks: [app]
+    depends_on:
+      core: { condition: service_healthy }
+    stop_grace_period: 20s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: '0.25', memory: 512M }
+    logging: *logging
+
+  # One-shot, at deployment: `docker compose --profile ops run --rm ops [prepare]`. It reads the superuser's
+  # address (postgres.env) and the run-time roles' passwords (roles.env).
+  ops:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: ops }
+    profiles: [ops]
+    restart: 'no'
+    <<: *node-hardening
+    env_file:
+      - '${MKT_SECRETS:-/opt/mkt/secrets}/postgres.env'
+      - '${MKT_SECRETS:-/opt/mkt/secrets}/roles.env'
+    networks: [data]
+    depends_on:
+      postgres: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
+    logging: *logging
+
+volumes:
+  pg:
+
+networks:
+  app:
+  worker:
+    internal: true
+  data:
+    internal: true
+  worker_egress:

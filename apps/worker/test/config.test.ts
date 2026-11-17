@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { summaryResultSchema, wrapBrief } from '@mkt/shared'
 import { describe, expect, it } from 'vitest'
 import { loadWorkerConfig } from '../src/config.ts'
 import { chooseModel } from '../src/main.ts'
@@ -53,6 +54,20 @@ describe('the model backend choice', () => {
     const config = loadWorkerConfig({ ...base, NODE_ENV: 'test', MODEL_BACKEND: 'standin' })
     expect(config.modelBackend).toBe('standin')
     expect(typeof (await chooseModel(config)).send).toBe('function')
+  })
+
+  it('the stand-in chosen at start answers a summary the contract accepts (the compose stack test runs it)', async () => {
+    const config = loadWorkerConfig({ ...base, NODE_ENV: 'test', MODEL_BACKEND: 'standin' })
+    const reply = await (
+      await chooseModel(config)
+    ).send({
+      model: 'claude-opus-5-5',
+      system: 's',
+      maxTokens: 1024,
+      messages: [{ role: 'user', content: wrapBrief('A brief.') }],
+    })
+    expect(reply.stopReason).toBe('end_turn')
+    expect(summaryResultSchema.safeParse(JSON.parse(reply.text)).success).toBe(true)
   })
 
   it('has no static import of the stand-in in main.ts, only a dynamic one inside the choice', () => {
