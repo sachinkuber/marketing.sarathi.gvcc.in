@@ -92,6 +92,73 @@ describe('scrubEvent', () => {
   })
 })
 
+describe('scrubEvent urls, metadata and walk bounds', () => {
+  it('strips the query string and fragment from request.url and breadcrumb urls', () => {
+    const out = scrubEvent(
+      event({
+        request: { url: 'https://x.example/a/b?email=a%40b.example&x=1#frag' },
+        breadcrumbs: [
+          {
+            category: 'http',
+            data: {
+              url: 'https://x.example/p?q=1',
+              to: '/next?email=a%40b.example#h',
+              from: '/prev?z=2',
+              status_code: 200,
+            },
+          },
+        ],
+      }),
+    )
+    expect(out.request?.url).toBe('https://x.example/a/b')
+    expect(out.breadcrumbs?.[0]?.data).toEqual({
+      url: 'https://x.example/p',
+      to: '/next',
+      from: '/prev',
+      status_code: 200,
+    })
+  })
+
+  it('replaces percent-encoded email addresses too', () => {
+    const out = scrubEvent(event({ message: 'bad value a%40b.example and C%40D.org' }))
+    expect(out.message).toBe('bad value [email] and [email]')
+  })
+
+  it('removes sdkProcessingMetadata, even with class instances and cycles in it', () => {
+    class Scope {
+      client: unknown
+    }
+    const scope = new Scope()
+    scope.client = { options: { dsn: 'x' }, scope }
+    const out = scrubEvent(
+      event({
+        message: 'm',
+        sdkProcessingMetadata: { capturedSpanScope: scope, normalizedRequest: { url: '/a?b=c' } },
+      }),
+    )
+    expect(out.sdkProcessingMetadata).toBeUndefined()
+    expect(out.message).toBe('m')
+  })
+
+  it('caps a deeply nested value without throwing', () => {
+    let deep: Record<string, unknown> = { leaf: 1 }
+    for (let i = 0; i < 5000; i++) deep = { next: deep }
+    const out = scrubEvent(event({ extra: { deep } }))
+    expect(JSON.stringify(out)).toContain('[too deep]')
+  })
+
+  it('keeps an object referenced twice in different branches, and marks a true cycle', () => {
+    const shared = { v: 1 }
+    const cyc: Record<string, unknown> = { name: 'c' }
+    cyc.self = cyc
+    const out = scrubEvent(event({ extra: { a: shared, b: shared, cyc } }))
+    const extra = out.extra as { a: unknown; b: unknown; cyc: { self: unknown } }
+    expect(extra.a).toEqual({ v: 1 })
+    expect(extra.b).toEqual({ v: 1 })
+    expect(extra.cyc.self).toBe('[circular]')
+  })
+})
+
 describe('initErrorTracking', () => {
   it('without a dsn returns false and does not call Sentry.init', () => {
     const init = vi.mocked(Sentry.init)
