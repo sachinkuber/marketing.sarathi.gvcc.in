@@ -124,7 +124,7 @@ flowchart TB
 ```mermaid
 flowchart TB
   DNS["DNS: marketing.sarathi.gvcc.in"] --> PX
-  subgraph HOST["Shared server 72.62.195.236: initial"]
+  subgraph HOST["Shared server: initial"]
     PX["Reverse proxy: TLS"]
     subgraph EXIST["Existing: not changed"]
       N8N["n8n"]
