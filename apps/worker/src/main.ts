@@ -59,6 +59,7 @@ export async function startWorker(
   const maintenance = startMaintenance({
     core: options.core,
     queue,
+    workerId: options.workerId,
     intervalSeconds: options.reconcileIntervalSeconds ?? 300,
     maxWaitSeconds: options.maxWaitSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
     log,

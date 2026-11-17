@@ -473,7 +473,7 @@ describe('worker route', () => {
     const res = await fetch(`${stack.server.url}/api/v1/worker/approvals/tick`, {
       method: 'POST',
       headers,
-      body: '{}',
+      body: JSON.stringify({ workerId: 'test-worker' }),
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ failedBrands: 0, reminded: 1, overdue: 0, escalated: 0 })

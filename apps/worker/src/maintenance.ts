@@ -20,6 +20,7 @@ export const DEFAULT_MAX_WAIT_SECONDS: Record<JobClass, number> = {
 export function startMaintenance(options: {
   core: CoreClient
   queue: Queue
+  workerId: string
   intervalSeconds: number
   maxWaitSeconds: Record<JobClass, number>
   log: (line: Record<string, unknown>) => void
@@ -68,7 +69,7 @@ export function startMaintenance(options: {
       }
       // Its own duty: a failure above does not stop it, and a failure of it does not undo the above.
       try {
-        const done = await options.core.approvalsTick()
+        const done = await options.core.approvalsTick(options.workerId)
         options.log({
           event: 'approvals_tick',
           reminded: done.reminded,

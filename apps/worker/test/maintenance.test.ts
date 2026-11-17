@@ -12,10 +12,34 @@ const approvalsTick = async () => counts
 const limits = { interactive: 60, publishing: 120, production: 900, bulk: 3600 }
 
 describe('maintenance', () => {
+  it('passes its worker id to the approvals tick, which is the heartbeat', async () => {
+    const ids: string[] = []
+    const core = {
+      reconcile: async () => ({ marked: 0 }),
+      approvalsTick: async (id: string) => {
+        ids.push(id)
+        return counts
+      },
+    } as unknown as CoreClient
+    const m = startMaintenance({
+      workerId: 'worker-7',
+      core,
+      queue,
+      intervalSeconds: 0.05,
+      maxWaitSeconds: limits,
+      log: () => undefined,
+    })
+    await new Promise((r) => setTimeout(r, 200))
+    m.stop()
+    expect(ids.length).toBeGreaterThan(0)
+    expect(new Set(ids)).toEqual(new Set(['worker-7']))
+  })
+
   it('sweeps, reads the watchdog and logs the counts on each tick', async () => {
     const lines: Record<string, unknown>[] = []
     const core = { reconcile: async () => ({ marked: 4 }), approvalsTick } as unknown as CoreClient
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue,
       intervalSeconds: 0.05,
@@ -43,6 +67,7 @@ describe('maintenance', () => {
       approvalsTick,
     } as unknown as CoreClient
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue,
       intervalSeconds: 0.05,
@@ -75,6 +100,7 @@ describe('maintenance', () => {
       failedJobIds: async (c: string) => (c === 'interactive' ? ['bad', 'lost', 'marked'] : []),
     } as unknown as Queue
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue: failing,
       intervalSeconds: 0.05,
@@ -93,6 +119,7 @@ describe('maintenance', () => {
     const run = async (core: Partial<CoreClient>, q: Queue = queue, ms = 130) => {
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: core as CoreClient,
         queue: q,
         intervalSeconds: 0.1,
@@ -189,6 +216,7 @@ describe('maintenance', () => {
       let ticked = 0
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => {
             throw new TypeError('http://10.0.0.1/secret body')
@@ -213,6 +241,7 @@ describe('maintenance', () => {
     it('logs a failed dead report by error name only', async () => {
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => ({ marked: 0 }),
           approvalsTick,
@@ -238,6 +267,7 @@ describe('maintenance', () => {
     it('clears busy even when the log callback throws', async () => {
       let ticked = 0
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => {
             ticked += 1

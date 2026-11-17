@@ -111,6 +111,19 @@ describe('every route declares the access it needs (acceptance test 13, SEC-2)',
     })
   })
 
+  it('keeps the health endpoints (/health and /api/health) outside the route table, and answers them with no sign-in', async () => {
+    expect(stack.core.routes.list().filter((r) => r.path.includes('health'))).toEqual([])
+    for (const prefix of ['/health', '/api/health']) {
+      for (const path of ['live', 'ready', 'heartbeat']) {
+        expect((await fetch(`${stack.server.url}${prefix}/${path}`)).status, `${prefix}/${path}`).toBe(200)
+      }
+      // No worker has ticked in this stack, so the worker check answers never, not a sign-in refusal.
+      const worker = await fetch(`${stack.server.url}${prefix}/worker`)
+      expect(worker.status).toBe(503)
+      expect(await worker.json()).toEqual({ status: 'never' })
+    }
+  })
+
   it('declares the trigger routes as trigger, never public', () => {
     const declared = Object.fromEntries(
       stack.core.routes
