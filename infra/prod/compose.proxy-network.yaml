@@ -1,9 +1,14 @@
 # Only when the proxy runs in Docker (as Caddy does on the staging host) and so cannot reach the host's
-# 127.0.0.1:4100 and 3100. Adds the core and the dashboard, and nothing else, to the proxy's existing Docker
-# network, under names no other project on that network uses. The proxy site then names mkt-core:4000 and
-# mkt-dashboard:3000 (infra/prod/proxy/marketing.caddy). Every container on that network can then reach them.
-#   MKT_PROXY_NETWORK=web docker compose -f infra/prod/compose.yaml -f infra/prod/compose.proxy-network.yaml up -d
-# With Caddy on the host this file is not used (docs/operations.md, "How the proxy reaches the app").
+# 127.0.0.1:4100 and 3100. Adds the core and the dashboard, and nothing else, to an existing Docker network the
+# proxy is on, under the names mkt-core and mkt-dashboard; the proxy site then names mkt-core:4000 and
+# mkt-dashboard:3000 (infra/prod/proxy/marketing.caddy). Use a network shared by the proxy and this stack only:
+#   docker network create mkt_proxy && docker network connect mkt_proxy caddy   (owner-approved proxy change)
+#   MKT_PROXY_NETWORK=mkt_proxy docker compose -f infra/prod/compose.yaml -f infra/prod/compose.proxy-network.yaml up -d
+# RISK: every container on that network reaches the core directly, around the proxy, and TRUST_PROXY=1 is only a
+# hop count: the core believes one X-Forwarded-For address from whoever connects. On a network other projects'
+# containers share (staging's `web`), any of them could forge addresses and get around the invite and sign-in
+# limiters. Joining such a network is an exception only the owner can approve. With Caddy on the host this file
+# is not used (docs/operations.md, "How the proxy reaches the app").
 services:
   core:
     networks:

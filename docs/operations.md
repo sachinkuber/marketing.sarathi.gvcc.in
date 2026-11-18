@@ -12,6 +12,7 @@ Files this runbook uses:
 | `infra/prod/proxy/marketing.caddy` | The proxy site, a template (Caddy) |
 | `infra/prod/proxy/cloudflare-ips.txt` | Cloudflare's address ranges, dated: the only peers the proxy believes |
 | `infra/prod/smoke.mjs` | The smoke check of a deployed origin |
+| `infra/prod/firewall/mkt-egress.sh`, `mkt-egress.service` | The worker's egress firewall and the unit that installs it before Docker starts |
 
 ## Hosts
 
@@ -45,14 +46,18 @@ To be recorded when the owner gives access (A1), with the same commands, read-on
 The core and the dashboard publish `127.0.0.1:4100` and `127.0.0.1:3100` only (`compose.yaml`). Two cases:
 
 1. **Caddy on the host** (a package or binary run by systemd). It reaches those ports directly. Render the site with `__MKT_CORE__ = 127.0.0.1:4100` and `__MKT_DASHBOARD__ = 127.0.0.1:3100`. Nothing else changes. This is the recommended production setup.
-2. **Caddy in Docker** (as on staging). A container cannot reach the host's `127.0.0.1`. Start the stack with the override, which adds the core and the dashboard to the proxy's network under the names `mkt-core` and `mkt-dashboard`:
+2. **Caddy in Docker** (as on staging). A container cannot reach the host's `127.0.0.1`. Give the proxy and this stack a Docker network of their own, shared with nothing else, and start the stack with the override, which adds the core and the dashboard (only) to it under the names `mkt-core` and `mkt-dashboard`:
 
    ```sh
-   export MKT_PROXY_NETWORK=web
+   docker network create mkt_proxy
+   docker network connect mkt_proxy caddy     # a change to the proxy: the owner approves it first
+   export MKT_PROXY_NETWORK=mkt_proxy
    docker compose -f infra/prod/compose.yaml -f infra/prod/compose.proxy-network.yaml up -d
    ```
 
-   Render the site with `__MKT_CORE__ = mkt-core:4000` and `__MKT_DASHBOARD__ = mkt-dashboard:3000`. Every later `up`, `restart` or `down` must name both files. Caution: every container on that network can then reach the core directly, around the proxy, and the core believes one forwarded address from whoever connects (`TRUST_PROXY=1`). On a network shared with other projects that is a way around the limiters for anyone who controls a container there. Prefer a network shared only by the proxy and this stack (`docker network create mkt_proxy`, then `docker network connect mkt_proxy caddy`, which is a change to the proxy the owner must approve), or case 1.
+   Render the site with `__MKT_CORE__ = mkt-core:4000` and `__MKT_DASHBOARD__ = mkt-dashboard:3000`. Every later `up`, `restart` or `down` must name both files. `docker network connect` does not survive a re-creation of the proxy container: add the network to the proxy's own compose file too (again with the owner's approval).
+
+   Why a network of its own: every container on that network reaches the core directly, around the proxy, and `TRUST_PROXY=1` is only a count of hops, so the core believes one forwarded address from whoever connects. Any container on the network can therefore send a forged `X-Forwarded-For` straight to the core and get around the invite and sign-in limiters. Joining the proxy's existing shared network instead (on staging, `web`, which other projects' containers are on) is an exception only the owner can approve, knowing that risk.
 
 ## Proxy site
 
@@ -97,7 +102,7 @@ Cloudflare changes its ranges rarely and announces it. To refresh: fetch `https:
 
 ## First deployment
 
-On the production host, as root, from a checkout of the release (`/opt/mkt/marketing`). Steps 1 to 4 are the order of every later deployment too (migrations, then the queue, then core, worker and dashboard; the core and the worker always together).
+On the production host, as root, from a checkout of the release (`/opt/mkt/marketing`). Steps 1 to 4 are the order of every later deployment too (the firewall is already in place then) (migrations, then the queue, then core, worker and dashboard; the core and the worker always together).
 
 1. **Folders and secrets.** Every value is generated on the host with `openssl rand` and goes only into these files, never onto a command line that is logged, into the repository or an image:
 
@@ -119,11 +124,11 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 3. **Prepare** the database (migrations, run-time role passwords, the queue): `docker compose -f infra/prod/compose.yaml --profile ops run --rm ops prepare`. Its last line is JSON with `"event":"prepared"`.
 
-4. **Start**: `docker compose -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, and `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`.
+4. **Worker egress firewall**, installed before the stack first starts (below). Then **start**: `docker compose -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`, and `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`.
 
 5. **Dashboard file permissions.** After the first start, `docker compose -f infra/prod/compose.yaml logs dashboard | grep -i eacces` must print nothing: an `EACCES` on `.next` means the image's cache folder is not writable by the `node` user.
 
-6. **Worker egress firewall** (below), then its check.
+6. **Worker egress check** from inside the worker (below, "Check").
 
 7. **Proxy site** (above): render, validate, reload.
 
@@ -150,33 +155,35 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 ## Worker egress firewall
 
-The worker's only way out is the `mkt_worker_egress` network, an ordinary bridge (ruling R9). On the production host it is limited to TCP 443 to public addresses: no other port, no private or link-local range, and not the host itself. Docker sends a container's outbound traffic through the `DOCKER-USER` chain (forwarded traffic); traffic to the host's own addresses goes through `INPUT` instead, so both are set. Run after every `up` that may have recreated the network (its subnet can change), and at boot after Docker (for example from a systemd unit with `After=docker.service`):
+The worker's only way out is the network `mkt_worker_egress`, an ordinary bridge (ruling R9). Compose gives it a fixed bridge name, `mkt-egress0`, a fixed subnet, `10.247.73.0/24`, and no IPv6. `infra/prod/firewall/mkt-egress.sh` limits traffic from that bridge to:
+
+- replies to connections already made;
+- DNS (UDP and TCP 53) to the host's resolvers only, read from `/run/systemd/resolve/resolv.conf` or `/etc/resolv.conf` (or named in `MKT_EGRESS_DNS`). These come first, because cloud resolvers often sit in 10/8 or 169.254/16;
+- then it drops every private, shared, loopback, link-local, multicast and reserved range, and the host's own addresses (`DOCKER-USER`, plus a DROP in `INPUT` for the host's services);
+- then it allows TCP 443 and drops everything else.
+
+**Deviation awaiting the owner's approval (ruling R15).** Plan decision 3 says the worker reaches "the model provider only". This firewall enforces TCP 443 to any public address, which is wider. It does not try to follow the provider's address ranges. Until the owner accepts this, or asks for a provider-only rule (for example an egress proxy with a host allow-list), the plan's rule is not met.
+
+The rules are keyed on the bridge's name, not on its subnet, so they can be in place before the network exists. A systemd unit installs them at every boot **before Docker starts**, so the worker never runs unrestricted: Docker restarts the containers as soon as it starts, and it keeps what is in `DOCKER-USER`. On the production host, before the first `up -d`:
 
 ```sh
-SUBNET=$(docker network inspect mkt_worker_egress --format '{{(index .IPAM.Config 0).Subnet}}')
-iptables -N MKT-EGRESS 2>/dev/null || iptables -F MKT-EGRESS
-iptables -A MKT-EGRESS -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-# Private, shared, loopback, link-local, multicast and reserved ranges. The host's published ports are reached
-# through Docker's address translation, so they land in these ranges too; the host's own services are INPUT below.
-for net in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 224.0.0.0/4 240.0.0.0/4; do
-  iptables -A MKT-EGRESS -d "$net" -j DROP
-done
-iptables -A MKT-EGRESS -m addrtype --dst-type LOCAL -j DROP
-iptables -A MKT-EGRESS -p tcp --dport 443 -j RETURN
-iptables -A MKT-EGRESS -j DROP
-iptables -D DOCKER-USER -s "$SUBNET" -j MKT-EGRESS 2>/dev/null
-iptables -I DOCKER-USER 1 -s "$SUBNET" -j MKT-EGRESS
-iptables -D INPUT -s "$SUBNET" -j DROP 2>/dev/null
-iptables -I INPUT 1 -s "$SUBNET" -j DROP
+install -d -m 0755 /opt/mkt/firewall
+install -m 0755 infra/prod/firewall/mkt-egress.sh /opt/mkt/firewall/mkt-egress.sh
+install -m 0644 infra/prod/firewall/mkt-egress.service /etc/systemd/system/mkt-egress.service
+systemctl daemon-reload
+systemctl enable --now mkt-egress.service
 ```
 
-Name resolution goes through Docker's embedded resolver. If the worker cannot resolve the provider's name after this, add `-p udp --dport 53 -d <resolver> -j RETURN` (and the same for tcp) for the host's resolvers before the final `DROP`. An old rule for a previous subnet is removed with `iptables -D DOCKER-USER -s <old subnet> -j MKT-EGRESS`.
+The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. Re-run `systemctl restart mkt-egress.service` after the resolvers change. The `iptables` here is whichever variant the host's Docker uses (legacy or nft); `infra/prod/test/firewall.test.mjs` checks the rule order.
 
-Check (each line's expectation in the comment):
+If `10.247.73.0/24` is already used on the host or its network (`ip route`, `docker network inspect`), set another unused private /24 in `MKT_EGRESS_SUBNET`, in the environment of every `docker compose` command (for example in `/opt/mkt/compose.env`, sourced first). Nothing in the firewall changes, because it matches the bridge name.
+
+### Check
+
+After `up -d`, run each command below:
 
 ```sh
-iptables -S DOCKER-USER | grep MKT-EGRESS        # one rule, for the current $SUBNET
-iptables -S INPUT | grep -- "-s $SUBNET"         # one DROP rule
+/opt/mkt/firewall/mkt-egress.sh check            # mkt-egress: ok  (backend, rule order, bridge name, IPv6 off)
 W='docker compose -f infra/prod/compose.yaml exec -T worker node -e'
 $W "fetch('https://api.anthropic.com/').then(r=>console.log('443 ok',r.status),e=>console.log('443 blocked',e.cause?.code))"   # 443 ok
 $W "fetch('http://example.com/').then(r=>console.log('80 open',r.status),e=>console.log('80 blocked',e.cause?.code))"           # 80 blocked
@@ -198,12 +205,14 @@ On the host, the full run. `--direct` reaches the proxy on the host itself, arou
 
 ```sh
 cd /opt/mkt/marketing
-umask 077 && sed -n 's/^TRIGGER_SECRET=//p' /opt/mkt/secrets/core.env > /root/.mkt-smoke-trigger
-docker run --rm --network host --entrypoint node \
+(umask 077 && sed -n 's/^TRIGGER_SECRET=//p' /opt/mkt/secrets/core.env > /root/.mkt-smoke-trigger)
+docker run --rm --network host --user 0 --entrypoint node \
   -v "$PWD/infra/prod/smoke.mjs:/tmp/smoke.mjs:ro" -v /root/.mkt-smoke-trigger:/tmp/trigger:ro \
   mkt-core /tmp/smoke.mjs https://marketing.sarathi.gvcc.in \
   --direct https://127.0.0.1:443 --trigger-secret-file /tmp/trigger
 rm -f /root/.mkt-smoke-trigger
 ```
 
-Side effects, all expected: invite look-ups from the host's own address are locked for 15 minutes; a few failed sign-ins for made-up `@example.invalid` addresses and one `trigger.received` entry for workflow `smoke-check` appear in the audit log. `/api/health/worker` answers 503 until the worker has stamped its first heartbeat (it does so at start) and whenever it has been silent for 15 minutes.
+`--user 0`: the image runs as `node`, which cannot read the root-only secret file.
+
+Side effects, all expected: invite look-ups from the host's own address are locked for 15 minutes, so a second run within 15 minutes fails `forged-invite` as "already locked" (by design: it could prove nothing; likewise `forged-sign-in` within 10 seconds); a few failed sign-ins for made-up `@example.invalid` addresses and one `trigger.received` entry for workflow `smoke-check` appear in the audit log. `/api/health/worker` answers 503 until the worker has stamped its first heartbeat (it does so at start) and whenever it has been silent for 15 minutes.

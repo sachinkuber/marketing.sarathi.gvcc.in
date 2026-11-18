@@ -110,6 +110,7 @@ export async function startFakeOrigin(options = {}) {
     }
     if (req.method === 'POST' && path === '/api/v1/invites/lookup') {
       const key = addresses(req).invite
+      if (faults.inviteLocked) return error(res, 429, 'too_many_attempts')
       const failures = invites.get(key) ?? 0
       if (failures >= 5) return error(res, 429, 'too_many_attempts')
       invites.set(key, failures + 1)
@@ -117,9 +118,14 @@ export async function startFakeOrigin(options = {}) {
     }
     if (req.method === 'POST' && path === '/api/auth/sign-in/email') {
       const key = addresses(req).signIn
-      const count = (signIns.get(key) ?? 0) + 1
-      signIns.set(key, count)
-      if (count > 3) return json(res, 429, { message: 'Too many requests. Please try again later.' })
+      // Better Auth's rule for /sign-in: 3 per 10 s per address.
+      const now = Date.now()
+      const recent = (signIns.get(key) ?? []).filter((at) => now - at < 10_000)
+      recent.push(now)
+      signIns.set(key, recent)
+      if (faults.signInLimited || recent.length > 3) {
+        return json(res, 429, { message: 'Too many requests. Please try again later.' })
+      }
       return json(res, 401, { code: 'INVALID_EMAIL_OR_PASSWORD' })
     }
     if (req.method === 'DELETE' && REMOVE_MEMBER.test(path)) {

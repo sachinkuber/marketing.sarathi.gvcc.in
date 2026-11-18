@@ -1,0 +1,16 @@
+# Installs the worker's egress firewall (mkt-egress.sh) at every boot, before Docker starts, so the worker never
+# runs on an unrestricted network: Docker restarts the stack's containers as soon as it starts.
+# Installed as /etc/systemd/system/mkt-egress.service; docs/operations.md, "Worker egress firewall".
+[Unit]
+Description=Marketing platform: worker egress firewall (mkt-egress0, TCP 443 to public addresses)
+After=network-pre.target ufw.service netfilter-persistent.service
+Before=docker.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/mkt/firewall/mkt-egress.sh install
+
+[Install]
+WantedBy=multi-user.target docker.service

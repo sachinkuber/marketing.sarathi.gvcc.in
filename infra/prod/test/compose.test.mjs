@@ -170,6 +170,22 @@ test('published ports bind 127.0.0.1 only', () => {
   assert.deepEqual(published.sort(), ['core 127.0.0.1:4100:4000', 'dashboard 127.0.0.1:3100:3000'])
 })
 
+// The host firewall (infra/prod/firewall/mkt-egress.sh) keys on the egress bridge's name, installed before the
+// stack starts; the subnet is fixed and IPv6 is off (the rules are IPv4 only).
+test('worker_egress has a fixed bridge name, the firewall script uses it, a fixed subnet, and no IPv6', () => {
+  const egress = config().networks.worker_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.equal(egress.enable_ipv6, false)
+  assert.equal(egress.driver_opts?.['com.docker.network.bridge.name'], 'mkt-egress0')
+  assert.ok('mkt-egress0'.length <= 15)
+  assert.deepEqual(
+    egress.ipam?.config?.map((c) => c.subnet),
+    ['10.247.73.0/24'],
+  )
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.match(script, /^BRIDGE=mkt-egress0$/m)
+})
+
 // infra/prod/compose.proxy-network.yaml, for a proxy that runs in Docker (Task 7). The base file's own tests above
 // stay as they are; this override only adds the core and the dashboard to the proxy's external network.
 test('the proxy-network override adds only core and dashboard to the named external network', () => {

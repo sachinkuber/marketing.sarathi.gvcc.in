@@ -165,6 +165,51 @@ test('a wrong trigger secret fails the trigger check', async () => {
   assertOnlyFailed(await smokeAgainst({ triggerSecret: 'another-secret' }), ['trigger'])
 })
 
+test('the forged addresses differ from run to run', async () => {
+  const forged = async () => {
+    const out = await smokeAgainst({})
+    assert.equal(out.code, 0, out.stdout)
+    return out.seen
+      .filter((r) => r.url === '/api/v1/invites/lookup' || r.url === '/api/auth/sign-in/email')
+      .map((r) => `${r.headers['cf-connecting-ip']} ${r.headers['x-forwarded-for']}`)
+  }
+  const first = await forged()
+  const second = await forged()
+  // Every request of a run has its own pair, and the two runs do not repeat the same sequence.
+  assert.equal(new Set(first).size, first.length)
+  assert.notDeepEqual(first, second)
+  for (const pair of [...first, ...second]) {
+    assert.match(pair, /^203\.0\.113\.\d{1,3} 198\.51\.100\.\d{1,3}$/)
+  }
+})
+
+test('an invite limiter that is already locked before any look-up fails (no proof)', async () => {
+  const out = await smokeAgainst({ faults: { inviteLocked: true } })
+  assertOnlyFailed(out, ['forged-invite'])
+  assert.match(out.stdout, /FAIL +forged-invite .*already locked/)
+})
+
+test('a sign-in limiter that answers 429 before any 401 fails (no proof)', async () => {
+  const out = await smokeAgainst({ faults: { signInLimited: true } })
+  assertOnlyFailed(out, ['forged-sign-in'])
+  assert.match(out.stdout, /FAIL +forged-sign-in .*already limited/)
+})
+
+test('a second run inside the lock window fails the limiter checks instead of passing without proof', async () => {
+  const fake = await startFakeOrigin({ origin: ORIGIN, triggerSecret })
+  try {
+    const args = [ORIGIN, '--connect', fake.url, '--direct', fake.url, '--trigger-secret-file', secretFile]
+    assert.equal((await runSmoke(args)).code, 0)
+    const again = await runSmoke(args)
+    const r = results(again.stdout)
+    assert.equal(again.code, 1, again.stdout)
+    assert.equal(r.get('forged-invite'), 'FAIL')
+    assert.equal(r.get('forged-sign-in'), 'FAIL')
+  } finally {
+    await fake.close()
+  }
+})
+
 test('without --direct the forged checks are skipped and the run exits 2', async () => {
   const fake = await startFakeOrigin({ origin: ORIGIN })
   try {

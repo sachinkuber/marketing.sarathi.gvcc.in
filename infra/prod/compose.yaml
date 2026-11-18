@@ -15,10 +15,12 @@
 #   app            core and dashboard: the only services a proxy reaches, and the only published ports.
 #   worker         core and worker; internal (no route out).
 #   data           postgres, core, worker and ops; internal. Postgres publishes no port.
-#   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge, so for now it gives
-#                  unrestricted outbound access (any internet address, and the host's published ports via its
-#                  public address); the host firewall limits it to TCP 443 outward (docs/operations.md, "Worker
-#                  egress firewall"). The worker reaches the core only on `worker`.
+#   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge with a fixed
+#                  bridge name (mkt-egress0) and subnet, so the host firewall (infra/prod/firewall, installed
+#                  before the stack starts) can key on it. Without that firewall it is unrestricted outbound. With
+#                  it: TCP 443 to public addresses only, no private range, not the host. That is wider than plan
+#                  decision 3 ("the model provider only"): a deviation awaiting the owner's approval (ruling R15,
+#                  docs/operations.md). The worker reaches the core only on `worker`.
 # Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
 # that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
@@ -160,5 +162,14 @@ networks:
     internal: true
   data:
     internal: true
-  # Unrestricted outbound until the host firewall (docs/operations.md) limits this subnet to TCP 443.
+  # The firewall (infra/prod/firewall/mkt-egress.sh) matches the bridge name; keep the two equal. The subnet is
+  # fixed so it never moves onto another network's range; change MKT_EGRESS_SUBNET only to avoid a clash with a
+  # range already used on the host (docs/operations.md). IPv6 off: the firewall rules are IPv4 only.
   worker_egress:
+    driver: bridge
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: mkt-egress0
+    ipam:
+      config:
+        - subnet: ${MKT_EGRESS_SUBNET:-10.247.73.0/24}

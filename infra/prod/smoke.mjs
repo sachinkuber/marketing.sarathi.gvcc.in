@@ -27,7 +27,8 @@
 // It prints statuses and error codes only: never a body, a cookie, a header value it was given, or a secret.
 //
 // Side effects on the target (all harmless, all expected): six failed invite look-ups, which lock invite
-// look-ups for the --direct address for 15 minutes; up to five failed sign-ins for made-up addresses
+// look-ups for the --direct address for 15 minutes (a second run inside that time fails forged-invite as
+// "already locked", by design: it could prove nothing); up to five failed sign-ins for made-up addresses
 // (@example.invalid), audited as auth.sign_in failures; with the trigger secret, one trigger.received audit
 // entry for workflow "smoke-check".
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
@@ -270,9 +271,20 @@ async function trigger() {
   return 'with a query string 401 trigger_refused; correctly signed 200'
 }
 
-function forgedHeaders(i) {
-  // Documentation ranges (RFC 5737): a different made-up address on every request.
-  return { 'cf-connecting-ip': `203.0.113.${i}`, 'x-forwarded-for': `198.51.100.${i}` }
+// Documentation ranges (RFC 5737): a different made-up address on every request, drawn afresh on every run, so
+// a run never meets an address an earlier run locked. 11 distinct host parts: 6 for invites, 5 for sign-ins.
+const forgedHosts = (() => {
+  const pool = Array.from({ length: 254 }, (_, i) => i + 1)
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = randomBytes(4).readUInt32BE(0) % (i + 1)
+    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  }
+  return pool.slice(0, 11)
+})()
+
+function forgedHeaders(n) {
+  const host = forgedHosts[n]
+  return { 'cf-connecting-ip': `203.0.113.${host}`, 'x-forwarded-for': `198.51.100.${host}` }
 }
 
 function needsDirect() {
@@ -281,19 +293,30 @@ function needsDirect() {
   return null
 }
 
+// Each limiter check proves something only if the limiter first let a request through (counted it) and then
+// refused a later one carrying a different forged address. A 429 before that proves nothing: the real
+// address is still locked from an earlier run, or the limiter keys on something the run cannot see.
+
 // The invite limiter keys on the client address and locks after 5 failures (apps/core/src/auth/policy.ts).
 async function forgedInvite() {
   const skip = needsDirect()
   if (skip) return skip
+  let counted = 0
   for (let i = 1; i <= 6; i++) {
     const r = await request('/api/v1/invites/lookup', {
       method: 'POST',
       direct: true,
-      headers: { origin: ORIGIN, 'content-type': 'application/json', ...forgedHeaders(10 + i) },
+      headers: { origin: ORIGIN, 'content-type': 'application/json', ...forgedHeaders(i - 1) },
       body: JSON.stringify({ token: hex(32) }),
     })
-    if (r.status === 429) return `limited (429) at attempt ${i}, each with a different forged address`
+    if (r.status === 429) {
+      if (counted === 0) {
+        throw new Error('invite look-ups were already locked before this run: wait 15 minutes and run again')
+      }
+      return `limited (429) at attempt ${i} after ${counted} counted, each with a different forged address`
+    }
     if (r.status !== 410) throw new Error(`invite look-up ${i} answered ${described(r)}, not 410 or 429`)
+    counted++
   }
   throw new Error('6 failed look-ups, each with a different forged address, were never limited (429)')
 }
@@ -304,15 +327,22 @@ async function forgedSignIn() {
   const skip = needsDirect()
   if (skip) return skip
   const run = hex(4)
+  let counted = 0
   for (let i = 1; i <= 5; i++) {
     const r = await request('/api/auth/sign-in/email', {
       method: 'POST',
       direct: true,
-      headers: { origin: ORIGIN, 'content-type': 'application/json', ...forgedHeaders(30 + i) },
+      headers: { origin: ORIGIN, 'content-type': 'application/json', ...forgedHeaders(5 + i) },
       body: JSON.stringify({ email: `smoke-${run}-${i}@example.invalid`, password: hex(16) }),
     })
-    if (r.status === 429) return `limited (429) at attempt ${i}, each with a different forged address`
+    if (r.status === 429) {
+      if (counted === 0) {
+        throw new Error('sign-ins were already limited before this run: wait 10 seconds and run again')
+      }
+      return `limited (429) at attempt ${i} after ${counted} counted, each with a different forged address`
+    }
     if (r.status !== 401) throw new Error(`sign-in ${i} answered ${described(r)}, not 401 or 429`)
+    counted++
   }
   throw new Error(
     '5 sign-ins in a few seconds, each with a different forged address, were never limited (429)',
