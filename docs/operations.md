@@ -12,7 +12,7 @@ Files this runbook uses:
 | `infra/prod/proxy/marketing.caddy` | The proxy site, a template (Caddy) |
 | `infra/prod/proxy/cloudflare-ips.txt` | Cloudflare's address ranges, dated: the only peers the proxy believes |
 | `infra/prod/smoke.mjs` | The smoke check of a deployed origin |
-| `infra/prod/firewall/mkt-egress.sh`, `mkt-egress.service` | The worker's egress firewall and the unit that installs it before Docker starts |
+| `infra/prod/firewall/mkt-egress.sh`, `mkt-egress.service` | The egress firewall (the worker's and the backup upload's bridges) and the unit that installs it before Docker starts |
 | `infra/prod/backup/backup.sh`, `restore.sh`, `offsite.sh` | The daily encrypted backup and its restore (the `backup` service), and the off-server copy (the `offsite` service); both services use the ops image |
 | `infra/prod/backup/mkt-backup.service`, `.timer`, `mkt-backup-alert.service` | The host units: the daily run at 02:30 IST and the alert on its failure |
 
@@ -117,7 +117,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
    install -m 0600 -o root -g root infra/prod/compose.env.example /opt/mkt/compose.env
    ```
 
-   `/opt/mkt/compose.env` holds no secret; its defaults are right unless "Worker egress firewall", "Settings" below says otherwise.
+   `/opt/mkt/compose.env` holds no secret; its defaults are right unless "Egress firewall", "Settings" below says otherwise.
 
    Then edit each file and replace every `CHANGE_ME` with its own `openssl rand -hex 32` (hex keeps database URLs valid): the superuser password (twice in `postgres.env`), the four role passwords (`roles.env`, and the same four in the URLs of `core.env` and `worker.env`), and `AUTH_SECRET`, `WORKER_SECRET` (the same in `core.env` and `worker.env`), `ATTEMPT_TOKEN_SECRET` and `TRIGGER_SECRET`. `ANTHROPIC_API_KEY` is the provider's key (A3). `backup.env` and `offsite.env` stay as installed for now (blank values, no `CHANGE_ME`): the owner's age public key and the bucket come later ("Backups" below), and nothing else needs them. Check: `ls -l /opt/mkt/secrets` shows `-rw------- root root` for every file, and `grep -l CHANGE_ME /opt/mkt/secrets/*.env` prints nothing (the core and the worker refuse to start otherwise). Leave `MKT_SECRETS` unset: it exists only for the tests, and unset the stack reads `/opt/mkt/secrets`.
 
@@ -129,7 +129,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 3. **Prepare** the database (migrations, run-time role passwords, the queue): `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm ops prepare`. Its last line is JSON with `"event":"prepared"`.
 
-4. **Worker egress firewall**, installed before the stack first starts (below). Then **start**: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`, and `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`.
+4. **Egress firewall** (the worker's and the backup upload's), installed before the stack first starts (below). Then **start**: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`, and `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`.
 
 5. **Dashboard file permissions.** After the first start, `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml logs dashboard | grep -i eacces` must print nothing: an `EACCES` on `.next` means the image's cache folder is not writable by the `node` user.
 
@@ -160,14 +160,23 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 11. **Firewall check, the last step of every deployment** (the first and every later one): `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`. A deployment is not finished until it does.
 
-## Worker egress firewall
+## Egress firewall
 
-The worker's only way out is the network `mkt_worker_egress`, an ordinary bridge (ruling R9). Compose gives it a fixed bridge name (`mkt-egress0`), a fixed subnet (`10.247.73.0/24`) and no IPv6. `infra/prod/firewall/mkt-egress.sh` limits traffic from that bridge to:
+The stack has two ways out, each an ordinary bridge with a fixed name, a fixed subnet and no IPv6:
+
+| Network | Used by | Bridge | Subnet | Chains |
+| --- | --- | --- | --- | --- |
+| `mkt_worker_egress` | the worker, for the model provider (ruling R9) | `mkt-egress0` | `10.247.73.0/24` | `MKT-EGRESS-A`/`-B` |
+| `mkt_backup_egress` | the `offsite` service, for the off-server backup copy | `mkt-bkegress0` | `10.247.75.0/24` | `MKT-BKEGRESS-A`/`-B` |
+
+`infra/prod/firewall/mkt-egress.sh` applies the same rules to each bridge, in that bridge's own chain. It limits traffic from the bridge to:
 
 - replies to connections already made;
 - DNS (UDP and TCP 53) to the host's resolvers only. These come first, because cloud resolvers often sit in 10/8 or 169.254/16;
 - then it drops every private, shared, loopback, link-local, multicast and reserved range, and the host's own addresses (`DOCKER-USER`, plus a DROP in `INPUT` for the host's services);
 - then it allows TCP 443 and drops everything else.
+
+**Backup upload: owner decision (2026-11-18, ruling R19).** The owner decided the backup upload gets the same limit as the worker: DNS to the host's resolvers, no host or private and special ranges, TCP 443 to public addresses, everything else dropped, failing closed on its own. Each bridge is installed separately, with its own fallback: one failing never leaves the other unprotected, and `install` then exits 1.
 
 **Deviation awaiting the owner's approval (ruling R15).** Plan decision 3 says the worker reaches "the model provider only". This firewall enforces TCP 443 to any public address, which is wider. It does not try to follow the provider's address ranges. Until the owner accepts this, or asks for a provider-only rule (for example an egress proxy with a host allow-list), the plan's rule is not met.
 
@@ -182,30 +191,34 @@ One root-owned file, copied from `infra/prod/compose.env.example` at installatio
 The example sets the defaults, and `infra/prod/test/compose.test.mjs` checks that they equal those in `compose.yaml` and `mkt-egress.sh`:
 
 ```sh
-# The egress bridge's name, at most 15 characters.
+# The worker's egress bridge, at most 15 characters.
 MKT_EGRESS_BRIDGE=mkt-egress0
 # The egress subnet. Change it only if this range is already used on the host or its network.
 MKT_EGRESS_SUBNET=10.247.73.0/24
+# The backup upload's egress bridge (the offsite service), at most 15 characters, firewalled like the worker's.
+MKT_BACKUP_EGRESS_BRIDGE=mkt-bkegress0
+# Its subnet. Change it only if this range is already used on the host or its network.
+MKT_BACKUP_EGRESS_SUBNET=10.247.75.0/24
 # The host's upstream DNS resolvers, space-separated, when they cannot be read from resolv.conf at boot:
 # MKT_EGRESS_DNS="<resolver> <resolver>"
 ```
 
-If compose and the firewall disagree on the bridge name, `mkt-egress.sh check` says so.
+If compose and the firewall disagree on a bridge name, `mkt-egress.sh check` says so.
 
 **Resolvers.** Without `MKT_EGRESS_DNS`, the script reads the IPv4 nameservers in `/run/systemd/resolve/resolv.conf`, or in `/etc/resolv.conf` if that file is missing. It leaves out loopback: `127.0.0.53` is a stub a container cannot use. At boot the unit runs after the network is online and after `systemd-resolved`, and the script waits up to 60 seconds (`MKT_EGRESS_DNS_WAIT`) for a resolver to appear.
 
-If none appears, install **fails closed** and exits 1, and `systemctl status mkt-egress` shows why. Docker still starts, so other projects on the host are not affected. For the worker:
+If none appears, install **fails closed** and exits 1, and `systemctl status mkt-egress` shows why. Docker still starts, so other projects on the host are not affected. For each bridge:
 
 - If a chain is already in place, it is left exactly as it is.
-- Otherwise a chain with no DNS rule is installed: everything but TCP 443 to public addresses is dropped, and since the worker cannot resolve names, it reaches nothing until this is fixed.
+- Otherwise a chain with no DNS rule is installed: everything but TCP 443 to public addresses is dropped, and since the worker (or the backup upload) cannot resolve names, it reaches nothing until this is fixed.
 
-If an install fails for any other reason before the bridge points at a complete chain, and nothing else covers the bridge, the script drops everything from the bridge until an install succeeds.
+If an install fails for any other reason before a bridge points at a complete chain, and nothing else covers that bridge, the script drops everything from it until an install succeeds. The other bridge is still installed.
 
 Set `MKT_EGRESS_DNS` in `compose.env` on a host whose resolvers cannot be read that way, or whose resolvers are fixed by hand. Run `systemctl restart mkt-egress.service` whenever they change.
 
 ### Install
 
-The rules are keyed on the bridge's name, not on its subnet, so they can be in place before the network exists. A systemd unit installs them at every boot **before Docker starts**, so the worker never runs unrestricted: Docker restarts the containers as soon as it starts, and it keeps what is in `DOCKER-USER`. On the production host, before the first `up -d`:
+The rules are keyed on the bridges' names, not on their subnets, so they can be in place before the networks exist. A systemd unit installs them at every boot **before Docker starts**, so neither the worker nor the backup upload ever runs unrestricted: Docker restarts the containers as soon as it starts, and it keeps what is in `DOCKER-USER`. On the production host, before the first `up -d`:
 
 ```sh
 install -d -m 0755 /opt/mkt/firewall
@@ -215,23 +228,27 @@ systemctl daemon-reload
 systemctl enable --now mkt-egress.service
 ```
 
-A re-run (a restart of the unit, or a new release of the script) builds the new rules in a second chain (`MKT-EGRESS-A` and `MKT-EGRESS-B` alternate), points the bridge at it, and only then removes the old chain. The bridge is never left without rules.
+A re-run (a restart of the unit, or a new release of the script) builds each bridge's new rules in its second chain (`MKT-EGRESS-A` and `MKT-EGRESS-B` alternate, and `MKT-BKEGRESS-A` and `-B`), points the bridge at it, and only then removes the old chain. A bridge is never left without rules. On a host where an earlier release of the script covered the worker's bridge only, a restart of the unit (`systemctl restart mkt-egress.service`, after installing the new script and unit as above) adds the backup bridge; run it before the next `up -d`.
 
-The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. The `iptables` here is whichever variant the host's Docker uses (legacy or nft). `infra/prod/test/firewall.test.mjs` checks the rule order, the swap, the refusal without a resolver, and `check`.
+The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. The `iptables` here is whichever variant the host's Docker uses (legacy or nft). `infra/prod/test/firewall.test.mjs` checks the rule order, the swap, the refusal without a resolver, each bridge failing closed on its own, and `check` for both bridges.
 
-A test stack (`infra/prod/test/stack.test.mjs`, project `mkt-m7test`) uses its own bridge (`mkt-m7t-egress0`) and subnet (`10.247.74.0/24`), so it can run on a host beside `mkt`. It installs no firewall. A hand-run rehearsal should do the same, setting `MKT_EGRESS_BRIDGE` and `MKT_EGRESS_SUBNET` to unused values in its own shell.
+A test stack (`infra/prod/test/stack.test.mjs`, project `mkt-m7test`, and `backup.test.mjs`) uses its own bridges (`mkt-m7t-egress0`, `mkt-m7t-bkegr0`) and subnets (`10.247.74.0/24`, `10.247.76.0/24`), so it can run on a host beside `mkt`. It installs no firewall. A hand-run rehearsal should do the same, setting `MKT_EGRESS_BRIDGE`, `MKT_EGRESS_SUBNET`, `MKT_BACKUP_EGRESS_BRIDGE` and `MKT_BACKUP_EGRESS_SUBNET` to unused values in its own shell.
 
 ### Check
 
 After `up -d`, run each command below:
 
 ```sh
-/opt/mkt/firewall/mkt-egress.sh check            # mkt-egress: ok  (backend, rule order, bridge name, IPv6 off)
+/opt/mkt/firewall/mkt-egress.sh check   # mkt-egress: ok (mkt-egress0 MKT-EGRESS-A, mkt-bkegress0 MKT-BKEGRESS-A), A or B: both bridges' rules, backend, bridge names, IPv6 off
 W='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml exec -T worker node -e'
 $W "fetch('https://api.anthropic.com/').then(r=>console.log('443 ok',r.status),e=>console.log('443 blocked',e.cause?.code))"   # 443 ok
 $W "fetch('http://example.com/').then(r=>console.log('80 open',r.status),e=>console.log('80 blocked',e.cause?.code))"           # 80 blocked
 HOST_IP=$(hostname -I | cut -d' ' -f1)
 $W "fetch('https://$HOST_IP/',{signal:AbortSignal.timeout(5000)}).then(r=>console.log('host open'),e=>console.log('host blocked'))"  # host blocked
+# The backup upload's bridge, from a one-off offsite container (it runs only once a day otherwise):
+O='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T --entrypoint node offsite -e'
+$O "fetch('https://www.cloudflare.com/').then(r=>console.log('443 ok',r.status),e=>console.log('443 blocked',e.cause?.code))"  # 443 ok
+$O "fetch('http://example.com/').then(r=>console.log('80 open',r.status),e=>console.log('80 blocked',e.cause?.code))"         # 80 blocked
 ```
 
 ## Smoke check
@@ -275,7 +292,7 @@ When the backup succeeded, the same unit runs `infra/prod/backup/offsite.sh` in 
 
 On a failure of either, systemd starts `mkt-backup-alert.service` (`OnFailure=`), which runs `ops alert backup_failed`: a **severity 1** platform alert, written with `app.raise_alert` (the function the core's `raiseAlert` uses) through the superuser's address in `postgres.env`, so no secret is on a command line. The core delivers it to every platform owner by email and on the second channel at its next notify run (the worker timer's `/worker/reconcile`, every `RECONCILE_INTERVAL_SECONDS`). While that alert is unresolved, another failure adds no second one. If the database itself is down, the alert unit fails too; `systemctl --failed` then lists both units.
 
-The two services are split by what they hold. `backup` has the database's credentials (`postgres.env`) and the age public key (`backup.env`), writes `/opt/mkt/backups`, and is on `data` only: no way out. `offsite` sees `/opt/mkt/backups` read-only, holds only the remote's settings (`offsite.env`, no database setting), and is on its own `backup_egress` only: it cannot reach postgres. The host firewall restricts only the worker's bridge (`mkt-egress0`), so `backup_egress` is unrestricted outbound, used for a few minutes a day by a container that serves nothing and holds only encrypted files. **Pending the owner's decision:** whether to restrict it to the bucket's endpoint as the worker's is restricted.
+The two services are split by what they hold. `backup` has the database's credentials (`postgres.env`) and the age public key (`backup.env`), writes `/opt/mkt/backups`, and is on `data` only: no way out. `offsite` sees `/opt/mkt/backups` read-only, holds only the remote's settings (`offsite.env`, no database setting), and is on its own `backup_egress` only: it cannot reach postgres. The host firewall limits `backup_egress` (bridge `mkt-bkegress0`) as it limits the worker's: DNS to the host's resolvers and TCP 443 to public addresses only (owner decision 2026-11-18, ruling R19; "Egress firewall" above). The bucket's endpoint is reached over HTTPS, so nothing else is needed.
 
 ### Install
 

@@ -25,7 +25,13 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
 const composeFile = join(root, 'infra/prod/compose.yaml')
 const PROJECT = 'mkt-m7test-bk'
 const OWNER = 'owner@example.test'
-const TEST_EGRESS = { MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0', MKT_EGRESS_SUBNET: '10.247.74.0/24' }
+// Its own egress bridges and subnets (the worker's and the backup upload's), so it can run beside a `mkt` stack.
+const TEST_EGRESS = {
+  MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0',
+  MKT_EGRESS_SUBNET: '10.247.74.0/24',
+  MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0',
+  MKT_BACKUP_EGRESS_SUBNET: '10.247.76.0/24',
+}
 const SCHEMAS = ['app', 'auth', 'audit', 'pgboss']
 // The same postgres image as the stack, by digest.
 const PG_IMAGE = readFileSync(composeFile, 'utf8').match(/^\s+image: (postgres@sha256:[0-9a-f]{64})$/m)[1]

@@ -1,6 +1,7 @@
-// The worker egress firewall (infra/prod/firewall, ruling R9; R15 for what it allows): the rules the script
-// would install, read from its dry run (MKT_EGRESS_DRY_RUN=1 prints each iptables command and runs none), and
-// the systemd unit that installs them before Docker starts. Needs bash only; it never touches a firewall.
+// The egress firewall for the worker's and the backup upload's bridges (infra/prod/firewall, rulings R9 and R19;
+// R15 for what it allows): the rules the script would install, read from its dry run (MKT_EGRESS_DRY_RUN=1 prints
+// each iptables command and runs none), and the systemd unit that installs them before Docker starts. Needs bash
+// only; it never touches a firewall.
 //   node --test infra/prod/test/firewall.test.mjs
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -146,6 +147,39 @@ test('MKT_EGRESS_BRIDGE names another bridge', () => {
   assert.ok(!out.stdout.includes('-i mkt-egress0 '))
 })
 
+// The backup upload (offsite, network backup_egress) gets the same limit (ruling R19): its own bridge, its own
+// pair of chains (MKT-BKEGRESS-A/B), the same rules.
+test('the backup bridge gets its own chain with the same rules, hooked first, and dropped in INPUT', () => {
+  const out = dryRun(['install'])
+  assert.equal(out.status, 0, out.stderr)
+  const all = rules(out.stdout)
+  assert.ok(all.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j MKT-BKEGRESS-A'), all.join('\n'))
+  assert.ok(all.includes('iptables -I INPUT 1 -i mkt-bkegress0 -j DROP'))
+  const chain = (name) =>
+    all.filter((l) => l.startsWith(`iptables -A ${name} `)).map((l) => l.replace(name, 'CHAIN'))
+  assert.ok(chain('MKT-EGRESS-A').length > 10)
+  assert.deepEqual(chain('MKT-BKEGRESS-A'), chain('MKT-EGRESS-A'))
+  assert.match(out.stdout, /installed MKT-EGRESS-A for mkt-egress0/)
+  assert.match(out.stdout, /installed MKT-BKEGRESS-A for mkt-bkegress0/)
+})
+
+test('MKT_BACKUP_EGRESS_BRIDGE names another backup bridge', () => {
+  const out = dryRun(['install'], {}, { MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0' })
+  assert.equal(out.status, 0, out.stderr)
+  assert.ok(rules(out.stdout).includes('iptables -I DOCKER-USER 1 -i mkt-m7t-bkegr0 -j MKT-BKEGRESS-A'))
+  assert.ok(!out.stdout.includes('-i mkt-bkegress0 '))
+  assert.ok(rules(out.stdout).includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'))
+})
+
+test('no resolver: both bridges get a chain with no DNS rule, and install exits 1', () => {
+  const out = dryRun(['install'], { resolv: 'nameserver 127.0.0.53\n' })
+  assert.notEqual(out.status, 0)
+  const all = rules(out.stdout)
+  assert.ok(all.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j MKT-BKEGRESS-A'))
+  assert.ok(all.includes('iptables -A MKT-BKEGRESS-A -j DROP'))
+  assert.ok(!all.some((l) => /--dport 53/.test(l)), all.join('\n'))
+})
+
 // A stand-in iptables (and docker) on PATH: it logs every call, answers -L / -S / -C from a small state, and
 // changes nothing. Used for the parts the dry run cannot show: the swap on a re-run, and `check`.
 function stubbed(args, { dockerUser = [], chains = {}, extra = {}, fresh = false } = {}) {
@@ -153,7 +187,10 @@ function stubbed(args, { dockerUser = [], chains = {}, extra = {}, fresh = false
   const state = mkdtempSync(join(dir, 'state-'))
   // fresh: Docker has never run, so there is no DOCKER-USER chain yet (the first boot).
   if (!fresh) writeFileSync(join(state, 'DOCKER-USER'), ['-N DOCKER-USER', ...dockerUser].join('\n') + '\n')
-  writeFileSync(join(state, 'INPUT'), '-P INPUT ACCEPT\n-A INPUT -i mkt-egress0 -j DROP\n')
+  writeFileSync(
+    join(state, 'INPUT'),
+    '-P INPUT ACCEPT\n-A INPUT -i mkt-egress0 -j DROP\n-A INPUT -i mkt-bkegress0 -j DROP\n',
+  )
   for (const [name, lines] of Object.entries(chains)) {
     writeFileSync(join(state, name), [`-N ${name}`, ...lines].join('\n') + '\n')
   }
@@ -189,6 +226,21 @@ exit 0
   const log = existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n') : []
   return { ...out, log }
 }
+
+const goodChain = (name) => [
+  `-A ${name} -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN`,
+  `-A ${name} -d 192.0.2.53/32 -p udp -m udp --dport 53 -j RETURN`,
+  `-A ${name} -d 10.0.0.0/8 -j DROP`,
+  `-A ${name} -p tcp --dport 443 -j RETURN`,
+  `-A ${name} -j DROP`,
+]
+const GOOD_CHAIN = goodChain('MKT-EGRESS-B')
+// Both bridges installed and hooked first: the worker's (MKT-EGRESS-*) and the backup upload's (MKT-BKEGRESS-*).
+const BOTH_HOOKED = [
+  '-A DOCKER-USER -i mkt-bkegress0 -j MKT-BKEGRESS-A',
+  '-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B',
+]
+const BOTH_CHAINS = { 'MKT-EGRESS-B': GOOD_CHAIN, 'MKT-BKEGRESS-A': goodChain('MKT-BKEGRESS-A') }
 
 test('a re-run builds the other chain first, then swaps the jump, then removes the old chain', () => {
   const out = stubbed(['install'], {
@@ -236,10 +288,10 @@ test('fresh host, no resolver: fails closed (a hooked chain that drops DNS and p
   )
 })
 
-test('existing good chain, no resolver: the chain is left exactly as it is, and install exits 1', () => {
+test('existing good chains, no resolver: both are left exactly as they are, and install exits 1', () => {
   const out = stubbed(['install'], {
-    dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
-    chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
+    dockerUser: BOTH_HOOKED,
+    chains: BOTH_CHAINS,
     extra: { MKT_EGRESS_DNS: '' },
   })
   assert.notEqual(out.status, 0)
@@ -255,15 +307,43 @@ test('a failure while building on a fresh host leaves the bridge dropped, not op
   assert.match(out.stderr, /dropped/)
 })
 
-test('a failure while building beside a good chain leaves the good chain hooked and adds nothing to DOCKER-USER', () => {
+test('a failure while building beside good chains leaves them hooked and adds nothing to DOCKER-USER', () => {
   const out = stubbed(['install'], {
-    dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
-    chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
+    dockerUser: BOTH_HOOKED,
+    chains: BOTH_CHAINS,
     extra: { STUB_FAIL_ON: '--dport 443' },
   })
   assert.notEqual(out.status, 0)
   assert.ok(!out.log.some((l) => /^iptables (-I|-D) DOCKER-USER/.test(l)), out.log.join('\n'))
   assert.ok(!out.log.includes('iptables -X MKT-EGRESS-B'))
+  assert.ok(!out.log.includes('iptables -X MKT-BKEGRESS-A'))
+})
+
+// One bridge failing must not leave the other unprotected (ruling R19): each is installed on its own, with its own
+// fail-closed fallback, and install exits 1 if either failed.
+test('the backup bridge failing leaves it dropped, and the worker bridge still gets its chain', () => {
+  const out = stubbed(['install'], {
+    fresh: true,
+    extra: { STUB_FAIL_ON: 'MKT-BKEGRESS-A -p tcp --dport 443' },
+  })
+  assert.notEqual(out.status, 0)
+  assert.ok(out.log.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j DROP'), out.log.join('\n'))
+  assert.ok(!out.log.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j MKT-BKEGRESS-A'))
+  assert.ok(out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'))
+  assert.ok(!out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j DROP'))
+  assert.match(out.stderr, /everything from mkt-bkegress0 is dropped/)
+})
+
+test('the worker bridge failing leaves it dropped, and the backup bridge still gets its chain', () => {
+  const out = stubbed(['install'], {
+    fresh: true,
+    extra: { STUB_FAIL_ON: 'MKT-EGRESS-A -p tcp --dport 443' },
+  })
+  assert.notEqual(out.status, 0)
+  assert.ok(out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j DROP'), out.log.join('\n'))
+  assert.ok(!out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'))
+  assert.ok(out.log.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j MKT-BKEGRESS-A'))
+  assert.ok(!out.log.includes('iptables -I DOCKER-USER 1 -i mkt-bkegress0 -j DROP'))
 })
 
 test('a successful install removes an emergency DROP left by a failed one', () => {
@@ -276,27 +356,36 @@ test('a successful install removes an emergency DROP left by a failed one', () =
   )
 })
 
-const GOOD_CHAIN = [
-  '-A MKT-EGRESS-B -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN',
-  '-A MKT-EGRESS-B -d 192.0.2.53/32 -p udp -m udp --dport 53 -j RETURN',
-  '-A MKT-EGRESS-B -d 10.0.0.0/8 -j DROP',
-  '-A MKT-EGRESS-B -p tcp --dport 443 -j RETURN',
-  '-A MKT-EGRESS-B -j DROP',
-]
+test('check passes on the installed rules, for both bridges, in either order', () => {
+  for (const dockerUser of [BOTH_HOOKED, [...BOTH_HOOKED].reverse()]) {
+    const out = stubbed(['check'], { dockerUser, chains: BOTH_CHAINS })
+    assert.equal(out.status, 0, out.stderr)
+    assert.match(out.stdout, /mkt-egress: ok \(mkt-egress0 MKT-EGRESS-B, mkt-bkegress0 MKT-BKEGRESS-A\)/)
+  }
+})
 
-test('check passes on the installed rules', () => {
-  const out = stubbed(['check'], {
+test('check fails when the backup bridge has no jump, or its chain allows no DNS', () => {
+  const missing = stubbed(['check'], {
     dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
     chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
   })
-  assert.equal(out.status, 0, out.stderr)
-  assert.match(out.stdout, /mkt-egress: ok/)
+  assert.notEqual(missing.status, 0)
+  assert.match(missing.stderr, /mkt-bkegress0/)
+  const noDns = stubbed(['check'], {
+    dockerUser: BOTH_HOOKED,
+    chains: {
+      ...BOTH_CHAINS,
+      'MKT-BKEGRESS-A': goodChain('MKT-BKEGRESS-A').filter((l) => !/--dport 53/.test(l)),
+    },
+  })
+  assert.notEqual(noDns.status, 0)
+  assert.match(noDns.stderr, /MKT-BKEGRESS-A allows no DNS/)
 })
 
 test('check fails when the chain allows no DNS resolver', () => {
   const out = stubbed(['check'], {
-    dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
-    chains: { 'MKT-EGRESS-B': GOOD_CHAIN.filter((l) => !/--dport 53/.test(l)) },
+    dockerUser: BOTH_HOOKED,
+    chains: { ...BOTH_CHAINS, 'MKT-EGRESS-B': GOOD_CHAIN.filter((l) => !/--dport 53/.test(l)) },
   })
   assert.notEqual(out.status, 0)
   assert.match(out.stderr, /no DNS/)
@@ -304,11 +393,18 @@ test('check fails when the chain allows no DNS resolver', () => {
 
 test('check fails when the jump is not the first DOCKER-USER rule', () => {
   const out = stubbed(['check'], {
-    dockerUser: ['-A DOCKER-USER -j RETURN', '-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
-    chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
+    dockerUser: ['-A DOCKER-USER -j RETURN', ...BOTH_HOOKED],
+    chains: BOTH_CHAINS,
   })
   assert.notEqual(out.status, 0)
   assert.match(out.stderr, /first DOCKER-USER rule/)
+  // The backup bridge's jump after another rule is refused too.
+  const late = stubbed(['check'], {
+    dockerUser: [BOTH_HOOKED[1], '-A DOCKER-USER -j RETURN', BOTH_HOOKED[0]],
+    chains: BOTH_CHAINS,
+  })
+  assert.notEqual(late.status, 0)
+  assert.match(late.stderr, /first DOCKER-USER rule.*mkt-bkegress0/)
 })
 
 test('the unit reads the bridge name and resolvers from one env file, after resolved and the network', () => {

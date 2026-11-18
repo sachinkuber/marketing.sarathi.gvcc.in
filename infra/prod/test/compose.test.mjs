@@ -23,7 +23,15 @@ function compose(args, env = {}) {
   const result = spawnSync('docker', ['compose', '-f', composeFile, ...args], {
     encoding: 'utf8',
     // The egress variables unset (empty), so the file's own defaults are what is tested.
-    env: { ...process.env, MKT_SECRETS: secretsDir, MKT_EGRESS_BRIDGE: '', MKT_EGRESS_SUBNET: '', ...env },
+    env: {
+      ...process.env,
+      MKT_SECRETS: secretsDir,
+      MKT_EGRESS_BRIDGE: '',
+      MKT_EGRESS_SUBNET: '',
+      MKT_BACKUP_EGRESS_BRIDGE: '',
+      MKT_BACKUP_EGRESS_SUBNET: '',
+      ...env,
+    },
   })
   if (result.status !== 0) {
     throw new Error(
@@ -300,6 +308,35 @@ test('worker_egress has a fixed bridge name, the firewall script uses it, a fixe
   )
 })
 
+// The backup upload's way out gets the same firewall (ruling R19): a fixed bridge name the script also defaults
+// to, a fixed subnet, no IPv6; a test stack overrides both.
+test('backup_egress has a fixed bridge name, the firewall script uses it, a fixed subnet, and no IPv6', () => {
+  const egress = config(['ops']).networks.backup_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.equal(egress.enable_ipv6, false)
+  assert.equal(egress.driver_opts?.['com.docker.network.bridge.name'], 'mkt-bkegress0')
+  assert.ok('mkt-bkegress0'.length <= 15)
+  assert.deepEqual(
+    egress.ipam?.config?.map((c) => c.subnet),
+    ['10.247.75.0/24'],
+  )
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.match(script, /^BACKUP_BRIDGE=\$\{MKT_BACKUP_EGRESS_BRIDGE:-mkt-bkegress0\}$/m)
+  const raw = readFileSync(composeFile, 'utf8')
+  assert.match(raw, /com\.docker\.network\.bridge\.name: \$\{MKT_BACKUP_EGRESS_BRIDGE:-mkt-bkegress0\}$/m)
+  const other = JSON.parse(
+    compose(['--profile', 'ops', 'config', '--format', 'json'], {
+      MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0',
+      MKT_BACKUP_EGRESS_SUBNET: '10.247.76.0/24',
+    }),
+  ).networks.backup_egress
+  assert.equal(other.driver_opts['com.docker.network.bridge.name'], 'mkt-m7t-bkegr0')
+  assert.deepEqual(
+    other.ipam.config.map((c) => c.subnet),
+    ['10.247.76.0/24'],
+  )
+})
+
 // infra/prod/compose.env.example, copied to /opt/mkt/compose.env: read by compose (--env-file), by the firewall
 // unit (systemd EnvironmentFile=) and by a shell. Its values are the defaults of compose.yaml and mkt-egress.sh,
 // and no value line carries a trailing comment (systemd would keep it as part of the value).
@@ -316,19 +353,45 @@ test('compose.env.example holds the compose and firewall defaults, in a form all
   const raw = readFileSync(composeFile, 'utf8')
   const composeDefault = (name) => raw.match(new RegExp(`\\$\\{${name}:-([^}]+)\\}`))?.[1]
   const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
-  assert.deepEqual(Object.keys(values).sort(), ['MKT_EGRESS_BRIDGE', 'MKT_EGRESS_SUBNET'])
+  assert.deepEqual(Object.keys(values).sort(), [
+    'MKT_BACKUP_EGRESS_BRIDGE',
+    'MKT_BACKUP_EGRESS_SUBNET',
+    'MKT_EGRESS_BRIDGE',
+    'MKT_EGRESS_SUBNET',
+  ])
   assert.equal(values.MKT_EGRESS_BRIDGE, composeDefault('MKT_EGRESS_BRIDGE'))
   assert.equal(values.MKT_EGRESS_BRIDGE, script.match(/^BRIDGE=\$\{MKT_EGRESS_BRIDGE:-([^}]+)\}$/m)?.[1])
   assert.equal(values.MKT_EGRESS_SUBNET, composeDefault('MKT_EGRESS_SUBNET'))
+  assert.equal(values.MKT_BACKUP_EGRESS_BRIDGE, 'mkt-bkegress0')
+  assert.equal(values.MKT_BACKUP_EGRESS_BRIDGE, composeDefault('MKT_BACKUP_EGRESS_BRIDGE'))
+  assert.equal(
+    values.MKT_BACKUP_EGRESS_BRIDGE,
+    script.match(/^BACKUP_BRIDGE=\$\{MKT_BACKUP_EGRESS_BRIDGE:-([^}]+)\}$/m)?.[1],
+  )
+  assert.equal(values.MKT_BACKUP_EGRESS_SUBNET, '10.247.75.0/24')
+  assert.equal(values.MKT_BACKUP_EGRESS_SUBNET, composeDefault('MKT_BACKUP_EGRESS_SUBNET'))
   // The resolvers are offered as a commented line only.
   assert.match(text, /^# MKT_EGRESS_DNS="[^"]+"$/m)
   // Compose reads it as written (the egress variables absent from the environment, so only the file sets them).
   const env = { ...process.env, MKT_SECRETS: secretsDir }
   delete env.MKT_EGRESS_BRIDGE
   delete env.MKT_EGRESS_SUBNET
+  delete env.MKT_BACKUP_EGRESS_BRIDGE
+  delete env.MKT_BACKUP_EGRESS_SUBNET
   const read = spawnSync(
     'docker',
-    ['compose', '--env-file', exampleFile, '-f', composeFile, 'config', '--format', 'json'],
+    [
+      'compose',
+      '--env-file',
+      exampleFile,
+      '-f',
+      composeFile,
+      '--profile',
+      'ops',
+      'config',
+      '--format',
+      'json',
+    ],
     { encoding: 'utf8', env },
   )
   assert.equal(read.status, 0, read.stderr)
@@ -337,6 +400,12 @@ test('compose.env.example holds the compose and firewall defaults, in a form all
   assert.deepEqual(
     viaFile.ipam.config.map((c) => c.subnet),
     ['10.247.73.0/24'],
+  )
+  const backupViaFile = JSON.parse(read.stdout).networks.backup_egress
+  assert.equal(backupViaFile.driver_opts['com.docker.network.bridge.name'], 'mkt-bkegress0')
+  assert.deepEqual(
+    backupViaFile.ipam.config.map((c) => c.subnet),
+    ['10.247.75.0/24'],
   )
 })
 

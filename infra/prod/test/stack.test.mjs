@@ -24,7 +24,13 @@ const PROJECT = 'mkt-m7test'
 const CORE = 'http://127.0.0.1:4100'
 const OWNER = 'owner@example.test'
 const JOBS = 5
-const TEST_EGRESS = { MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0', MKT_EGRESS_SUBNET: '10.247.74.0/24' }
+// Its own egress bridges and subnets (the worker's and the backup upload's), so it can run beside a `mkt` stack.
+const TEST_EGRESS = {
+  MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0',
+  MKT_EGRESS_SUBNET: '10.247.74.0/24',
+  MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0',
+  MKT_BACKUP_EGRESS_SUBNET: '10.247.76.0/24',
+}
 
 // Hex keeps every value valid inside a database URL and within the role-password rules.
 const secret = () => randomBytes(32).toString('hex')

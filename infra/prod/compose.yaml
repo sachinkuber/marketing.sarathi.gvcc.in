@@ -24,8 +24,9 @@
 #                  outbound. With it: TCP 443 to public addresses only, no private range, not the host. That is wider
 #                  than plan decision 3 ("the model provider only"): a deviation awaiting the owner's approval
 #                  (ruling R15, docs/operations.md). The worker reaches the core only on `worker`.
-#   backup_egress  offsite alone: its way out, for the off-server copy. Not restricted by the firewall (pending
-#                  the owner's decision, docs/operations.md "Backups").
+#   backup_egress  offsite alone: its way out, for the off-server copy. Like worker_egress, a fixed bridge name
+#                  (mkt-bkegress0 by default) and subnet, and the same firewall: TCP 443 to public addresses only
+#                  (owner decision 2026-11-18, ruling R19).
 # Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
 # that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
@@ -232,8 +233,15 @@ networks:
     ipam:
       config:
         - subnet: ${MKT_EGRESS_SUBNET:-10.247.73.0/24}
-  # The offsite service's way out, for the off-server copy only. Not restricted by the host firewall, which keys
-  # on the worker's bridge alone; restricting it is pending the owner's decision (docs/operations.md, "Backups").
+  # The offsite service's way out, for the off-server copy only. The same firewall limits it as the worker's
+  # (owner decision 2026-11-18, ruling R19), keyed the same way: MKT_BACKUP_EGRESS_BRIDGE (default mkt-bkegress0,
+  # at most 15 characters) in both, and a fixed subnet, MKT_BACKUP_EGRESS_SUBNET, changed only to avoid a clash.
+  # A test stack sets both to its own values (stack.test.mjs, backup.test.mjs). IPv6 off.
   backup_egress:
     driver: bridge
     enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.name: ${MKT_BACKUP_EGRESS_BRIDGE:-mkt-bkegress0}
+    ipam:
+      config:
+        - subnet: ${MKT_BACKUP_EGRESS_SUBNET:-10.247.75.0/24}
