@@ -12,6 +12,7 @@
 | Changes in version 2 | Owner decisions of 2026-10-04: the refinements in section 12 accepted; 90-day retention for job inputs and notifications confirmed; every cost recorded in both US dollars and Indian rupees (sections 2, 7.6 to 7.8). |
 | Changes at milestone 4 (2026-10-14) | Brought in line with migrations 0011 to 0013 as built: sections 7.3, 7.5, 7.6, new 7.9 and 7.10, and 11.1. The Word copy is not regenerated (it needs `mmdc`, which the server lacks); this Markdown file is canonical. |
 | Changes at milestone 6 (2026-10-25) | Brought in line with migration 0018 as built: sections 7.1 (the summary agent's first definition), 7.11 (new, `app.duty_run`), 8.3 (nonce retention and grants), 9.3 (new, `audit.search`), 11.1 and 11.2, and refinements 16 to 18 in section 12. The Word copy is not regenerated (`tools/build-docs` has no script for this document and `mmdc` is not installed); this Markdown file is canonical. |
+| Changes at milestone 7 (2026-11-17) | Brought in line with migration 0021 as built: section 7.12 (new, `app.worker_heartbeat` and its two functions). |
 | Based on | Phase 1 spec version 4, Architecture version 2, Master PRD version 3, App flow version 2, Content guidelines version 2, Tech stack version 1. All approved. |
 
 ## 1. Scope and status of each part
@@ -619,6 +620,17 @@ Not brand-scoped. Added by migration 0018. One row per daily duty per UTC date; 
 | finished_at | timestamptz | Null while running |
 
 Each duty runs at most once per UTC date: a `done` row is skipped, a `failed` row is run again on the next call, and a `running` row older than 15 minutes is taken to have crashed and may be claimed again. The application role holds select, insert and update.
+
+### 7.12 `app.worker_heartbeat`
+
+Not brand-scoped, outside row-level security. Added by migration 0021. One row per worker id, stamped by the core each time the worker's timer calls the approvals tick; `/health/worker` (also `/api/health/worker`) answers from the newest row.
+
+| Column | Type | Rules |
+|---|---|---|
+| worker_id | text | Primary key. At most 200 characters. |
+| seen_at | timestamptz | Not null. The time of the latest stamp. |
+
+No role but the definer reaches the table. Two `security definer` functions (owner `mkt_definer`, `search_path` fixed to `pg_catalog, app`, no execute right for `PUBLIC`) are executed by the application role only: `app.stamp_worker(p_worker_id text)` upserts the row with `now()` and refuses an id that is empty or over 200 characters (error code 22023); `app.worker_last_seen()` returns the newest `seen_at`, or null if there is none.
 
 ## 8. Phase 1: notifications, alerts and triggers
 

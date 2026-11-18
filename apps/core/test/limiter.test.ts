@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { AttemptLimiter, attemptKey } from '../src/auth/limiter.ts'
+import { createStack } from './support.ts'
 
 function make() {
   let now = 1_000_000
@@ -58,5 +59,34 @@ describe('AttemptLimiter', () => {
       attemptKey('/sign-in/email', 'admin@example.test'),
     )
     expect(attemptKey('/sign-in/email', 'a@x')).not.toBe(attemptKey('/request-password-reset', 'a@x'))
+  })
+})
+
+describe('the invite limiter and the client address', () => {
+  const stacks: Awaited<ReturnType<typeof createStack>>[] = []
+  afterAll(async () => {
+    await Promise.all(stacks.map((s) => s.close()))
+  })
+  const lookup = (stack: Awaited<ReturnType<typeof createStack>>, forwardedFor: string) =>
+    stack.newClient().request('POST', '/api/v1/invites/lookup', {
+      body: { token: 'x'.repeat(43) },
+      headers: { 'x-forwarded-for': forwardedFor },
+    })
+
+  it('with trustProxy 1 the invite limiter keys on X-Forwarded-For', async () => {
+    const stack = await createStack({ trustProxy: 1 })
+    stacks.push(stack)
+    for (let i = 0; i < 5; i++) expect((await lookup(stack, '203.0.113.7')).status).not.toBe(429)
+    expect((await lookup(stack, '203.0.113.7')).status).toBe(429)
+    // Another client address behind the same proxy is not locked.
+    expect((await lookup(stack, '203.0.113.8')).status).not.toBe(429)
+  })
+
+  it('with trustProxy 0 it ignores the header', async () => {
+    const stack = await createStack({ trustProxy: 0 })
+    stacks.push(stack)
+    for (let i = 0; i < 5; i++) expect((await lookup(stack, `203.0.113.${i}`)).status).not.toBe(429)
+    // Five different header values were one client: the sixth is locked whatever it claims.
+    expect((await lookup(stack, '203.0.113.99')).status).toBe(429)
   })
 })

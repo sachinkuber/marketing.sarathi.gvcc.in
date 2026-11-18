@@ -83,6 +83,8 @@ export async function createStack(
     withQueue?: boolean
     // The class backlog at which production and bulk jobs are refused (default 2000).
     backlogLimit?: number
+    // Proxies in front of the service (default 0: the client address is the socket's).
+    trustProxy?: number
     // The second alert channel and the clock the core's delivery uses (default: always failing, system).
     alertChannel?: AlertChannel
     clock?: Clock
@@ -120,6 +122,7 @@ export async function createStack(
     queueBacklogLimit: options.backlogLimit ?? 2000,
     publicOrigin: ORIGIN,
     n8nHeartbeatExpected: false,
+    trustProxy: options.trustProxy ?? 0,
     logLevel: 'silent',
   }
   const queue = options.withQueue ? await openQueue(db.urlFor('queue')) : null

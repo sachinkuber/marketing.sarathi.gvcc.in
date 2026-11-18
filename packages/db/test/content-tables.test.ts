@@ -44,6 +44,7 @@ describe('content and approval tables', () => {
       'run',
       'trigger_nonce',
       'version_state_transition',
+      'worker_heartbeat',
     ])
   })
 

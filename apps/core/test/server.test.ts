@@ -61,6 +61,7 @@ describe('startServer', () => {
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
         n8nHeartbeatExpected: false,
+        trustProxy: 0,
         logLevel: 'silent',
       },
       { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
@@ -95,6 +96,7 @@ describe('startServer', () => {
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
         n8nHeartbeatExpected: false,
+        trustProxy: 0,
         logLevel: 'silent',
       },
       { logger: createLogger('silent'), mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
@@ -129,6 +131,7 @@ describe('startServer', () => {
         queueBacklogLimit: 2000,
         publicOrigin: 'https://app.example.test',
         n8nHeartbeatExpected: false,
+        trustProxy: 0,
         logLevel: 'info',
       },
       { logger, mailer: new UnconfiguredMailer(), audit: new MemoryAudit() },
@@ -161,6 +164,7 @@ describe('startServer', () => {
     queueBacklogLimit: 2000,
     publicOrigin: 'https://app.example.test',
     n8nHeartbeatExpected: false,
+    trustProxy: 0,
     logLevel: 'silent' as const,
   })
 

@@ -1,3 +1,4 @@
+import { initErrorTracking } from '@mkt/shared'
 import { openQueue, type JobClass } from '@mkt/queue'
 import { anthropicModel } from './anthropic.ts'
 import { loadWorkerConfig, type WorkerConfig } from './config.ts'
@@ -59,6 +60,7 @@ export async function startWorker(
   const maintenance = startMaintenance({
     core: options.core,
     queue,
+    workerId: options.workerId,
     intervalSeconds: options.reconcileIntervalSeconds ?? 300,
     maxWaitSeconds: options.maxWaitSeconds ?? DEFAULT_MAX_WAIT_SECONDS,
     log,
@@ -71,11 +73,21 @@ export async function startWorker(
   }
 }
 
+// What the stand-in answers when the worker runs it as a process (the compose stack test, the load test): a
+// result the summary contract accepts, so runs finish instead of being retried and dead-lettered.
+const STANDIN_SUMMARY = JSON.stringify({
+  summary: 'A stand-in summary of the brief.',
+  keywords: ['stand-in', 'summary', 'brief'],
+})
+
 // The stand-in is accepted by the configuration only under NODE_ENV=test, and is loaded only here, so the
 // production module graph does not contain it.
 export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
   if (config.modelBackend === 'standin') {
-    return (await import('./standin.ts')).standInModel({ logFile: process.env.MODEL_LOG ?? '/dev/null' })
+    return (await import('./standin.ts')).standInModel({
+      logFile: process.env.MODEL_LOG ?? '/dev/null',
+      replyFor: () => STANDIN_SUMMARY,
+    })
   }
   return anthropicModel(config.anthropicApiKey!)
 }
@@ -84,6 +96,8 @@ export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
 // environment.
 if (import.meta.main) {
   const config = loadWorkerConfig(process.env)
+  // First thing once the DSN is known: the config load is the only earlier step, and it never reports a value.
+  initErrorTracking({ dsn: config.sentryDsn, service: 'worker', release: config.release ?? 'dev' })
   const handlers: Record<string, JobHandler> = {
     'summary.v1': summaryHandler,
     'placeholder_check.v1': checkHandler,

@@ -44,8 +44,8 @@ jobs:
       - run: npm ci
       - run: npm run verify
 
-  # Browser checks (plan decision 2): Chromium against the whole stack (apps/dashboard/e2e). Separate from
-  # `verify` because it builds the dashboard and starts a browser.
+  # Browser checks (plan decision 2): Chromium against the whole stack (apps/dashboard/e2e), then the
+  # infrastructure tests in infra/prod/test. Separate from `verify` because they build and start things.
   e2e:
     runs-on: ubuntu-latest
     services:
@@ -72,3 +72,15 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+      # The infrastructure tests (test 39 for images, the compose file and its stack test): build the production
+      # images with the runner's Docker and scan their filesystems with gitleaks, installed as in the verify job.
+      # One file at a time: two of them build images and the stack test holds ports 4100 and 3100.
+      - name: Install the secret scanner
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          curl -sSfL -o checksums.txt https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
+          grep ' gitleaks_8.30.1_linux_x64.tar.gz$' checksums.txt | sed 's/gitleaks_8.30.1_linux_x64.tar.gz/gitleaks.tar.gz/' | sha256sum --check
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+          rm gitleaks.tar.gz checksums.txt
+      - run: node --test --test-concurrency=1 infra/prod/test/*.mjs

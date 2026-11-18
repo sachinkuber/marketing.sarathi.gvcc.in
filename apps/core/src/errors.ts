@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler, RequestHandler, Response } from 'express'
 import type { Logger } from 'pino'
+import { captureError } from '@mkt/shared'
 
 export class AppError extends Error {
   readonly status: number
@@ -47,6 +48,7 @@ export function errorHandler(logger: Logger): ErrorRequestHandler {
       return
     }
     logger.error({ err, requestId: req.id }, 'unhandled error')
+    captureError(err)
     send(res, 500, 'internal_error', 'Something went wrong.')
   }
 }

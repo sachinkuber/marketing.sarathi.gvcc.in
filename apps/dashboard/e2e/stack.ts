@@ -157,6 +157,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
     queueBacklogLimit: 2000,
     publicOrigin: origin,
     n8nHeartbeatExpected: false,
+    trustProxy: 0,
     logLevel: 'silent',
   }
   const results: ResultHandlers = new Map()

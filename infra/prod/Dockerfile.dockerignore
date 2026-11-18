@@ -1,0 +1,20 @@
+# Read by BuildKit for infra/prod/Dockerfile (the context is the repository root). The Dockerfile copies named
+# paths only; this list keeps everything else, and anything secret, out of the build context.
+.git
+**/.git
+**/.env*
+!**/.env.example
+**/*.pem
+**/*.key
+.superpowers
+.claude
+docs
+**/test
+**/e2e
+**/node_modules
+**/.next
+**/coverage
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+**/.DS_Store

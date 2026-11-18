@@ -6,6 +6,7 @@ export {
   type BodyBlock,
   type ContentPayload,
 } from './content-payload.ts'
+export { captureError, initErrorTracking, scrubEvent } from './sentry.ts'
 export { DISALLOWED } from './disallowed.ts'
 export {
   BRIEF_MAX,

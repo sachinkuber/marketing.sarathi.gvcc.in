@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../src/config.ts'
 
@@ -109,10 +110,171 @@ describe('loadConfig', () => {
   })
 })
 
+const production = {
+  ...base,
+  NODE_ENV: 'production',
+  TRUST_PROXY: '1',
+}
+
+describe('production refusals', () => {
+  it('refuses CHANGE_ME in any value when NODE_ENV=production, naming the variable and not the value', () => {
+    for (const key of Object.keys(production).filter((k) => k !== 'NODE_ENV' && k !== 'TRUST_PROXY')) {
+      const value = `${'z'.repeat(40)}CHANGE_ME`
+      const env: Record<string, string> = { ...production }
+      env[key] = key.endsWith('_URL') || key === 'PUBLIC_ORIGIN' ? `https://u:${value}@host.test/x` : value
+      let message = ''
+      try {
+        loadConfig(env)
+      } catch (error) {
+        message = (error as Error).message
+      }
+      expect(message).toContain(key)
+      expect(message).not.toContain('CHANGE_ME')
+      expect(message).not.toContain('zzzz')
+    }
+  })
+
+  it('applies the CHANGE_ME refusal to a variable outside the base set, such as the Sentry DSN', () => {
+    expect(() =>
+      loadConfig({ ...production, SENTRY_DSN: 'https://CHANGE_ME@o0.ingest.example.test/1' }),
+    ).toThrow('SENTRY_DSN')
+  })
+
+  it('refuses an http PUBLIC_ORIGIN in production', () => {
+    expect(() => loadConfig({ ...production, PUBLIC_ORIGIN: 'http://app.example.test' })).toThrow(
+      'Invalid configuration: PUBLIC_ORIGIN',
+    )
+  })
+
+  it('requires TRUST_PROXY in production', () => {
+    const rest: Record<string, string> = { ...production }
+    delete rest.TRUST_PROXY
+    expect(() => loadConfig(rest)).toThrow('Invalid configuration: TRUST_PROXY')
+  })
+
+  it('reads TRUST_PROXY as an integer from 0 to 3', () => {
+    expect(loadConfig({ ...production, TRUST_PROXY: '0' }).trustProxy).toBe(0)
+    expect(loadConfig({ ...production, TRUST_PROXY: '3' }).trustProxy).toBe(3)
+    for (const bad of ['4', '-1', '1.5', 'yes', '']) {
+      expect(() => loadConfig({ ...production, TRUST_PROXY: bad })).toThrow(
+        'Invalid configuration: TRUST_PROXY',
+      )
+    }
+  })
+
+  it('accepts a complete production environment and carries the Sentry DSN', () => {
+    const dsn = 'https://key@o0.ingest.example.test/1'
+    const config = loadConfig({ ...production, SENTRY_DSN: dsn })
+    expect(config).toMatchObject({ nodeEnv: 'production', trustProxy: 1, sentryDsn: dsn })
+  })
+
+  it('defaults TRUST_PROXY to 0 outside production', () => {
+    expect(loadConfig(base).trustProxy).toBe(0)
+    expect(loadConfig(base).sentryDsn).toBeUndefined()
+  })
+
+  it('accepts the development example unchanged outside production', () => {
+    const text = readFileSync(new URL('../../../.env.example', import.meta.url), 'utf8')
+    const env: Record<string, string> = {}
+    for (const line of text.split('\n')) {
+      const match = /^([A-Z0-9_]+)=(.*)$/.exec(line)
+      if (match?.[1]) env[match[1]] = match[2] ?? ''
+    }
+    expect(env.AUTH_SECRET).toContain('CHANGE_ME')
+    expect(() => loadConfig(env)).not.toThrow()
+    expect(() => loadConfig({ ...env, NODE_ENV: 'production', TRUST_PROXY: '1' })).toThrow(
+      /Invalid configuration: .*DATABASE_URL/,
+    )
+  })
+})
+
 describe('the owner-view pool is not optional', () => {
   it('refuses to start without OWNER_VIEW_DATABASE_URL, because the audit screens need it', () => {
     const rest: Record<string, string> = { ...base }
     delete rest.OWNER_VIEW_DATABASE_URL
     expect(() => loadConfig(rest)).toThrow(/OWNER_VIEW_DATABASE_URL/)
+  })
+})
+
+describe('the write-once audit store settings', () => {
+  const store = {
+    AUDIT_STORE_URL: 'https://acct.r2.example.test',
+    AUDIT_STORE_BUCKET: 'audit',
+    AUDIT_STORE_KEY_ID: 'key-id',
+    AUDIT_STORE_SECRET: 'store-secret',
+  }
+
+  it('is absent when none are set, and blank counts as unset', () => {
+    expect(loadConfig(base).auditStore).toBeUndefined()
+    const blank = {
+      AUDIT_STORE_URL: '',
+      AUDIT_STORE_BUCKET: '',
+      AUDIT_STORE_KEY_ID: '',
+      AUDIT_STORE_SECRET: '',
+    }
+    expect(loadConfig({ ...base, ...blank }).auditStore).toBeUndefined()
+  })
+
+  it('carries the settings with 400 days and no object lock by default', () => {
+    expect(loadConfig({ ...base, ...store }).auditStore).toEqual({
+      url: 'https://acct.r2.example.test',
+      bucket: 'audit',
+      keyId: 'key-id',
+      secret: 'store-secret',
+      retentionDays: 400,
+      objectLock: false,
+    })
+    const config = loadConfig({
+      ...base,
+      ...store,
+      AUDIT_STORE_RETENTION_DAYS: '30',
+      AUDIT_STORE_OBJECT_LOCK: 'true',
+    })
+    expect(config.auditStore).toMatchObject({ retentionDays: 30, objectLock: true })
+  })
+
+  it('needs all of URL, BUCKET, KEY_ID and SECRET or none, naming the missing ones and no value', () => {
+    for (const key of Object.keys(store)) {
+      const partial: Record<string, string> = { ...base, ...store }
+      delete partial[key]
+      let message = ''
+      try {
+        loadConfig(partial)
+      } catch (error) {
+        message = (error as Error).message
+      }
+      expect(message).toContain(key)
+      expect(message).not.toContain('store-secret')
+    }
+    // The tuning values alone (as in a deployment file with the store left blank) are harmless.
+    expect(
+      loadConfig({ ...base, AUDIT_STORE_RETENTION_DAYS: '400', AUDIT_STORE_OBJECT_LOCK: 'false' }).auditStore,
+    ).toBeUndefined()
+  })
+
+  it('rejects a bad retention or lock value', () => {
+    expect(() => loadConfig({ ...base, ...store, AUDIT_STORE_RETENTION_DAYS: '0' })).toThrow(
+      'AUDIT_STORE_RETENTION_DAYS',
+    )
+    expect(() => loadConfig({ ...base, ...store, AUDIT_STORE_OBJECT_LOCK: 'yes' })).toThrow(
+      'AUDIT_STORE_OBJECT_LOCK',
+    )
+  })
+
+  it('refuses AUDIT_STORE_SECRET=CHANGE_ME in production, naming the variable and not the value', () => {
+    let message = ''
+    try {
+      loadConfig({
+        ...base,
+        ...store,
+        NODE_ENV: 'production',
+        TRUST_PROXY: '1',
+        AUDIT_STORE_SECRET: 'CHANGE_ME',
+      })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain('AUDIT_STORE_SECRET')
+    expect(message).not.toContain('CHANGE_ME')
   })
 })

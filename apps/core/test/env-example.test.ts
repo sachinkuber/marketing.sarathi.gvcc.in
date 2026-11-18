@@ -46,4 +46,10 @@ describe('.env.example', () => {
     const text = lines.join('\n')
     expect(text).not.toMatch(/smtps?:\/\/[^\s:@]+:(?!CHANGE_ME)[^\s@]+@/)
   })
+
+  it('lists TRUST_PROXY live and SENTRY_DSN as a placeholder only', () => {
+    expect(lines.some((line) => /^TRUST_PROXY=[0-3]$/.test(line))).toBe(true)
+    expect(lines.some((line) => line.startsWith('SENTRY_DSN='))).toBe(false)
+    expect(lines.some((line) => line.startsWith('# SENTRY_DSN='))).toBe(true)
+  })
 })

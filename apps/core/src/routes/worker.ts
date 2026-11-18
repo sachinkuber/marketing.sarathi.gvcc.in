@@ -17,7 +17,7 @@ import {
 } from '../jobs/service.ts'
 import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
-import type { NotifyDeps } from '../notify/ports.ts'
+import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
@@ -60,6 +60,7 @@ const resultBody = z.strictObject({
   type: text(100),
   result: z.json().refine(noNul, 'must not contain U+0000'),
 })
+const tickBody = z.strictObject({ workerId: z.string().min(1).max(200) })
 const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
 const endBody = z.strictObject({ reason: z.literal('held') })
 const failureBody = z.strictObject({ error: text(2000) })
@@ -222,9 +223,18 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
       path: '/worker/approvals/tick',
       access: { kind: 'worker' },
       summary:
-        'The worker timer sends due approval reminders and marks and escalates overdue requests; it never approves or changes a version',
+        'The worker timer sends due approval reminders and marks and escalates overdue requests, and stamps the worker heartbeat; it never approves or changes a version',
       handlers: [
+        validate({ body: tickBody }),
         async (_req, res) => {
+          const { body } = inputOf<{ body: z.infer<typeof tickBody> }>(res)
+          // The timer's call is the worker's heartbeat (/health/worker). A failed stamp is logged and never
+          // stops the tick.
+          try {
+            await notify.pool.query('select app.stamp_worker($1)', [body.workerId])
+          } catch (error) {
+            notify.logger?.error({ err: errorName(error) }, 'worker heartbeat not stamped')
+          }
           res.json(await approvalsTick(notify.pool, notify))
         },
       ],

@@ -63,7 +63,9 @@ export interface CoreClient {
   // Of these failed job IDs, the ones the core has not yet marked dead.
   unmarkedDead(jobIds: string[]): Promise<string[]>
   // The approvals timer: the core sends due reminders and marks and escalates overdue requests.
-  approvalsTick(): Promise<{ reminded: number; overdue: number; escalated: number; failedBrands: number }>
+  approvalsTick(
+    workerId: string,
+  ): Promise<{ reminded: number; overdue: number; escalated: number; failedBrands: number }>
 }
 
 // What the core may answer. Extra fields are accepted (the core can grow); a missing or unknown required
@@ -193,8 +195,8 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
       const reply = await call('POST', '/worker/reconcile', null, {})
       return parseReply(replySchemas.reconcile, reply, 'a reconciliation')
     },
-    async approvalsTick() {
-      const reply = await call('POST', '/worker/approvals/tick', null, {})
+    async approvalsTick(workerId) {
+      const reply = await call('POST', '/worker/approvals/tick', null, { workerId })
       return parseReply(replySchemas.approvalsTick, reply, 'an approvals tick')
     },
   }

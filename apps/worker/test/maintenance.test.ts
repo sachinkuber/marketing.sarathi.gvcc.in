@@ -12,10 +12,34 @@ const approvalsTick = async () => counts
 const limits = { interactive: 60, publishing: 120, production: 900, bulk: 3600 }
 
 describe('maintenance', () => {
+  it('passes its worker id to the approvals tick, which is the heartbeat', async () => {
+    const ids: string[] = []
+    const core = {
+      reconcile: async () => ({ marked: 0 }),
+      approvalsTick: async (id: string) => {
+        ids.push(id)
+        return counts
+      },
+    } as unknown as CoreClient
+    const m = startMaintenance({
+      workerId: 'worker-7',
+      core,
+      queue,
+      intervalSeconds: 0.05,
+      maxWaitSeconds: limits,
+      log: () => undefined,
+    })
+    await new Promise((r) => setTimeout(r, 200))
+    m.stop()
+    expect(ids.length).toBeGreaterThan(0)
+    expect(new Set(ids)).toEqual(new Set(['worker-7']))
+  })
+
   it('sweeps, reads the watchdog and logs the counts on each tick', async () => {
     const lines: Record<string, unknown>[] = []
     const core = { reconcile: async () => ({ marked: 4 }), approvalsTick } as unknown as CoreClient
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue,
       intervalSeconds: 0.05,
@@ -43,6 +67,7 @@ describe('maintenance', () => {
       approvalsTick,
     } as unknown as CoreClient
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue,
       intervalSeconds: 0.05,
@@ -75,6 +100,7 @@ describe('maintenance', () => {
       failedJobIds: async (c: string) => (c === 'interactive' ? ['bad', 'lost', 'marked'] : []),
     } as unknown as Queue
     const m = startMaintenance({
+      workerId: 'w-1',
       core,
       queue: failing,
       intervalSeconds: 0.05,
@@ -90,9 +116,11 @@ describe('maintenance', () => {
   })
 
   describe('the approvals tick', () => {
-    const run = async (core: Partial<CoreClient>, q: Queue = queue, ms = 130) => {
+    // The first tick runs at start; 50 ms ends the run before the 100 ms timer fires a second one.
+    const run = async (core: Partial<CoreClient>, q: Queue = queue, ms = 50) => {
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: core as CoreClient,
         queue: q,
         intervalSeconds: 0.1,
@@ -178,9 +206,80 @@ describe('maintenance', () => {
           },
         },
         queue,
-        450,
+        // The tick that starts at once is still running when the timer fires at 100, 200 and 300 ms.
+        330,
       )
       expect(calls).toBe(1)
+    })
+  })
+
+  describe('the first tick', () => {
+    // A new worker reports its heartbeat at once, not one interval (5 minutes by default) after starting.
+    it('runs at start, before the first interval has passed', async () => {
+      const ids: string[] = []
+      const m = startMaintenance({
+        workerId: 'w-first',
+        core: {
+          reconcile: async () => ({ marked: 0 }),
+          approvalsTick: async (id: string) => {
+            ids.push(id)
+            return counts
+          },
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: () => undefined,
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(ids).toEqual(['w-first'])
+    })
+
+    it('a first tick that fails is logged by name and does not throw or reject', async () => {
+      const lines: Record<string, unknown>[] = []
+      const m = startMaintenance({
+        workerId: 'w-1',
+        core: {
+          reconcile: async () => {
+            throw new Error('core down')
+          },
+          approvalsTick: async () => {
+            throw new TypeError('no route')
+          },
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: (l) => lines.push(l),
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(lines).toContainEqual({ event: 'maintenance_failed', error: 'Error' })
+      expect(lines).toContainEqual({ event: 'approvals_tick_failed', error: 'TypeError' })
+    })
+
+    it('a first tick whose log callback throws does not throw or reject', async () => {
+      let ticked = 0
+      const m = startMaintenance({
+        workerId: 'w-1',
+        core: {
+          reconcile: async () => {
+            ticked += 1
+            return { marked: 0 }
+          },
+          approvalsTick,
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: () => {
+          throw new Error('log sink down')
+        },
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(ticked).toBe(1)
     })
   })
 
@@ -189,6 +288,7 @@ describe('maintenance', () => {
       let ticked = 0
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => {
             throw new TypeError('http://10.0.0.1/secret body')
@@ -213,6 +313,7 @@ describe('maintenance', () => {
     it('logs a failed dead report by error name only', async () => {
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => ({ marked: 0 }),
           approvalsTick,
@@ -238,6 +339,7 @@ describe('maintenance', () => {
     it('clears busy even when the log callback throws', async () => {
       let ticked = 0
       const m = startMaintenance({
+        workerId: 'w-1',
         core: {
           reconcile: async () => {
             ticked += 1

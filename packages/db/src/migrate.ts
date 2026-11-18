@@ -3,8 +3,9 @@ import { join } from 'node:path'
 
 const migrationsDir = join(import.meta.dirname, '..', 'migrations')
 
-export async function migrate(databaseUrl: string): Promise<void> {
-  await runner({
+// Applies the migrations that have not run yet and returns their names (none when the database is current).
+export async function migrate(databaseUrl: string): Promise<string[]> {
+  const applied = await runner({
     databaseUrl,
     dir: migrationsDir,
     direction: 'up',
@@ -13,4 +14,5 @@ export async function migrate(databaseUrl: string): Promise<void> {
     createSchema: false,
     log: () => undefined,
   })
+  return applied.map((migration) => migration.name)
 }

@@ -47,7 +47,10 @@ export class DoubleAlertChannel extends Flaky<AlertMessage> implements AlertChan
 
 // A clock a test moves by hand.
 export class ManualClock {
-  constructor(private at: Date) {}
+  private at: Date
+  constructor(at: Date) {
+    this.at = at
+  }
   now(): Date {
     return new Date(this.at)
   }

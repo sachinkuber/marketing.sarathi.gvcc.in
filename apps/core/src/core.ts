@@ -129,8 +129,13 @@ export function buildCore(deps: CoreDeps): {
   )
   const app = createApp({
     logger: deps.logger,
+    trustProxy: config.trustProxy,
     ready: async () => {
       await deps.appPool.query('select 1')
+    },
+    workerLastSeen: async () => {
+      const r = await deps.appPool.query<{ seen: Date | null }>('select app.worker_last_seen() as seen')
+      return r.rows[0]?.seen ?? null
     },
     guard,
     authHandler: toNodeHandler(auth),

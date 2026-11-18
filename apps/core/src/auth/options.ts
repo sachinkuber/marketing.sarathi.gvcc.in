@@ -116,6 +116,8 @@ export function authOptions(deps: AuthDeps): BetterAuthOptions {
       database: { generateId: 'uuid' },
       useSecureCookies: deps.baseURL.startsWith('https:'),
       defaultCookieAttributes: { httpOnly: true, sameSite: 'lax' },
+      // Behind the proxy the socket address is the proxy's; the library reads the client's from this header.
+      ipAddress: { ipAddressHeaders: ['x-forwarded-for'] },
     },
     emailAndPassword: {
       enabled: true,

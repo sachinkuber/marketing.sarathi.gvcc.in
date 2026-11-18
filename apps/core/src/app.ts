@@ -10,6 +10,9 @@ export interface AppDeps {
   logger: Logger
   ready: () => Promise<void>
   now?: () => Date
+  // Default: the worker has never been seen.
+  workerLastSeen?: () => Promise<Date | null>
+  workerStaleAfterMs?: number
   // Number of proxies in front of the service. Set to 1 behind the server's proxy at deployment.
   trustProxy?: number
   guard?: RequestHandler
@@ -45,10 +48,17 @@ export function createApp(deps: AppDeps): Express {
       },
     }),
   )
-  app.use(
-    '/health',
-    healthRouter({ logger: deps.logger, ready: deps.ready, now: deps.now ?? (() => new Date()) }),
-  )
+  // The proxy forwards only /api/, so the uptime checker reads /api/health/*; both paths answer the same.
+  // Neither is in the route table, and both come before the request guard.
+  const health = healthRouter({
+    logger: deps.logger,
+    ready: deps.ready,
+    now: deps.now ?? (() => new Date()),
+    workerLastSeen: deps.workerLastSeen ?? (async () => null),
+    ...(deps.workerStaleAfterMs === undefined ? {} : { workerStaleAfterMs: deps.workerStaleAfterMs }),
+  })
+  app.use('/health', health)
+  app.use('/api/health', health)
   if (deps.guard) app.use('/api', deps.guard)
   // The auth library reads the raw request body, so it is mounted before the JSON parser.
   if (deps.authHandler) app.all('/api/auth/*splat', deps.authHandler)
