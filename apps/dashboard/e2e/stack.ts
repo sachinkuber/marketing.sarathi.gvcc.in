@@ -177,7 +177,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(
     `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
-     values ('claude-opus-5-5', $1::date - 30, 4000000, 20000000, 200000, 5000000, 'e2e')`,
+     values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 'e2e')`,
     [today],
   )
   await db.admin.query(`select app.record_fx_rate($1::date - 1, 83500000, 'e2e')`, [today])

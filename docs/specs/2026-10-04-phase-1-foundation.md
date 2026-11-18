@@ -49,7 +49,7 @@ Aztek is created as the first brand. A second test brand with its own rows is cr
 
 ## 3. Pinned stack
 
-The stack is set by the approved **Tech stack version 3** (`docs/tech-stack/2026-10-04-tech-stack.md`; version 3 changes only Next.js to 16.3.8, approved 2026-11-18), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts. Confirmed on Node 24.20.0 in milestone 1; see `docs/progress.md`.
+The stack is set by the approved **Tech stack version 4** (`docs/tech-stack/2026-10-04-tech-stack.md`; version 3 changes only Next.js to 16.3.8, and version 4 changes only the model to `claude-sonnet-5-5`, both approved 2026-11-18), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts. Confirmed on Node 24.20.0 in milestone 1; see `docs/progress.md`.
 
 | Component | Selection | Version |
 |---|---|---|

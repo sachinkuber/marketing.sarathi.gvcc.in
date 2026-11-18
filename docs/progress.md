@@ -422,7 +422,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   - The dashboard image is built from `output: 'standalone'`.
   - Core and worker still deploy together (milestone 5).
 - Owner items still open, and what each leaves unproven:
-  - A3 model provider key: a real provider call; that the pinned SDK and `claude-opus-5-5` accept the structured request and return a schema-valid summary; a real cost row from real token counts (`apps/worker/test/anthropic-live.test.ts` runs once the key is supplied).
+  - A3 model provider key: a real provider call; that the pinned SDK and `claude-sonnet-5-5` accept the structured request and return a schema-valid summary; a real cost row from real token counts (`apps/worker/test/anthropic-live.test.ts` runs once the key is supplied).
   - A9 the owner's sign-in email and authenticator: the demonstration on the owner's own account and phone. The bootstrap command and every screen are built and are tested with generated users.
   - A6 sending address and account: any real delivery of email; test 38.
   - A11 second alert channel: delivery on the second channel; test 38.
