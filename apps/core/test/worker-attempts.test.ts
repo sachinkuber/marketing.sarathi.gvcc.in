@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
+import { attemptTokenFindings } from '../src/access/isolation-probes.ts'
 import { signAttemptToken, verifyAttemptToken, type AttemptClaims } from '../src/jobs/token.ts'
 import {
   createJob,
@@ -145,12 +146,18 @@ describe('the attempt token (acceptance tests 6, 26 and 32)', () => {
       await call('POST', `/worker/jobs/${jobA}/attempts`, { body: { workerId: 'w1' } })
     ).json()
 
-    expect((await call('GET', `/worker/jobs/${jobA}/control`, { token: started.token })).status).toBe(200)
-    for (const other of [sameBrand, otherBrand]) {
-      const res = await call('GET', `/worker/jobs/${other}/control`, { token: started.token })
-      expect(res.status).toBe(403)
-      expect(JSON.stringify(await res.json())).not.toContain(brandB)
+    // The probe is shared with the restore drill (apps/ops/src/restore-check.ts).
+    const request = async (path: string, token: string) => {
+      const res = await fetch(`${stack.server.url}${path}`, {
+        headers: { authorization: AUTH(), 'x-attempt-token': token },
+      })
+      return { status: res.status, text: await res.text() }
     }
+    const others = [
+      { jobId: sameBrand, label: 'same brand' },
+      { jobId: otherBrand, label: 'other brand' },
+    ]
+    expect(await attemptTokenFindings(request, started.token, jobA, others, brandB)).toEqual([])
     const logged = await refusals()
     const wrong = logged.filter((r) => r.reason === 'wrong_job' && r.jobId === sameBrand)
     const wrongOther = logged.filter((r) => r.reason === 'wrong_job' && r.jobId === otherBrand)

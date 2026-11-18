@@ -1,92 +1,48 @@
 import { requireDatabase } from '@mkt/test-support'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, it } from 'vitest'
+import {
+  brandIdInForeignKeys,
+  brandIdUniqueKeys,
+  brandPolicies,
+  brandScopedTables,
+  noPublicFunctions,
+  rowSecurityForced,
+  scopedTablesFound,
+} from '../src/isolation-probes.ts'
 import { createTestDatabase, type TestDatabase } from '../src/testing.ts'
 
-const POLICY = "(brand_id = (NULLIF(current_setting('app.brand_id'::text, true), ''::text))::uuid)"
-
+// The probes are shared with the restore drill (apps/ops/src/restore-check.ts), which runs them on a restored copy.
 describe('every brand-scoped table follows the rules (acceptance tests 3 and 4)', () => {
   let db: TestDatabase
   let scoped: string[]
   beforeAll(async () => {
     await requireDatabase()
     db = await createTestDatabase()
-    const r = await db.admin.query(
-      "select table_name from information_schema.columns where table_schema = 'app' and column_name = 'brand_id' order by 1",
-    )
-    scoped = r.rows.map((x) => x.table_name)
+    scoped = await brandScopedTables(db.admin)
   })
   afterAll(async () => db.drop())
 
   it('leaves no function in the app or audit schema executable by PUBLIC, except triggers', async () => {
-    const r = await db.admin.query(
-      `select n.nspname || '.' || p.proname as f from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname in ('app', 'audit') and p.prorettype <> 'trigger'::regtype
-          and (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'))`,
-    )
-    expect(r.rows.map((x) => x.f)).toEqual([])
+    await noPublicFunctions(db.admin)
   })
 
   it('finds the brand-scoped tables, so the tests below cannot pass on an empty list', () => {
-    expect(scoped.length).toBeGreaterThanOrEqual(21)
-    expect(scoped).toContain('content_version')
-    expect(scoped).not.toContain('brand')
+    scopedTablesFound(scoped)
   })
 
   it('has row-level security enabled and forced on each', async () => {
-    const r = await db.admin.query(
-      "select relname, relrowsecurity, relforcerowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'app' and c.relkind = 'r' and c.relname = any($1)",
-      [scoped],
-    )
-    expect(r.rowCount).toBe(scoped.length)
-    for (const row of r.rows) {
-      expect(row.relrowsecurity, row.relname).toBe(true)
-      expect(row.relforcerowsecurity, row.relname).toBe(true)
-    }
+    await rowSecurityForced(db.admin, scoped)
   })
 
   it('has one policy brand_isolation per table with the same read and write condition', async () => {
-    const r = await db.admin.query(
-      "select tablename, policyname, qual, with_check, cmd from pg_policies where schemaname = 'app' and tablename = any($1) and policyname = 'brand_isolation'",
-      [scoped],
-    )
-    expect(r.rowCount).toBe(scoped.length)
-    for (const row of r.rows) {
-      expect(row.cmd, row.tablename).toBe('ALL')
-      expect(row.qual, row.tablename).toBe(POLICY)
-      expect(row.with_check, row.tablename).toBe(POLICY)
-    }
+    await brandPolicies(db.admin, scoped)
   })
 
   it('has a unique key on (brand_id, id) wherever a table has an id', async () => {
-    const withId = await db.admin.query(
-      "select table_name from information_schema.columns where table_schema = 'app' and column_name = 'id' and table_name = any($1)",
-      [scoped],
-    )
-    expect(withId.rowCount).toBeGreaterThanOrEqual(17)
-    for (const { table_name } of withId.rows) {
-      const r = await db.admin.query(
-        `select 1 from pg_constraint c where c.conrelid = ('app.' || $1)::regclass and c.contype = 'u'
-           and (select array_agg(a.attname::text order by a.attname) from pg_attribute a where a.attrelid = c.conrelid and a.attnum = any(c.conkey)) = array['brand_id','id']`,
-        [table_name],
-      )
-      expect(r.rowCount, table_name).toBe(1)
-    }
+    await brandIdUniqueKeys(db.admin, scoped)
   })
 
   it('has brand_id in every foreign key between brand-scoped tables, on both sides', async () => {
-    const r = await db.admin.query(
-      `select c.conname, c.conrelid::regclass::text as child, c.confrelid::regclass::text as parent,
-              array(select a.attname::text from pg_attribute a where a.attrelid = c.conrelid and a.attnum = any(c.conkey)) as child_cols,
-              array(select a.attname::text from pg_attribute a where a.attrelid = c.confrelid and a.attnum = any(c.confkey)) as parent_cols
-         from pg_constraint c
-        where c.contype = 'f' and c.connamespace = 'app'::regnamespace`,
-    )
-    const names = new Set(scoped.map((t) => `app.${t}`))
-    const between = r.rows.filter((x) => names.has(x.child) && names.has(x.parent))
-    expect(between.length).toBeGreaterThanOrEqual(19)
-    for (const fk of between) {
-      expect(fk.child_cols, `${fk.conname} child`).toContain('brand_id')
-      expect(fk.parent_cols, `${fk.conname} parent`).toContain('brand_id')
-    }
+    await brandIdInForeignKeys(db.admin, scoped)
   })
 })

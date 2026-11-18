@@ -1,0 +1,187 @@
+import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import pg from 'pg'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import type { TestDatabase } from '@mkt/db/testing'
+import { createQueueTestDatabase } from '@mkt/queue/testing'
+import { databaseUrl, requireDatabase } from '@mkt/test-support'
+import { parseDrillFile } from '../src/restore-check.ts'
+
+// Acceptance test 40 on the development database: a database seeded the way the drill is seeded before a
+// backup, dumped with pg_dump --format=custom and restored with pg_restore as restore.sh restores it (the same
+// flags, run by the database server's own PostgreSQL 17 tools through COPY ... TO PROGRAM, since the Node image
+// has none), into a new empty database. restore-check then runs on the copy, as a child process, as the runbook
+// runs it. The roles are the cluster's own (shared by every test database), with the development passwords.
+// The encrypted round trip through backup.sh and restore.sh is infra/prod/test/backup.test.mjs's.
+
+const SCRIPT = fileURLToPath(new URL('../src/restore-check.ts', import.meta.url))
+const ADMIN = new URL(databaseUrl)
+const secret = () => randomBytes(32).toString('hex')
+const SECRETS = {
+  AUTH_SECRET: secret(),
+  WORKER_SECRET: secret(),
+  ATTEMPT_TOKEN_SECRET: secret(),
+  TRIGGER_SECRET: secret(),
+  PUBLIC_ORIGIN: 'https://drill.example.test',
+}
+const ROLE_PASSWORDS = {
+  MKT_APP_PASSWORD: 'dev_only_app',
+  MKT_AUDIT_WRITER_PASSWORD: 'dev_only_audit_writer',
+  MKT_QUEUE_PASSWORD: 'dev_only_queue',
+  MKT_OWNER_VIEW_PASSWORD: 'dev_only_owner_view',
+}
+
+// The superuser's address for a database, with no password (restore-check refuses one in its arguments).
+function target(database: string): string {
+  const url = new URL(databaseUrl)
+  url.password = ''
+  url.pathname = `/${database}`
+  return url.toString()
+}
+
+async function superuser<T>(fn: (client: pg.Client) => Promise<T>, database?: string): Promise<T> {
+  const url = new URL(databaseUrl)
+  if (database) url.pathname = `/${database}`
+  const client = new pg.Client({ connectionString: url.toString() })
+  await client.connect()
+  try {
+    return await fn(client)
+  } finally {
+    await client.end()
+  }
+}
+
+function run(args: string[], env: Record<string, string>): Promise<{ code: number | null; out: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [SCRIPT, ...args], {
+      env: { PATH: process.env.PATH ?? '', PGPASSWORD: decodeURIComponent(ADMIN.password), ...env },
+    })
+    let out = ''
+    child.stdout.on('data', (d) => (out += d))
+    child.stderr.on('data', (d) => (out += d))
+    child.on('close', (code) => resolve({ code, out }))
+  })
+}
+
+let source: TestDatabase
+let dir: string
+let drill: Record<string, string>
+const copies: string[] = []
+
+// A backup of the source restored into a new, empty database: pg_dump --format=custom, then pg_restore with
+// restore.sh's flags, by the server's own tools (as the superuser, over the server's local socket).
+async function backupAndRestore(): Promise<string> {
+  const copy = `${source.name}_r${copies.length + 1}`
+  copies.push(copy)
+  await superuser((c) => c.query(`create database ${copy}`))
+  const file = `/tmp/${copy}.dump`
+  const user = decodeURIComponent(ADMIN.username)
+  const script = [
+    `pg_dump -U ${user} --format=custom --no-password -f ${file} ${source.name}`,
+    `pg_restore -U ${user} --exit-on-error --single-transaction --no-password --dbname ${copy} ${file}`,
+  ].join(' && ')
+  await superuser((c) => c.query(`copy (select 1) to program '${script}; rc=$?; rm -f ${file}; exit $rc'`))
+  return copy
+}
+
+const checkEnv = () => ({ ...SECRETS, ...ROLE_PASSWORDS, ...drill })
+
+describe('the restore drill (acceptance test 40)', () => {
+  beforeAll(async () => {
+    await requireDatabase()
+    dir = mkdtempSync(join(tmpdir(), 'mkt-drill-'))
+    source = await createQueueTestDatabase()
+    // Prices and a rate for the stand-in model's usage, as the stack test enters them.
+    await source.admin
+      .query(`insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
+        values ('claude-opus-5-5', current_date - 30, 4000000, 20000000, 200000, 5000000, 'test');
+      select app.record_fx_rate(current_date - 1, 83500000, 'test');`)
+    const seed = () =>
+      run(['seed', '--target', target(source.name)], {
+        AUTH_SECRET: SECRETS.AUTH_SECRET,
+        PUBLIC_ORIGIN: SECRETS.PUBLIC_ORIGIN,
+        RESTORE_DRILL_FILE: join(dir, 'drill.env'),
+      })
+    const readDrill = () => parseDrillFile(readFileSync(join(dir, 'drill.env'), 'utf8'))
+    const seeded = await seed()
+    expect(seeded.out).toContain('"event":"restore_drill_seeded"')
+    expect(seeded.code).toBe(0)
+    const first = readDrill()
+    expect(Object.keys(first).sort()).toEqual([
+      'RESTORE_DRILL_EMAIL',
+      'RESTORE_DRILL_JOB_ID',
+      'RESTORE_DRILL_PASSWORD',
+      'RESTORE_DRILL_TOTP_SECRET',
+    ])
+    // A second seed, as before a later drill: same user and secrets, a new waiting job.
+    const again = await seed()
+    expect(again.code).toBe(0)
+    drill = readDrill()
+    expect(drill.RESTORE_DRILL_JOB_ID).not.toBe(first.RESTORE_DRILL_JOB_ID)
+    expect({ ...drill, RESTORE_DRILL_JOB_ID: '' }).toEqual({ ...first, RESTORE_DRILL_JOB_ID: '' })
+    expect(statSync(join(dir, 'drill.env')).mode & 0o777).toBe(0o600)
+    for (const out of [seeded.out, again.out]) {
+      expect(out).not.toContain(drill.RESTORE_DRILL_PASSWORD)
+      expect(out).not.toContain(drill.RESTORE_DRILL_TOTP_SECRET)
+    }
+  }, 120_000)
+
+  afterAll(async () => {
+    for (const copy of copies) {
+      await superuser((c) => c.query(`drop database if exists ${copy} with (force)`)).catch(() => undefined)
+    }
+    await source?.drop()
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('restore-check passes on a fresh backup of a seeded database and fails when one audit row is altered after restore', async () => {
+    const clean = await backupAndRestore()
+    const altered = await backupAndRestore()
+
+    const passed = await run(['--target', target(clean)], checkEnv())
+    expect(passed.out.trim().split('\n')).toEqual([
+      'PASS sign-in with password and second factor',
+      'PASS a job waiting in the backup finishes after a worker starts',
+      'PASS audit chains verify',
+      'PASS isolation tests 1 to 6',
+    ])
+    expect(passed.code).toBe(0)
+
+    // One entry's detail changed in place, its hash left as it was (as the superuser, past the log's triggers).
+    await superuser(async (c) => {
+      await c.query(`set session_replication_role = replica`)
+      const r = await c.query(
+        `update audit.log set detail = '{"altered": true}' where id = (select id from audit.log order by at limit 1)`,
+      )
+      expect(r.rowCount).toBe(1)
+    }, altered)
+    const failed = await run(['--target', target(altered)], checkEnv())
+    expect(failed.out).toMatch(/^FAIL audit chains verify: 1 finding\(s\) \(broken_chain\)/m)
+    expect(failed.out).toContain('PASS sign-in with password and second factor')
+    expect(failed.code).toBe(1)
+
+    // Nothing secret reaches the output: no password, secret, second-factor secret or address.
+    for (const out of [passed.out, failed.out]) {
+      for (const value of [...Object.values(SECRETS).slice(0, 4), ...Object.values(ROLE_PASSWORDS)]) {
+        expect(out).not.toContain(value)
+      }
+      expect(out).not.toContain(drill.RESTORE_DRILL_PASSWORD)
+      expect(out).not.toContain(drill.RESTORE_DRILL_TOTP_SECRET)
+      expect(out).not.toContain(decodeURIComponent(ADMIN.password))
+      expect(out).not.toContain('postgres://')
+    }
+  }, 900_000)
+
+  it('refuses a target address that carries a password, without printing it', async () => {
+    const url = new URL(target(source.name))
+    url.password = 'not-a-real-password'
+    const refused = await run(['--target', url.toString()], checkEnv())
+    expect(refused.code).toBe(2)
+    expect(refused.out).toContain('"event":"restore_check_refused"')
+    expect(refused.out).not.toContain('not-a-real-password')
+  })
+})

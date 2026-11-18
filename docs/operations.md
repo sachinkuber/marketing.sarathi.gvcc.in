@@ -326,3 +326,74 @@ $C --profile ops run --rm ops prepare      # gives the run-time roles their pass
 The last line of the restore is `"event":"restored"`. Then continue with step 4 of "First deployment" (firewall, start) and the smoke check. The audit chains are checked by the next daily `audit_verify` duty; to check at once, compare the restored database's row counts with the old one's if it still exists.
 
 `infra/prod/test/backup.test.mjs` rehearses all of this on throw-away containers (project `mkt-m7test-bk`): a backup restored into a clean postgres has the same row counts in `app`, `auth`, `audit` and `pgboss`, its audit chains verify with the core's `verifyAudit`, also for a backup taken while 50 audit entries are being written; a read-only folder fails the run; a target with `app` tables is refused; the files do not open with another key; 7 sets are kept; a malformed `ADMIN_DATABASE_URL` fails without its password reaching the log; the offsite service copies the newest complete set to `daily/` and once a month to `monthly/`, fails with no complete set or a bad remote, and can neither write the backups nor reach the database; and the alert command works.
+
+### Restore drill
+
+Acceptance test 40: a backup restores into a clean database where a user signs in with the second factor, a job that was waiting resumes, the audit chains verify and isolation tests 1 to 6 pass. `apps/ops/src/restore-check.ts` checks all four on a restored copy and prints one line per check, `PASS` or `FAIL` (with the route pattern, table, status or error name that failed, never a secret, a code, an address or a row), and exits 1 if any failed:
+
+| Line | What it does |
+|---|---|
+| `sign-in with password and second factor` | Starts a real core process (`apps/core/src/main.ts`) on the copy, with the run-time roles and the core's secrets, and signs the drill user in over HTTP: the password, then a code from the drill user's authenticator secret, then `/api/v1/session` |
+| `a job waiting in the backup finishes after a worker starts` | The drill job was `created` (waiting) in the backup; a real worker process (the stand-in model, `NODE_ENV=test`, so no provider is called) is started and the job's run must reach `succeeded` within 180 s |
+| `audit chains verify` | The core's `verifyAudit`, as the owner-view role, over every chain |
+| `isolation tests 1 to 6` | The isolation suites' probes (`packages/db/src/isolation-probes.ts`, `apps/core/src/access/isolation-probes.ts`): the catalog rules (tests 3 and 4) on the restored schema; test 2 on every restored brand's rows; tests 2 to 5 on two probe brands written in a transaction that is rolled back; test 1, the walk of every brand-scoped route as the drill user against the other drill brand (all 404), with the reads in its own brand as the control; test 6, a real attempt token for one new job refused on two others |
+
+The copy is throw-away and the drill changes it (sign-ins, the job's run, test 6's jobs). The drill core gets no mail, error-reporting or audit-store settings and the copy's network has no route out. The command refuses a target address that carries a password (exit 2), like `restore.sh`: the superuser's password comes from `PGPASSWORD`; everything else from the environment as well: the role passwords (`roles.env`), the core's four secrets and `PUBLIC_ORIGIN` (`core.env`; the second factor is stored encrypted with `AUTH_SECRET`, so the copy needs the same one) and the drill file.
+
+**The drill user** exists before the backup. `restore-check.ts seed` creates, on the live database: the brands `restore-drill-a` and `restore-drill-b`; the user `restore-drill@drill.invalid` (a brand admin in `restore-drill-a` only) with a random password, enrolled in the second factor through the sign-in library with the core's `AUTH_SECRET` (the authenticator secret is made for this account and is no person's); an article in each brand; and one summary job in `restore-drill-a`, which waits in the queue while no worker runs. It writes the password, the authenticator secret and the job's id to the drill file (`0600`, refused if it exists) and prints only `{"event":"restore_drill_seeded"}`. Run again while the drill user exists (before a later drill: the waiting job must be in the backup that is drilled), it makes only a new waiting job and replaces the job's id in the existing drill file; the password and the authenticator secret stay. The drill user is a real account in production: its file stays root's, in `/opt/mkt/drill`.
+
+**Where it runs.** Not in the ops image: that image holds only what `prepare`, `alert` and the backup need (`packages/db`, `packages/queue`, `apps/ops` and their production dependencies), and the drill starts the core and the worker, which would add both apps and all their dependencies to it. It runs instead from the release's checkout with its locked dependencies, in the same pinned Node image the images are built from, on the `mkt_data` network. On the development server `apps/ops/test/restore-check.test.ts` runs it in the normal `npm test` (a seeded database, `pg_dump --format=custom`, `pg_restore` with `restore.sh`'s flags into a new database, then restore-check passes; with one audit entry altered it fails that line).
+
+On the production host, as root (Step 4 of plan Task 9, recorded in `docs/progress.md` under test 40):
+
+```sh
+cd /opt/mkt/marketing
+C='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml'
+NODE=node:24.20.0@sha256:be23f54a88d34e8824c741b19b91064094f92c1c97b194144bfc8b50d67258e2
+PG=postgres@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+# The checkout and its locked dependencies, in a volume. On the default network: mkt_data has no route to npm.
+docker volume create mkt-drill-work
+docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $NODE \
+  sh -c 'cp -a /src/. /work && npm ci --ignore-scripts --no-audit --no-fund'
+```
+
+1. **Seed, before the backup** (the first time, and again before each later drill). The worker must not be running (it is off until A3; otherwise `$C stop worker` until the backup has run, then `$C start worker`, which runs the drill job with the real model):
+
+   ```sh
+   install -d -m 0700 -o root -g root /opt/mkt/drill
+   read -rs PGPASSWORD && export PGPASSWORD   # the superuser password (postgres.env)
+   docker run --rm --network mkt_data --env-file /opt/mkt/secrets/core.env -e PGPASSWORD \
+     -e RESTORE_DRILL_FILE=/drill/drill.env -v /opt/mkt/drill:/drill -v mkt-drill-work:/work -w /work $NODE \
+     node apps/ops/src/restore-check.ts seed --target postgres://postgres@postgres:5432/mkt
+   unset PGPASSWORD
+   ```
+
+   Then the night's backup (or `systemctl start mkt-backup.service`) holds the drill.
+
+2. **A throw-away target and the restore**, from that backup (bring the set and the owner's key as in "Restore" above):
+
+   ```sh
+   read -rs PGPASSWORD && export PGPASSWORD   # a new password for the throw-away target: paste openssl rand -hex 32
+   POSTGRES_PASSWORD=$PGPASSWORD docker run -d --name mkt-drill-target --network mkt_data --shm-size 256m \
+     -e POSTGRES_PASSWORD -e POSTGRES_DB=mkt $PG
+   until docker exec mkt-drill-target pg_isready -h 127.0.0.1 -U postgres -d mkt; do sleep 2; done
+   (umask 077 && cat > /opt/mkt/backups/.restore-identity)
+   $C --profile ops run --rm -T -e PGPASSWORD -e AGE_IDENTITY_FILE=/backups/.restore-identity \
+     --entrypoint mkt-restore backup \
+     /backups/mkt-<ts>.dump.age /backups/mkt-<ts>.roles.sql.age postgres://postgres@mkt-drill-target:5432/mkt
+   shred -u /opt/mkt/backups/.restore-identity
+   ADMIN_DATABASE_URL=postgres://postgres:$PGPASSWORD@mkt-drill-target:5432/mkt \
+     $C --profile ops run --rm -T -e ADMIN_DATABASE_URL ops prepare   # the roles' passwords from roles.env
+   ```
+
+3. **The drill**:
+
+   ```sh
+   docker run --rm --network mkt_data --env-file /opt/mkt/secrets/roles.env --env-file /opt/mkt/secrets/core.env \
+     --env-file /opt/mkt/drill/drill.env -e PGPASSWORD -v mkt-drill-work:/work -w /work $NODE \
+     node apps/ops/src/restore-check.ts --target postgres://postgres@mkt-drill-target:5432/mkt
+   ```
+
+   Four `PASS` lines and exit 0 are the pass. Copy the four lines, the backup set's name and the date into `docs/progress.md` under test 40.
+
+4. **Clean up**: `docker rm -f -v mkt-drill-target; docker volume rm mkt-drill-work; unset PGPASSWORD`. Keep `/opt/mkt/drill/drill.env` for later drills.
