@@ -1,0 +1,60 @@
+# Marketing platform: the proxy site (plan M7 decisions 1 and 2, Task 7). The server's proxy is Caddy; this is the
+# one site file it gets, and nothing else in its configuration changes except the global block below.
+#
+# A TEMPLATE. Render it with the placeholders replaced (docs/operations.md, "Proxy site"), never by hand-editing:
+#   __MKT_HOST__       the site address: marketing.sarathi.gvcc.in, or the test hostname until A2.
+#   __MKT_TLS__        one line, as the host issues certificates: `tls /certs/<name>.pem /certs/<name>.key`
+#                      (a Cloudflare origin certificate), `import stg <name>` (the staging snippet), or nothing
+#                      (an empty line) for Caddy's automatic HTTPS.
+#   __MKT_CORE__       the core:      127.0.0.1:4100 (Caddy on the host) or mkt-core:4000 (Caddy in Docker,
+#                                     with infra/prod/compose.proxy-network.yaml).
+#   __MKT_DASHBOARD__  the dashboard: 127.0.0.1:3100, or mkt-dashboard:3000.
+#
+# The client's address. Caddy works out {client_ip} from the Caddyfile's GLOBAL options, which a site file
+# cannot set. They must say (every range in infra/prod/proxy/cloudflare-ips.txt, dated):
+#   {
+#     servers {
+#       trusted_proxies static <every range in cloudflare-ips.txt>
+#       client_ip_headers CF-Connecting-IP
+#     }
+#   }
+# From a Cloudflare address {client_ip} is CF-Connecting-IP; from anywhere else it is the connection's own
+# address, whatever headers came with it. X-Forwarded-For is then REPLACED with that one address, never
+# appended to: the core trusts one proxy (TRUST_PROXY=1, the invite limiter reads the last entry) and Better
+# Auth trusts X-Forwarded-For only when it holds one address (the sign-in limiter). A forged CF-Connecting-IP or
+# X-Forwarded-For sent around Cloudflare therefore changes nothing (Review Focus 1; smoke check forged-*).
+#
+# What passes unchanged (docs/progress.md, proxy preconditions of milestones 2b, 2c, 4 and 6): the path and
+# query string as received (handle, not handle_path: nothing is stripped or rewritten), the Host header,
+# Authorization, the X-Mkt-* trigger headers, the raw body (no buffering, no decoding) and DELETE bodies.
+__MKT_HOST__ {
+	__MKT_TLS__
+
+	# The core's largest body is a worker checkpoint, which it caps at 1 MiB itself (express.json 1mb).
+	request_body {
+		max_size 1MiB
+	}
+
+	# HSTS and COOP belong to the proxy (apps/dashboard/next.config.ts); the app sets the rest. Deferred, so they
+	# replace the core's own copies (helmet) instead of being sent twice.
+	header {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+
+	encode zstd gzip
+
+	# /api/ to the core; everything else, /api without the slash included, to the dashboard.
+	handle /api/* {
+		reverse_proxy __MKT_CORE__ {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle {
+		reverse_proxy __MKT_DASHBOARD__ {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+}

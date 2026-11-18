@@ -170,6 +170,42 @@ test('published ports bind 127.0.0.1 only', () => {
   assert.deepEqual(published.sort(), ['core 127.0.0.1:4100:4000', 'dashboard 127.0.0.1:3100:3000'])
 })
 
+// infra/prod/compose.proxy-network.yaml, for a proxy that runs in Docker (Task 7). The base file's own tests above
+// stay as they are; this override only adds the core and the dashboard to the proxy's external network.
+test('the proxy-network override adds only core and dashboard to the named external network', () => {
+  const overrideFile = join(root, 'infra/prod/compose.proxy-network.yaml')
+  const withOverride = (env) =>
+    spawnSync(
+      'docker',
+      ['compose', '-f', composeFile, '-f', overrideFile, '--profile', 'ops', 'config', '--format', 'json'],
+      { encoding: 'utf8', env: { ...process.env, MKT_SECRETS: secretsDir, ...env } },
+    )
+  // Refused without the network's name.
+  const unnamed = withOverride({ MKT_PROXY_NETWORK: '' })
+  assert.notEqual(unnamed.status, 0)
+  assert.match(unnamed.stderr, /MKT_PROXY_NETWORK/)
+  const result = withOverride({ MKT_PROXY_NETWORK: 'web' })
+  assert.equal(result.status, 0, result.stderr)
+  const { services, networks } = JSON.parse(result.stdout)
+  assert.equal(networks.proxy.name, 'web')
+  assert.equal(networks.proxy.external, true)
+  assert.deepEqual(Object.keys(services.core.networks).sort(), ['app', 'data', 'proxy', 'worker'])
+  assert.deepEqual(Object.keys(services.dashboard.networks).sort(), ['app', 'proxy'])
+  assert.deepEqual(services.core.networks.proxy.aliases, ['mkt-core'])
+  assert.deepEqual(services.dashboard.networks.proxy.aliases, ['mkt-dashboard'])
+  for (const name of ['postgres', 'worker', 'ops']) {
+    assert.ok(!Object.keys(services[name].networks ?? {}).includes('proxy'), name)
+  }
+  // Everything else is the base file's: the project's own networks stay internal and scoped, ports on 127.0.0.1.
+  assert.equal(networks.worker.internal, true)
+  assert.equal(networks.data.internal, true)
+  for (const key of ['app', 'worker', 'data', 'worker_egress']) assert.equal(networks[key].name, `mkt_${key}`)
+  assert.deepEqual(
+    Object.values(services).flatMap((s) => (s.ports ?? []).map((p) => p.host_ip)),
+    ['127.0.0.1', '127.0.0.1'],
+  )
+})
+
 test('worker stop_grace_period is at least 45s', () => {
   assert.ok(seconds(config().services.worker.stop_grace_period) >= 45)
 })

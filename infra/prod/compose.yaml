@@ -17,10 +17,10 @@
 #   data           postgres, core, worker and ops; internal. Postgres publishes no port.
 #   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge, so for now it gives
 #                  unrestricted outbound access (any internet address, and the host's published ports via its
-#                  public address); limiting it to the model provider is the host firewall's job (Task 7). The
-#                  worker reaches the core only on `worker`.
-# Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. Joining
-# a proxy that runs in Docker instead is decided in Task 7.
+#                  public address); the host firewall limits it to TCP 443 outward (docs/operations.md, "Worker
+#                  egress firewall"). The worker reaches the core only on `worker`.
+# Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
+# that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
 
 x-logging: &logging
@@ -160,5 +160,5 @@ networks:
     internal: true
   data:
     internal: true
-  # Unrestricted outbound until the host firewall (Task 7) limits this subnet to the model provider.
+  # Unrestricted outbound until the host firewall (docs/operations.md) limits this subnet to TCP 443.
   worker_egress:
