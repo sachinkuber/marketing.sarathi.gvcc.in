@@ -566,7 +566,7 @@ A scheduled job verifies the chain against the exported hashes and raises a seve
 ## 14. Use of the Claude API
 
 - **Surface.** The Messages API through the official TypeScript SDK, in our own workers.
-- **Model.** `claude-opus-5-5` for every agent to begin with, with effort set explicitly per agent. Moving an agent to a cheaper model is the owner's decision and requires its evaluation set to pass on that model (AI-14).
+- **Model.** `claude-sonnet-5-5` for every agent to begin with (the owner's decision of 2026-11-18, replacing `claude-opus-5-5`), with effort set explicitly per agent. Moving an agent to another model, cheaper or dearer, is the owner's decision and requires its evaluation set to pass on that model (AI-14).
 - **Structured output** validated against a schema for every step.
 - **Caching.** Stable prompt parts first, changing parts last.
 - **Batch processing** for evaluation runs and bulk research.

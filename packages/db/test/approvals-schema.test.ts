@@ -383,8 +383,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0021, 0020, 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all eight come off.
-      await runner({ ...base, direction: 'down', count: 8 })
+      // 0022, 0021, 0020, 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all nine come off.
+      await runner({ ...base, direction: 'down', count: 9 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )
@@ -400,7 +400,7 @@ describe('migration 0014 down and up', () => {
     }
   })
 
-  it('rolling back 0015 and the three after it leaves platform_alerts() working (0014 granted its select)', async () => {
+  it('rolling back 0015 and the four after it leaves platform_alerts() working (0014 granted its select)', async () => {
     const own = await createTestDatabase()
     try {
       const url = own.urlFor('migration')
@@ -412,7 +412,7 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      await runner({ ...base, direction: 'down', count: 7 })
+      await runner({ ...base, direction: 'down', count: 8 })
       const gone = await own.admin.query(
         "select to_regprocedure('app.raise_alert(uuid,smallint,text,jsonb)') as r",
       )

@@ -84,12 +84,16 @@ describe('duty_run', () => {
 })
 
 describe('summary agent definition', () => {
-  it('has exactly one live summary definition: version 1, claude-opus-5-5, low', async () => {
+  it('the live summary definition is version 2 on claude-sonnet-5-5, effort low; version 1 on claude-opus-5-5 is kept and not live', async () => {
     const r = await db.admin.query(
       "select version, model, effort, files_hash from app.agent_definition_version where agent = 'summary' and live",
     )
     expect(r.rows).toHaveLength(1)
-    expect(r.rows[0]).toMatchObject({ version: 1, model: 'claude-opus-5-5', effort: 'low' })
+    expect(r.rows[0]).toMatchObject({ version: 2, model: 'claude-sonnet-5-5', effort: 'low' })
+    const old = await db.admin.query(
+      "select model, effort, live from app.agent_definition_version where agent = 'summary' and version = 1",
+    )
+    expect(old.rows).toEqual([{ model: 'claude-opus-5-5', effort: 'low', live: false }])
     const definition = JSON.parse(readFileSync(join(SUMMARY_AGENT_DIR, 'definition.json'), 'utf8'))
     expect(r.rows[0]).toMatchObject({
       version: definition.version,
@@ -242,8 +246,8 @@ describe('migration 0018 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0021, 0020 and 0019 sit on top of 0018: all four come off.
-      await runner({ ...base, direction: 'down', count: 4 })
+      // 0022, 0021, 0020 and 0019 sit on top of 0018: all five come off.
+      await runner({ ...base, direction: 'down', count: 5 })
       const gone = await own.admin.query(
         "select to_regclass('app.trigger_nonce') as n, to_regclass('app.duty_run') as d, to_regprocedure('audit.search(text,uuid,text,timestamptz,timestamptz,bigint,integer)') as s, (select count(*) from app.agent_definition_version where agent = 'summary') as defs",
       )

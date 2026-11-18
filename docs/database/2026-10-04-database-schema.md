@@ -13,6 +13,7 @@
 | Changes at milestone 4 (2026-10-14) | Brought in line with migrations 0011 to 0013 as built: sections 7.3, 7.5, 7.6, new 7.9 and 7.10, and 11.1. The Word copy is not regenerated (it needs `mmdc`, which the server lacks); this Markdown file is canonical. |
 | Changes at milestone 6 (2026-10-25) | Brought in line with migration 0018 as built: sections 7.1 (the summary agent's first definition), 7.11 (new, `app.duty_run`), 8.3 (nonce retention and grants), 9.3 (new, `audit.search`), 11.1 and 11.2, and refinements 16 to 18 in section 12. The Word copy is not regenerated (`tools/build-docs` has no script for this document and `mmdc` is not installed); this Markdown file is canonical. |
 | Changes at milestone 7 (2026-11-17) | Brought in line with migration 0021 as built: section 7.12 (new, `app.worker_heartbeat` and its two functions). |
+| Changes at milestone 7 (2026-11-18) | Migration 0022: section 7.1 now records the summary agent's version 2 on `claude-sonnet-5-5` (owner decision of 2026-11-18). |
 | Based on | Phase 1 spec version 4, Architecture version 2, Master PRD version 3, App flow version 2, Content guidelines version 2, Tech stack version 1. All approved. |
 
 ## 1. Scope and status of each part
@@ -442,7 +443,7 @@ Not brand-scoped. Changed only by the release step.
 
 At most one live version per agent (partial unique index where `live`).
 
-Migration 0018 inserts the first definition of the summary agent: agent `summary`, version 1, model `claude-opus-5-5`, effort `low`, live. `files_hash` is the hash of the repository directory `agents/summary/` (sorted relative paths, each followed by a NUL byte and the file's bytes); a test recomputes it, so a change to those files without a new version fails the suite.
+Migration 0018 inserts the first definition of the summary agent: agent `summary`, version 1, model `claude-opus-5-5`, effort `low`, live. Migration 0022 (owner decision of 2026-11-18, the default model is Claude Sonnet 5.5) inserts version 2 (model `claude-sonnet-5-5`, effort `low`, live) and sets version 1 not live in the same transaction; version 1 stays on record so the owner can switch back. `files_hash` is the hash of the repository directory `agents/summary/` (sorted relative paths, each followed by a NUL byte and the file's bytes); a test recomputes it, so a change to those files without a new version fails the suite.
 
 ### 7.2 `app.run`
 

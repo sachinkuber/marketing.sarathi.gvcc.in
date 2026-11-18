@@ -43,7 +43,7 @@ describe('the summary handler', () => {
     expect(step).toBe('summarise')
     expect(request.messages).toEqual([{ role: 'user', content: wrapBrief('Hello <b>') }])
     expect(request.system).toBe(agentFile('system.md'))
-    expect(request.model).toBe('claude-opus-5-5')
+    expect(request.model).toBe('claude-sonnet-5-5')
     expect(request.effort).toBe('low')
     expect(request.maxTokens).toBe(1024)
     expect(request.outputSchema).toEqual(providerSchema(JSON.parse(agentFile('output.schema.json'))))

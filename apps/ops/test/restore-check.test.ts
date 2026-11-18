@@ -98,7 +98,7 @@ describe('the restore drill (acceptance test 40)', () => {
     // Prices and a rate for the stand-in model's usage, as the stack test enters them.
     await source.admin
       .query(`insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
-        values ('claude-opus-5-5', current_date - 30, 4000000, 20000000, 200000, 5000000, 'test');
+        values ('claude-sonnet-5-5', current_date - 30, 2000000, 10000000, 100000, 2500000, 'test');
       select app.record_fx_rate(current_date - 1, 83500000, 'test');`)
     const seed = () =>
       run(['seed', '--target', target(source.name)], {

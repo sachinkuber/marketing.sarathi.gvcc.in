@@ -2,11 +2,12 @@
 
 | Document control | |
 |---|---|
-| Version | 3 |
+| Version | 4 |
 | Status | **Approved** |
 | Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("tech stack version 2 approved"). Version 1 was approved the same day. Version 3 approved by the owner on 2026-11-18 ("Next.js 16.3.8 … approved"). |
 | Changes in version 2 | ESLint 9.39.5 replaced by 10.10.0. A trial install showed version 9 is marked "no longer supported" by its publisher. |
 | Changes in version 3 | 2026-11-17 (milestone 7, plan decision 9): Next.js 16.3.4 replaced by 16.3.8, which fixes the critical `next/og` advisory found in milestone 1. 16.3.8 was released on 2026-09-30, 48 days before the change, so it meets the 30-day rule. Approved by the owner on 2026-11-18; the spec was updated to version 6 to match. |
+| Changes in version 4 | 2026-11-18 (milestone 7, ruling R20): the model provider row changes from `claude-opus-5-5` to `claude-sonnet-5-5` (input $2.00, output $10.00, cache read $0.10, cache write $2.50 per million tokens). Approved by the owner on 2026-11-18; the spec was updated to version 7 to match. |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
@@ -73,7 +74,7 @@ Section 3 lists every place where a choice does not fully meet these rules, and 
 
 | Job | Choice | Version | Evidence | Why this and not the alternative |
 |---|---|---|---|---|
-| Model provider | Claude API, model `claude-opus-5-5` | — | Architecture section 14 | Set per agent. A cheaper model for a high-volume agent is the owner's decision. |
+| Model provider | Claude API, model `claude-sonnet-5-5` | — | Architecture section 14 | Set per agent. Another model for an agent is the owner's decision. |
 | Model SDK | Official Anthropic TypeScript SDK | 0.124.0 | 51.1 million a week | The provider's own library. See section 3. |
 
 ### 2.6 Quality

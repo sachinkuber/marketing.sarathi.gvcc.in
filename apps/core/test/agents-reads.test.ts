@@ -43,8 +43,8 @@ describe('GET /brands/:brandId/agents', () => {
     expect(reply.json.items).toHaveLength(1)
     expect(reply.json.items[0]).toEqual({
       agent: 'summary',
-      version: 1,
-      model: 'claude-opus-5-5',
+      version: 2,
+      model: 'claude-sonnet-5-5',
       effort: 'low',
       state: 'idle',
       costThisMonth: { usdMicros: '2000000', inrMicros: '166000000' },

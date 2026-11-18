@@ -2,9 +2,9 @@
 
 | Document control | |
 |---|---|
-| Version | 6 |
+| Version | 7 |
 | Status | **Approved** |
-| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 5 approved"). Replaces version 4. The change was approved as described in the queue trial findings, section 5. Version 6 (2026-11-18): the only change is Next.js 16.3.4 → 16.3.8 in section 3, approved by the owner on 2026-11-18 (milestone 7 plan, decision 9). |
+| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 5 approved"). Replaces version 4. The change was approved as described in the queue trial findings, section 5. Version 6 (2026-11-18): the only change is Next.js 16.3.4 → 16.3.8 in section 3, approved by the owner on 2026-11-18 (milestone 7 plan, decision 9). Version 7 (2026-11-18): the only change is the default model, `claude-opus-5-5` → `claude-sonnet-5-5`, in section 3, approved by the owner on 2026-11-18 (ruling R20). |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
@@ -66,7 +66,7 @@ The stack is set by the approved **Tech stack version 3** (`docs/tech-stack/2026
 | Schema validation | Zod, strict objects | 4.5.4 |
 | Sign-in | Better Auth, with its two-factor plugin | 1.7.2 |
 | Job queue | pg-boss, behind our own queue interface | 12.30.0 |
-| Model SDK | Anthropic TypeScript SDK; model `claude-opus-5-5` | 0.124.0 |
+| Model SDK | Anthropic TypeScript SDK; model `claude-sonnet-5-5` | 0.124.0 |
 | Unit and integration tests | Vitest, against a real Postgres of the pinned version | 4.1.11 |
 | Browser tests | Playwright | 1.63.0 |
 | Code checks and formatting | ESLint; Prettier | 10.10.0; 3.9.6 |

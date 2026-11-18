@@ -132,7 +132,9 @@ describe('starting a summary run', () => {
   })
 
   it('answers 503 agent_unavailable when no summary definition is live, and writes nothing', async () => {
-    await stack.db.admin.query(`update app.agent_definition_version set live = false where agent = 'summary'`)
+    const live = await stack.db.admin.query<{ id: string }>(
+      `update app.agent_definition_version set live = false where agent = 'summary' and live returning id`,
+    )
     try {
       const runs = await runCount()
       const reply = await owner.request('POST', route(), { body: { brief: BRIEF } })
@@ -140,9 +142,9 @@ describe('starting a summary run', () => {
       expect(reply.json.error.code).toBe('agent_unavailable')
       expect(await runCount()).toBe(runs)
     } finally {
-      await stack.db.admin.query(
-        `update app.agent_definition_version set live = true where agent = 'summary'`,
-      )
+      await stack.db.admin.query(`update app.agent_definition_version set live = true where id = any($1::uuid[])`, [
+        live.rows.map((x) => x.id),
+      ])
     }
   })
 
