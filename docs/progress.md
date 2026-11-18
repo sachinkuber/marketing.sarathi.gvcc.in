@@ -398,7 +398,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   1. (Plan 1) The dashboard is a client of the core API on the same origin and imports no workspace package at run time; its reply schemas are in `apps/dashboard/src/api/schemas.ts` and a core test parses real replies with them. Cost: the schemas are written twice.
   2. (Plan 2) Browser checks run on the development server in a derived image (`infra/dev/browser.Dockerfile`, `infra/dev/server-run-browser.sh`, 3 GB and 1.5 CPUs), as `npm run e2e`, separate from `npm run verify`. CI has a second job, `e2e`. Cost: 3 GB on the shared host while it runs.
   3. (Plan 3) Component tests render with `react-dom/server` and `happy-dom` (a development dependency, 20.14.5); interaction is proven only by Playwright. Cost: the render tests do not click.
-  4. (Plan 4) Next.js stays at 16.3.4 (the spec pin); the dashboard never imports `next/og`, which is where the advisory is (an ESLint rule enforces it).
+  4. (Plan 4) Next.js stays at 16.3.4 (the spec pin); the dashboard never imports `next/og`, which is where the advisory is (an ESLint rule enforces it). Superseded in milestone 7 (2026-11-17, plan decision 9): Next.js is now pinned at 16.3.8, released 2026-09-30, which fixes the advisory; the ESLint rule stays.
   5. (Plan 5) Reads of agents, runs, model-call review and the audit log use `edit_profile`; starting the summary agent and dead-letter requeue and cancel use `see_other_brands`. No permission key was added, so the 50-cell comparison test is unchanged.
   6. (Plan 6) The placeholder check `placeholder_length` is blocking: summary at most 400 characters, each keyword at most 40; the core recomputes it from the stored payload.
   7. (Plan 7) The summary request asks for structured output (`json_schema`), 1024 tokens, no tools. A reply that did not stop at `end_turn` is an error and is never stored. Whether the pinned SDK and `claude-opus-5-5` accept the request is decided only by the live check (A3).
@@ -433,7 +433,7 @@ The browser suite passed 6 of 6 specs on the development server (desktop and pho
   - The bootstrap command uses `BOOTSTRAP_DATABASE_URL`, a separate privileged role the operator must supply at deployment; decide who holds it and where it is kept.
   - The notification bell (plan decision 14).
   - QR image for enrolment (needs a new run-time dependency; plan decision 12).
-  - Move Next.js to 16.3.8 once that release is 30 days old (plan decision 4), as a one-line change plus the full suite.
+  - Move Next.js to 16.3.8 once that release is 30 days old (plan decision 4), as a one-line change plus the full suite. Done in milestone 7 (2026-11-17, commit 85b6250).
   - Move Nodemailer to 10.x on the owner's approval (plan decision 13).
   - Retention job for notifications and alerts (90 days for notifications; alert retention is open).
   - The remaining milestone 5 minors (listed under milestone 5 Findings) that this milestone did not absorb.

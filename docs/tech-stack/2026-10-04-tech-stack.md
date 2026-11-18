@@ -2,10 +2,11 @@
 
 | Document control | |
 |---|---|
-| Version | 2 |
+| Version | 3 |
 | Status | **Approved** |
 | Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("tech stack version 2 approved"). Version 1 was approved the same day. |
 | Changes in version 2 | ESLint 9.39.5 replaced by 10.10.0. A trial install showed version 9 is marked "no longer supported" by its publisher. |
+| Changes in version 3 | 2026-11-17 (milestone 7, plan decision 9): Next.js 16.3.4 replaced by 16.3.8, which fixes the critical `next/og` advisory found in milestone 1. 16.3.8 was released on 2026-09-30, 48 days before the change, so it meets the 30-day rule. Made under the owner's approval of the milestone 7 plan; the spec's own pin is the owner's to update. |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
@@ -62,7 +63,7 @@ Section 3 lists every place where a choice does not fully meet these rules, and 
 
 | Job | Choice | Version | Evidence | Why this and not the alternative |
 |---|---|---|---|---|
-| Framework | Next.js | 16.3.4 | 74.7 million a week. The 16 line since October 2025. | The most widely used React framework, and the one the Aztek site already runs. See section 3. |
+| Framework | Next.js | 16.3.8 | 74.7 million a week. The 16 line since October 2025. | The most widely used React framework, and the one the Aztek site already runs. See section 3. |
 | UI library | React | 19.2.8 | 218.1 million a week. The 19 line since December 2024. | Required by the framework |
 | Styling | Tailwind CSS | 4.3.3 | 158.9 million a week. The 4 line since January 2025. | The same as the Aztek site |
 | Forms | React Hook Form | 7.87.0 | 69.1 million a week. The 7 line since April 2021. | The most widely used form library; works with Zod |
@@ -103,7 +104,7 @@ Section 3 lists every place where a choice does not fully meet these rules, and 
 | **Kysely 0.29.5** | Its version number is below 1.0, which normally signals an unfinished library | It has been in production use since 2021 and has 21.4 million downloads a week, more than three times Knex. The sign-in library uses it internally, so it is in the product whether or not we call it directly. | Exact version pinned. All queries go through one package (`packages/db`), so it can be replaced without touching the rest. |
 | **Better Auth 1.7.2** | The youngest library in the stack: first released April 2024 | The older options (Passport, next-auth) have no second factor, so we would write that security code ourselves. That is a bigger risk than a younger library that provides it. | Its database schema is a reviewed, committed migration; it cannot change tables at run time. Sign-in has its own acceptance tests. |
 | **pg-boss 12.30.0** | Major version 12 is 11 months old, just under a year, and releases come often | The features the approved design relies on (worker heartbeats, per-group concurrency, notification dispatch) were confirmed against the version 12 documentation. Version 10 is older but those features are not confirmed there. | The first work package confirms each feature on this exact version before anything is built on it. The queue sits behind our own interface. |
-| **Next.js 16.3.4** | Major version 16 is 12 months old, right at the limit. Version 15 is older and still maintained. | It matches the Aztek site, so there is one set of conventions to know. | Its bundled documentation is read before any code is written. Version 15.5 is the fallback. |
+| **Next.js 16.3.8** | Major version 16 is 12 months old, right at the limit. Version 15 is older and still maintained. | It matches the Aztek site, so there is one set of conventions to know. | Its bundled documentation is read before any code is written. Version 15.5 is the fallback. |
 | **Anthropic SDK 0.124.0** | Version number below 1.0 | It is the provider's official library and there is no alternative with the same support | The first work package confirms this version works with `claude-opus-5-5`. If it does not, the newest version is used as a stated exception to the 30-day rule. |
 | **ESLint 10.10.0** | Major version 10 is 8 months old, under the one-year rule | Version 9, which met the rule, is marked "no longer supported". An unsupported tool is a worse risk than a younger one. It only checks code; it is not part of the running product. | The release is 30 days old. The TypeScript plugin pinned with it supports version 10. |
 | **PostgreSQL 17.11** | The newest maintenance release, so it may be under 30 days old | Maintenance releases are security and bug fixes (rule 4) | Tested like any other change |
@@ -123,7 +124,7 @@ The Phase 1 spec version 3 pinned the newest releases. This document replaces it
 | Better Auth | 1.7.7 | 1.7.2 | 30-day rule |
 | pg-boss | 12.36.0 | 12.30.0 | 30-day rule |
 | pg | 8.23.1 | 8.23.0 | 30-day rule |
-| Next.js and React | 16.3.8 and 19.3.0 | 16.3.4 and 19.2.8 | 30-day rule |
+| Next.js and React | 16.3.8 and 19.3.0 | 16.3.8 and 19.2.8 | React: 30-day rule. Next.js was 16.3.4 under the same rule until version 3 |
 | Anthropic SDK | 0.131.0 | 0.124.0 | 30-day rule |
 | Vitest | 5.0.3 | 4.1.11 | Version 5 is days old |
 | pino | 10.4.0 | 10.3.1 | 30-day rule |

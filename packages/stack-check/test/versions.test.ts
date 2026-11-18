@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 const root = join(import.meta.dirname, '..', '..', '..')
 
-// Copied from docs/tech-stack/2026-10-04-tech-stack.md, version 2.
+// Copied from docs/tech-stack/2026-10-04-tech-stack.md, version 3.
 const pinned: Record<string, string> = {
   '@anthropic-ai/sdk': '0.124.0',
   '@playwright/test': '1.63.0',

@@ -3,7 +3,8 @@
 # these tests reach the host's Docker through its socket. Built once on the development server:
 #   docker build -f infra/dev/infra.Dockerfile -t mkt-dev-infra:2 infra/dev
 # Docker CLI 29.9.1 (2026-10-14): download.docker.com publishes no checksum for 29.9.x static archives;
-#   the sha256 below was computed on the first download. Only the `docker` binary is kept.
+#   the sha256 below was computed on the first download (trust on first use: it catches a later change to the
+#   archive, not a bad first download). Only the `docker` binary is kept.
 # buildx 0.38.0 (2026-10-07): sha256 from the release's checksums.txt. `docker build` needs it for BuildKit
 #   (per-Dockerfile ignore files, building only the stages a target needs).
 # Compose 5.6.0 (2026-10-02, the newest release at least 30 days old on 2026-11-17; the host runs 5.7.1):

@@ -1,8 +1,10 @@
 # Production stack (plan, Task 5): postgres, core, worker and dashboard, plus the one-shot `ops` (profile ops).
 # Run from the repository root on the server; the images are built here from infra/prod/Dockerfile:
-#   docker compose -f infra/prod/compose.yaml build                      (one service at a time on a shared host)
-#   docker compose -f infra/prod/compose.yaml --profile ops run --rm ops  (prepare: migrations, roles, queue)
+#   docker compose -f infra/prod/compose.yaml --profile ops build   (one service at a time on a shared host)
+#   docker compose -f infra/prod/compose.yaml --profile ops run --rm ops prepare   (migrations, roles, queue)
 #   docker compose -f infra/prod/compose.yaml up -d
+# `--profile ops` on the build is needed: without it the ops image is not rebuilt, and `run` would use the old one
+# and miss new migrations.
 # Configuration and every secret come from root-owned 0600 env files in /opt/mkt/secrets (MKT_SECRETS moves
 # the folder, for tests); infra/prod/secrets.example holds one placeholder file for each. Nothing secret is
 # written here, in an image, a build argument or a command line.
@@ -130,8 +132,9 @@ services:
         limits: { cpus: '0.25', memory: 512M }
     logging: *logging
 
-  # One-shot, at deployment: `docker compose --profile ops run --rm ops [prepare]`. It reads the superuser's
-  # address (postgres.env) and the run-time roles' passwords (roles.env).
+  # One-shot, at deployment: `docker compose --profile ops run --rm ops [prepare]`, after a build with
+  # `--profile ops` (a build without it leaves this image old). It reads the superuser's address (postgres.env)
+  # and the run-time roles' passwords (roles.env).
   ops:
     build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: ops }
     profiles: [ops]

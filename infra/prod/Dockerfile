@@ -87,9 +87,11 @@ ENV PORT=3000 HOSTNAME=0.0.0.0
 EXPOSE 3000
 CMD ["node", "apps/dashboard/server.js"]
 
-# ---- ops tools, each pinned by version and checksum.
-#   age 1.3.2:     sha256 from the GitHub release asset digest of age-v1.3.2-linux-amd64.tar.gz.
-#   rclone 1.75.2: sha256 from the release's signed SHA256SUMS.
+# ---- ops tools, each pinned by version and sha256. What each sha256 was taken from:
+#   age 1.3.2:     GitHub's digest of the release asset age-v1.3.2-linux-amd64.tar.gz (computed by GitHub on
+#                  upload; age publishes no checksum file of its own).
+#   rclone 1.75.2: the release's SHA256SUMS file. That file is PGP-signed by the rclone authors, but the
+#                  signature was not verified; only the sha256 below is checked at build time.
 FROM base AS ops-tools
 USER root
 RUN set -eu; cd /tmp; \
