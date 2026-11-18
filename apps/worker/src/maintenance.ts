@@ -16,7 +16,8 @@ export const DEFAULT_MAX_WAIT_SECONDS: Record<JobClass, number> = {
 
 // Until n8n's scheduled trigger exists (milestone 6): sweep model calls, and report what the watchdog sees.
 // The approvals tick rides this timer too, until that trigger exists; spec 10.6 asks for a 15-minute check,
-// and with the default 300 s interval it runs at least that often (it is idempotent and time-driven).
+// and with the default 300 s interval it runs at least that often (it is idempotent and time-driven). It is
+// also the worker's heartbeat, so the first tick runs at start; the interval is at most 450 s (config.ts).
 export function startMaintenance(options: {
   core: CoreClient
   queue: Queue
@@ -84,6 +85,9 @@ export function startMaintenance(options: {
       busy = false
     }
   }
+  // One tick at once, so a new worker's heartbeat reaches the core now and not one interval later; it is
+  // caught like every other tick, so a failure of it never stops the worker.
+  void tick().catch(() => undefined)
   const timer = setInterval(() => void tick().catch(() => undefined), options.intervalSeconds * 1000)
   timer.unref()
   return { stop: () => clearInterval(timer) }

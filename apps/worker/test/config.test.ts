@@ -117,3 +117,17 @@ describe('production refusals', () => {
     ).toThrow('SENTRY_DSN')
   })
 })
+
+describe('the maintenance interval', () => {
+  // The core reports the worker stale after 900 s without a beat; 450 s leaves room for one missed tick.
+  it('accepts up to 450 seconds', () => {
+    const config = loadWorkerConfig({ ...base, ANTHROPIC_API_KEY: SECRET_KEY, RECONCILE_INTERVAL_SECONDS: '450' })
+    expect(config.reconcileIntervalSeconds).toBe(450)
+  })
+
+  it('refuses more than 450 seconds, naming the variable', () => {
+    expect(() =>
+      loadWorkerConfig({ ...base, ANTHROPIC_API_KEY: SECRET_KEY, RECONCILE_INTERVAL_SECONDS: '451' }),
+    ).toThrow('Invalid configuration: RECONCILE_INTERVAL_SECONDS')
+  })
+})

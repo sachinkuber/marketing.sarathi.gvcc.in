@@ -116,7 +116,8 @@ describe('maintenance', () => {
   })
 
   describe('the approvals tick', () => {
-    const run = async (core: Partial<CoreClient>, q: Queue = queue, ms = 130) => {
+    // The first tick runs at start; 50 ms ends the run before the 100 ms timer fires a second one.
+    const run = async (core: Partial<CoreClient>, q: Queue = queue, ms = 50) => {
       const lines: Record<string, unknown>[] = []
       const m = startMaintenance({
         workerId: 'w-1',
@@ -205,9 +206,80 @@ describe('maintenance', () => {
           },
         },
         queue,
-        450,
+        // The tick that starts at once is still running when the timer fires at 100, 200 and 300 ms.
+        330,
       )
       expect(calls).toBe(1)
+    })
+  })
+
+  describe('the first tick', () => {
+    // A new worker reports its heartbeat at once, not one interval (5 minutes by default) after starting.
+    it('runs at start, before the first interval has passed', async () => {
+      const ids: string[] = []
+      const m = startMaintenance({
+        workerId: 'w-first',
+        core: {
+          reconcile: async () => ({ marked: 0 }),
+          approvalsTick: async (id: string) => {
+            ids.push(id)
+            return counts
+          },
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: () => undefined,
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(ids).toEqual(['w-first'])
+    })
+
+    it('a first tick that fails is logged by name and does not throw or reject', async () => {
+      const lines: Record<string, unknown>[] = []
+      const m = startMaintenance({
+        workerId: 'w-1',
+        core: {
+          reconcile: async () => {
+            throw new Error('core down')
+          },
+          approvalsTick: async () => {
+            throw new TypeError('no route')
+          },
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: (l) => lines.push(l),
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(lines).toContainEqual({ event: 'maintenance_failed', error: 'Error' })
+      expect(lines).toContainEqual({ event: 'approvals_tick_failed', error: 'TypeError' })
+    })
+
+    it('a first tick whose log callback throws does not throw or reject', async () => {
+      let ticked = 0
+      const m = startMaintenance({
+        workerId: 'w-1',
+        core: {
+          reconcile: async () => {
+            ticked += 1
+            return { marked: 0 }
+          },
+          approvalsTick,
+        } as unknown as CoreClient,
+        queue,
+        intervalSeconds: 60,
+        maxWaitSeconds: limits,
+        log: () => {
+          throw new Error('log sink down')
+        },
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      m.stop()
+      expect(ticked).toBe(1)
     })
   })
 

@@ -58,6 +58,10 @@ export function optionsFromEnv(env: Record<string, string | undefined>): Prepare
   const names = ['ADMIN_DATABASE_URL', ...Object.values(PASSWORD_VARIABLES)]
   const missing = names.filter((name) => !env[name])
   if (missing.length > 0) throw new Error(`Missing environment variables: ${missing.join(', ')}.`)
+  // A template placeholder left in the admin address. The variable is named, never its value.
+  if (env.ADMIN_DATABASE_URL!.includes('CHANGE_ME')) {
+    throw new Error('Refusing to prepare: ADMIN_DATABASE_URL still contains CHANGE_ME.')
+  }
   const rolePasswords = Object.fromEntries(
     ROLES.map((role) => [role, env[PASSWORD_VARIABLES[role]] ?? '']),
   ) as RolePasswords

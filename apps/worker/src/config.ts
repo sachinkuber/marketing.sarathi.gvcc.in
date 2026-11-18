@@ -12,7 +12,9 @@ const schema = z.object({
   PROCESSES_PER_CLASS: z.coerce.number().int().min(1).default(1),
   MODEL_BACKEND: z.enum(['anthropic', 'standin']).default('anthropic'),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().positive().default(300),
+  // The maintenance tick is the heartbeat, and the core reports the worker stale after 900 s without one:
+  // at most 450 s leaves room for one missed tick.
+  RECONCILE_INTERVAL_SECONDS: z.coerce.number().int().positive().max(450).default(300),
   SUPERVISE_INTERVAL_SECONDS: z.coerce.number().int().positive().optional(),
   // Error reporting; unset means none. A credential: never logged or put in an error.
   SENTRY_DSN: z.url().optional(),
