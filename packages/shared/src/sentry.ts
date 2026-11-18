@@ -82,6 +82,10 @@ export function initErrorTracking(opts: {
     tracesSampleRate: 0,
     beforeSend: scrubEvent,
     beforeSendTransaction: () => null,
+    // The default handler only warns, and once a listener exists Node no longer exits on an unhandled
+    // rejection, so the service would keep running in an unknown state. Strict reports it, then exits(1).
+    // An integration with the same name replaces the default one.
+    integrations: [Sentry.onUnhandledRejectionIntegration({ mode: 'strict' })],
   })
   return true
 }

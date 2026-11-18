@@ -180,4 +180,39 @@ describe('initErrorTracking', () => {
     })
     expect(options.beforeSendTransaction!({} as never, {})).toBeNull()
   })
+
+  // Sentry's default rejection handler only warns, and once any listener exists Node no longer exits on an
+  // unhandled rejection. Strict mode reports the rejection and then exits with code 1, as Node would.
+  it('replaces the unhandled-rejection integration with one that exits the process (strict mode)', () => {
+    const init = vi.mocked(Sentry.init)
+    init.mockClear()
+    initErrorTracking({ dsn: 'https://k@h.example/1', service: 'core', release: 'r1' })
+    const integrations = init.mock.calls[0]![0]!.integrations
+    expect(Array.isArray(integrations)).toBe(true)
+    const rejection = (integrations as { name: string; setup?: (client: unknown) => void }[]).find(
+      (integration) => integration.name === 'OnUnhandledRejection',
+    )
+    expect(rejection).toBeDefined()
+
+    let handler: ((reason: unknown, promise: unknown) => void) | undefined
+    const on = vi.spyOn(process, 'on').mockImplementation(((event: string, listener: never) => {
+      if (event === 'unhandledRejection') handler = listener
+      return process
+    }) as never)
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      // No Sentry client exists here (init is mocked), so the handler takes the immediate-exit path.
+      rejection!.setup!(undefined)
+      expect(handler).toBeDefined()
+      handler!(new Error('boom'), Promise.resolve())
+      expect(exit).toHaveBeenCalledWith(1)
+    } finally {
+      on.mockRestore()
+      exit.mockRestore()
+      warn.mockRestore()
+      error.mockRestore()
+    }
+  })
 })
