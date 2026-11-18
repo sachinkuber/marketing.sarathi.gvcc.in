@@ -1,0 +1,14 @@
+# Starts mkt-backup.service daily at 21:00 UTC, which is 02:30 IST (plan decision 6). Persistent: a run missed
+# while the host was off happens at the next boot.
+# Installed as /etc/systemd/system/mkt-backup.timer and enabled with `systemctl enable --now mkt-backup.timer`;
+# docs/operations.md, "Backups".
+[Unit]
+Description=Marketing platform: daily encrypted database backup at 02:30 IST
+
+[Timer]
+OnCalendar=*-*-* 21:00:00 UTC
+Persistent=true
+Unit=mkt-backup.service
+
+[Install]
+WantedBy=timers.target

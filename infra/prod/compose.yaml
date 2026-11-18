@@ -11,18 +11,20 @@
 # the folder, for tests); infra/prod/secrets.example holds one placeholder file for each. Nothing secret is
 # written here, in an image, a build argument or a command line.
 #
-# Limits (plan decision 4; ops excluded, it runs only at deployment): 2.0 processors and 4 GiB in total.
+# Limits (plan decision 4; ops and backup excluded, they run only at deployment and once a day): 2.0 processors
+# and 4 GiB in total.
 #   postgres 0.75 / 1.5 GiB, core 0.5 / 1 GiB, worker 0.5 / 1 GiB, dashboard 0.25 / 512 MiB.
 # Networks (plan decision 3, the zones of spec 16), each scoped to the project (mkt_app, mkt_worker...):
 #   app            core and dashboard: the only services a proxy reaches, and the only published ports.
 #   worker         core and worker; internal (no route out).
-#   data           postgres, core, worker and ops; internal. Postgres publishes no port.
+#   data           postgres, core, worker, ops and backup; internal. Postgres publishes no port.
 #   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge with a fixed
 #                  bridge name (mkt-egress0 by default) and subnet, so the host firewall (infra/prod/firewall,
 #                  installed before the stack starts) can key on it. Without that firewall it is unrestricted
 #                  outbound. With it: TCP 443 to public addresses only, no private range, not the host. That is wider
 #                  than plan decision 3 ("the model provider only"): a deviation awaiting the owner's approval
 #                  (ruling R15, docs/operations.md). The worker reaches the core only on `worker`.
+#   backup_egress  the backup alone: its way out, for the off-server copy. Not restricted by the firewall.
 # Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
 # that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
@@ -155,6 +157,35 @@ services:
         limits: { cpus: '0.5', memory: 512M }
     logging: *logging
 
+  # The daily backup (plan decision 6, Task 8): infra/prod/backup/backup.sh in the ops image, run by the host's
+  # mkt-backup.timer (`docker compose ... --profile ops run --rm -T backup`); restore.sh is in the same image
+  # (`--entrypoint mkt-restore`, docs/operations.md "Restore"). It reads the superuser's address (postgres.env)
+  # and the owner's age public key and the off-server remote (backup.env). It writes to the host folder
+  # /opt/mkt/backups (root, 0700; MKT_BACKUP_DIR moves it, for tests), so it runs as root, with no capabilities:
+  # it can write only where root owns the folder.
+  # Its network out, backup_egress, is for the off-server copy (rclone to the bucket). It is its own network,
+  # not the worker's: the host firewall restricts worker_egress only, so this one is unrestricted outbound, used
+  # for minutes a day by a container that serves nothing (docs/operations.md, "Backups").
+  backup:
+    build: { context: ../.., dockerfile: infra/prod/Dockerfile, target: ops }
+    profiles: [ops]
+    restart: 'no'
+    user: '0:0'
+    <<: *node-hardening
+    entrypoint: [/usr/local/bin/mkt-backup]
+    env_file:
+      - '${MKT_SECRETS:-/opt/mkt/secrets}/postgres.env'
+      - '${MKT_SECRETS:-/opt/mkt/secrets}/backup.env'
+    volumes:
+      - '${MKT_BACKUP_DIR:-/opt/mkt/backups}:/backups'
+    networks: [data, backup_egress]
+    depends_on:
+      postgres: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
+    logging: *logging
+
 volumes:
   pg:
 
@@ -178,3 +209,8 @@ networks:
     ipam:
       config:
         - subnet: ${MKT_EGRESS_SUBNET:-10.247.73.0/24}
+  # The backup's way out, for the off-server copy only (the backup service above). Not restricted by the host
+  # firewall, which keys on the worker's bridge alone.
+  backup_egress:
+    driver: bridge
+    enable_ipv6: false

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const composeFile = join(root, 'infra/prod/compose.yaml')
 const examples = join(root, 'infra/prod/secrets.example')
-const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard']
+const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard', 'backup']
 const PRODUCT = ['postgres', 'core', 'worker', 'dashboard']
 const GiB = 1024 ** 3
 let secretsDir
@@ -80,8 +80,16 @@ const healthText = (service) => [service.healthcheck?.test ?? []].flat().join(' 
 test('the compose file loads with the example env files', () => {
   const resolved = JSON.parse(compose(['--profile', 'ops', 'config', '--format', 'json']))
   assert.equal(resolved.name, 'mkt')
-  assert.deepEqual(Object.keys(resolved.services).sort(), ['core', 'dashboard', 'ops', 'postgres', 'worker'])
+  assert.deepEqual(Object.keys(resolved.services).sort(), [
+    'backup',
+    'core',
+    'dashboard',
+    'ops',
+    'postgres',
+    'worker',
+  ])
   assert.deepEqual(resolved.services.ops.profiles, ['ops'])
+  assert.deepEqual(resolved.services.backup.profiles, ['ops'])
   // The database lives in the volume mkt_pg (project mkt, volume pg).
   assert.equal(resolved.volumes.pg.name, 'mkt_pg')
   assert.ok(resolved.services.postgres.volumes.some((v) => v.type === 'volume' && v.source === 'pg'))
@@ -154,6 +162,47 @@ test('the worker is not on app', () => {
   assert.deepEqual(Object.keys(services.core.networks).sort(), ['app', 'data', 'worker'])
   assert.deepEqual(Object.keys(services.dashboard.networks), ['app'])
   assert.deepEqual(Object.keys(services.ops.networks), ['data'])
+})
+
+// The daily backup (Task 8): the ops image with backup.sh as its entry point, root without capabilities, the host
+// folder /opt/mkt/backups at /backups, postgres.env and backup.env, and its own way out for the off-server copy.
+test('the backup service: ops image, root with no capabilities, /opt/mkt/backups, its own egress network', () => {
+  const resolved = config(['ops'])
+  const backup = resolved.services.backup
+  assert.equal(backup.build.target, 'ops')
+  assert.deepEqual(backup.entrypoint, ['/usr/local/bin/mkt-backup'])
+  assert.equal(backup.user, '0:0')
+  assert.deepEqual(backup.cap_drop, ['ALL'])
+  assert.deepEqual(backup.security_opt, ['no-new-privileges:true'])
+  assert.equal(backup.restart, 'no')
+  assert.deepEqual(
+    backup.volumes.map((v) => `${v.type} ${v.source} ${v.target} ${v.read_only === true}`),
+    ['bind /opt/mkt/backups /backups false'],
+  )
+  assert.deepEqual(
+    (backup.env_file ?? []).map((f) => (typeof f === 'string' ? f : f.path).split('/').pop()),
+    ['postgres.env', 'backup.env'],
+  )
+  assert.deepEqual(Object.keys(backup.networks).sort(), ['backup_egress', 'data'])
+  assert.equal(backup.depends_on?.postgres?.condition, 'service_healthy')
+  // backup_egress: the backup's alone, an ordinary bridge (not internal), IPv4 only.
+  const egress = resolved.networks.backup_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.notEqual(egress.internal, true)
+  assert.equal(egress.enable_ipv6, false)
+  for (const [name, service] of Object.entries(resolved.services)) {
+    if (name !== 'backup') assert.ok(!Object.keys(service.networks ?? {}).includes('backup_egress'), name)
+  }
+  // The Dockerfile puts both scripts in the ops image under the names compose and the runbook use.
+  const dockerfile = readFileSync(join(root, 'infra/prod/Dockerfile'), 'utf8')
+  assert.match(
+    dockerfile,
+    /^COPY --chmod=0755 infra\/prod\/backup\/backup\.sh \/usr\/local\/bin\/mkt-backup$/m,
+  )
+  assert.match(
+    dockerfile,
+    /^COPY --chmod=0755 infra\/prod\/backup\/restore\.sh \/usr\/local\/bin\/mkt-restore$/m,
+  )
 })
 
 test('published ports bind 127.0.0.1 only', () => {

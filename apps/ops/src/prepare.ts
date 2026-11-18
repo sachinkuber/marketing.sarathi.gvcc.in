@@ -78,10 +78,10 @@ export async function prepareFromEnv(env: Record<string, string | undefined>): P
 
 // A failure is reported by its message when it is ours (it names variables and roles, never a value), and
 // by its name and code only when it comes from the database or the network.
-export function failureLine(error: unknown): string {
+export function failureLine(error: unknown, event = 'prepare_failed'): string {
   const e = error as { message?: string; code?: string; name?: string }
   const detail = e.code ? `${e.name ?? 'Error'} ${e.code}` : (e.message ?? 'unknown error')
-  return `${JSON.stringify({ event: 'prepare_failed', error: detail })}\n`
+  return `${JSON.stringify({ event, error: detail })}\n`
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
