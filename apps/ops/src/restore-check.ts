@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { createPool, type Pool } from '@mkt/db'
+import { createPool, withBrand, type Pool } from '@mkt/db'
 import {
   appRoleCannotDisableSecurity,
   brandIdInForeignKeys,
@@ -26,7 +26,7 @@ import {
   serviceRolesReadNoBusinessTable,
   type AsRole,
 } from '@mkt/db/isolation-probes'
-import { openQueue, type Queue } from '@mkt/queue'
+import { openQueue, type JobClass, type Queue } from '@mkt/queue'
 import { totp } from '@mkt/test-support'
 import {
   attemptTokenFindings,
@@ -45,7 +45,7 @@ import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../../core/
 import { createUserWithPassword } from '../../core/src/auth/users.ts'
 import { loadConfig } from '../../core/src/config.ts'
 import { buildCore } from '../../core/src/core.ts'
-import type { JobsDeps } from '../../core/src/jobs/service.ts'
+import { currentQueueId, finaliseRun, type JobsDeps } from '../../core/src/jobs/service.ts'
 import { createLogger } from '../../core/src/logger.ts'
 import { errorName } from '../../core/src/notify/ports.ts'
 import { StandInFxSource } from '../../core/src/triggers/fx.ts'
@@ -80,7 +80,17 @@ import { StandInFxSource } from '../../core/src/triggers/fx.ts'
 // It creates the brands restore-drill-a and restore-drill-b, the drill user (brand admin in restore-drill-a
 // only, address restore-drill@drill.invalid) enrolled in the second factor through the sign-in library with
 // the core's AUTH_SECRET, a content item in each brand, and one waiting summary job in restore-drill-a; then
-// writes the drill file (mode 0600, refused if it exists). The secret is the drill user's own, made here.
+// writes the drill file (mode 0600, refused if it exists). The secret is the drill user's own, made here. The
+// file also names the live database (cluster system identifier and database name): restore-check refuses that
+// database, and any target host named `postgres` (the live service), before it starts anything.
+// `cancel-live` (after the backup, before the live worker starts) cancels the drill's waiting jobs on the live
+// database, so no drill job ever reaches the real model. `unseed` (when the drill file is lost) cancels them and
+// removes the drill user; the next seed starts over.
+//
+// Dependencies: the drill imports the core's code (relative paths, as apps/dashboard/e2e does) and starts the
+// core and the worker, so @mkt/core and @mkt/worker are devDependencies of @mkt/ops: the drill runs only from a
+// full checkout (`npm ci`), never in the ops image, which installs production dependencies only and whose entry
+// (main.ts) never loads this file. @mkt/test-support (the TOTP codes) is a dependency.
 
 export const DRILL_EMAIL = 'restore-drill@drill.invalid'
 export const DRILL_BRANDS = { own: 'restore-drill-a', other: 'restore-drill-b' } as const
@@ -96,12 +106,17 @@ const ROLE_PASSWORDS = {
   owner_view: 'MKT_OWNER_VIEW_PASSWORD',
 } as const
 const CORE_SECRETS = ['AUTH_SECRET', 'WORKER_SECRET', 'ATTEMPT_TOKEN_SECRET', 'TRIGGER_SECRET'] as const
-const DRILL_VARS = [
+const DRILL_ACCOUNT = [
   'RESTORE_DRILL_EMAIL',
   'RESTORE_DRILL_PASSWORD',
   'RESTORE_DRILL_TOTP_SECRET',
   'RESTORE_DRILL_JOB_ID',
 ] as const
+// RESTORE_DRILL_LIVE_DATABASE names the live database the seed ran on (cluster system identifier and
+// database name): restore-check refuses that database, so the drill can never run on the live data.
+const DRILL_VARS = [...DRILL_ACCOUNT, 'RESTORE_DRILL_LIVE_DATABASE'] as const
+// The live database's service name in compose.yaml. A drill target is always a throw-away container.
+const LIVE_HOST = 'postgres'
 
 type Env = Record<string, string | undefined>
 
@@ -230,6 +245,15 @@ async function check(name: string, run: () => Promise<string | undefined>): Prom
   } catch (error) {
     return { name, ok: false, detail: error instanceof Refused ? error.message : errorName(error) }
   }
+}
+
+// The cluster's system identifier and the database's name: different for every restored copy in a new
+// container, and, in one cluster (the tests), different for every database.
+export async function databaseIdentity(pool: Pool): Promise<string> {
+  const r = await pool.query<{ id: string }>(
+    `select system_identifier::text || '/' || current_database() as id from pg_control_system()`,
+  )
+  return r.rows[0]?.id as string
 }
 
 async function brandId(pool: Pool, slug: string): Promise<string | null> {
@@ -365,6 +389,19 @@ export async function restoreCheck(target: string, env: Env): Promise<CheckResul
   required(env, ['PGPASSWORD'])
   const url = (role: keyof typeof ROLE_PASSWORDS) =>
     roleUrl(target, role, roles[ROLE_PASSWORDS[role]] as string)
+  if (new URL(target).hostname === LIVE_HOST) {
+    throw new Refused('the target is the live database service; restore into a throw-away container')
+  }
+  // Before anything starts: the live database itself is refused, whatever address reaches it. A copy restored
+  // into a new container has a new cluster identifier.
+  const probe = createPool(target, { max: 1 })
+  try {
+    if ((await databaseIdentity(probe)) === drill.RESTORE_DRILL_LIVE_DATABASE) {
+      throw new Refused('the target is the live database the drill was seeded on, not a restored copy')
+    }
+  } finally {
+    await probe.end()
+  }
 
   const port = await freePort()
   const coreUrl = `http://127.0.0.1:${port}`
@@ -687,7 +724,7 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
       } catch {
         throw new Refused('the drill user exists and its drill file cannot be read')
       }
-      if (!DRILL_VARS.every((name) => lines[name])) throw new Refused('the drill file is incomplete')
+      if (!DRILL_ACCOUNT.every((name) => lines[name])) throw new Refused('the drill file is incomplete')
       const own = await brandId(pool, DRILL_BRANDS.own)
       if (!own) throw new Refused('the drill user exists without its brand')
       const { jobId } = await startSummaryRun(pool, jobsDeps(pool, queue, new DbAudit(pool), '', ''), {
@@ -695,7 +732,11 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
         brief: DRILL_BRIEF,
         actor: { userId: drillUser },
       })
-      writeDrillFile(file as string, { ...lines, RESTORE_DRILL_JOB_ID: jobId }, 'w')
+      writeDrillFile(
+        file as string,
+        { ...lines, RESTORE_DRILL_JOB_ID: jobId, RESTORE_DRILL_LIVE_DATABASE: await databaseIdentity(pool) },
+        'w',
+      )
       return { jobId }
     }
     const brands: Record<string, string> = {}
@@ -766,6 +807,7 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
         RESTORE_DRILL_PASSWORD: password,
         RESTORE_DRILL_TOTP_SECRET: totpSecret,
         RESTORE_DRILL_JOB_ID: jobId,
+        RESTORE_DRILL_LIVE_DATABASE: await databaseIdentity(pool),
       },
       'wx',
     )
@@ -777,16 +819,112 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
   }
 }
 
+// ---- cancel-live and unseed, on the live database
+
+// Every drill job not yet finished on the live database, in either drill brand.
+async function openDrillJobs(
+  pool: Pool,
+): Promise<{ job_id: string; class: string; run_id: string; brand_id: string }[]> {
+  const r = await pool.query<{ job_id: string; class: string; run_id: string; brand_id: string }>(
+    `select i.job_id, i.class, i.run_id, i.brand_id
+       from app.job_input i
+       join app.job_control c on c.brand_id = i.brand_id and c.job_id = i.job_id
+       join app.brand b on b.id = i.brand_id
+      where b.slug = any($1) and i.finished_at is null and not c.cancel_requested`,
+    [Object.values(DRILL_BRANDS)],
+  )
+  return r.rows
+}
+
+// After the backup that holds the drill has been taken, and before the live worker starts again: the drill's
+// waiting jobs are cancelled on the live database (the queue's job, the job's control and its run, with an
+// audit entry, as the dead-job cancel does), so no worker ever sends the drill's brief to the model. The copy
+// in the backup keeps them waiting.
+export async function cancelLiveDrill(target: string, env: Env): Promise<{ cancelled: number }> {
+  required(env, ['PGPASSWORD'])
+  const pool = createPool(target, { max: 2 })
+  const queue = await openQueue(target)
+  try {
+    const user = await pool.query<{ id: string }>('select id from auth."user" where email = $1', [
+      DRILL_EMAIL,
+    ])
+    const actor = user.rows[0]?.id ?? null
+    const audit = new DbAudit(pool)
+    const jobs = await openDrillJobs(pool)
+    for (const job of jobs) {
+      await withBrand(pool, job.brand_id, async (client) => {
+        await queue.cancel(job.class as JobClass, job.job_id, await currentQueueId(client, job.job_id))
+        await client.query(
+          'update app.job_control set cancel_requested = true, updated_at = now() where job_id = $1',
+          [job.job_id],
+        )
+        await finaliseRun(client, job.run_id)
+        await audit.record(
+          {
+            action: 'jobs.cancelled',
+            actor,
+            brandId: job.brand_id,
+            subject: job.job_id,
+            outcome: 'success',
+            detail: { jobId: job.job_id, reason: 'restore_drill' },
+          },
+          client,
+        )
+      })
+    }
+    return { cancelled: jobs.length }
+  } finally {
+    await queue.stop()
+    await pool.end()
+  }
+}
+
+// When the drill file is lost: the drill's open jobs are cancelled and the drill user removed (its sessions,
+// password and second factor go with it), so a new seed can start over. The drill brands and their rows stay.
+export async function unseedDrill(
+  target: string,
+  env: Env,
+): Promise<{ removed: boolean; cancelled: number }> {
+  const { cancelled } = await cancelLiveDrill(target, env)
+  const pool = createPool(target, { max: 1 })
+  try {
+    const client = await pool.connect()
+    try {
+      await client.query('begin')
+      await client.query(
+        `delete from app.membership where user_id in (select id from auth."user" where email = $1)`,
+        [DRILL_EMAIL],
+      )
+      const removed = await client.query('delete from auth."user" where email = $1', [DRILL_EMAIL])
+      await client.query('commit')
+      return { removed: removed.rowCount === 1, cancelled }
+    } catch (error) {
+      await client.query('rollback').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
+    }
+  } finally {
+    await pool.end()
+  }
+}
+
 if (import.meta.main) {
   const [first, ...rest] = process.argv.slice(2)
-  const seeding = first === 'seed'
-  const args = seeding ? rest : process.argv.slice(2)
-  const event = seeding ? 'restore_drill_seed' : 'restore_check'
+  const command = first === 'seed' || first === 'cancel-live' || first === 'unseed' ? first : null
+  const args = command ? rest : process.argv.slice(2)
+  const event = command ? `restore_drill_${command.replace('-', '_')}` : 'restore_check'
   try {
     const target = parseTarget(args)
-    if (seeding) {
+    if (command === 'seed') {
       await seedDrill(target, process.env)
       process.stdout.write(`${JSON.stringify({ event: 'restore_drill_seeded' })}\n`)
+    } else if (command === 'cancel-live') {
+      const { cancelled } = await cancelLiveDrill(target, process.env)
+      process.stdout.write(`${JSON.stringify({ event: 'restore_drill_cancelled', jobs: cancelled })}\n`)
+    } else if (command === 'unseed') {
+      const done = await unseedDrill(target, process.env)
+      process.stdout.write(`${JSON.stringify({ event: 'restore_drill_unseeded', ...done })}\n`)
     } else {
       const results = await restoreCheck(target, process.env)
       for (const r of results) {

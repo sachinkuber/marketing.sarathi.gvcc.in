@@ -114,6 +114,7 @@ describe('the restore drill (acceptance test 40)', () => {
     expect(Object.keys(first).sort()).toEqual([
       'RESTORE_DRILL_EMAIL',
       'RESTORE_DRILL_JOB_ID',
+      'RESTORE_DRILL_LIVE_DATABASE',
       'RESTORE_DRILL_PASSWORD',
       'RESTORE_DRILL_TOTP_SECRET',
     ])
@@ -183,5 +184,82 @@ describe('the restore drill (acceptance test 40)', () => {
     expect(refused.code).toBe(2)
     expect(refused.out).toContain('"event":"restore_check_refused"')
     expect(refused.out).not.toContain('not-a-real-password')
+  })
+
+  // What the live database holds that a drill run would change: audit entries, sessions, and the drill jobs'
+  // queue states.
+  const liveState = async () =>
+    (
+      await source.admin.query(
+        `select (select count(*) from audit.log)::int as audit, (select count(*) from auth.session)::int as sessions,
+                (select string_agg(q.state::text, ',' order by q.id) from pgboss.job q
+                   join app.job_input i on i.job_id = q.id) as jobs,
+                (select count(*) from pgboss.job)::int as queued`,
+      )
+    ).rows[0]
+
+  it('refuses the live database the drill was seeded on, and the live service name, before starting anything', async () => {
+    const before = await liveState()
+    const live = await run(['--target', target(source.name)], checkEnv())
+    expect(live.code).toBe(2)
+    expect(live.out).toContain('"event":"restore_check_refused"')
+    expect(live.out).toContain('the live database the drill was seeded on')
+    expect(live.out).not.toMatch(/^(PASS|FAIL) /m)
+    // Nothing ran on it: no sign-in, no worker, no test-6 job.
+    expect(await liveState()).toEqual(before)
+
+    const byName = await run(['--target', 'postgres://postgres@postgres:5432/mkt'], checkEnv())
+    expect(byName.code).toBe(2)
+    expect(byName.out).toContain('the target is the live database service')
+  })
+
+  it('cancel-live cancels the drill jobs waiting on the live database, once, after the backup was taken', async () => {
+    const drillJobs = async () =>
+      (
+        await source.admin.query(
+          `select q.state::text as queue, r.state::text as run from app.job_input i
+             join pgboss.job q on q.id = i.job_id join app.run r on r.id = i.run_id
+             join app.brand b on b.id = i.brand_id where b.slug like 'restore-drill-%' order by q.id`,
+        )
+      ).rows
+    // The two seeds' jobs wait.
+    expect(await drillJobs()).toEqual([
+      { queue: 'created', run: 'running' },
+      { queue: 'created', run: 'running' },
+    ])
+    const cancelled = await run(['cancel-live', '--target', target(source.name)], {})
+    expect(cancelled.out).toContain('{"event":"restore_drill_cancelled","jobs":2}')
+    expect(cancelled.code).toBe(0)
+    expect(await drillJobs()).toEqual([
+      { queue: 'cancelled', run: 'cancelled' },
+      { queue: 'cancelled', run: 'cancelled' },
+    ])
+    const audited = await source.admin.query(
+      `select count(*)::int as n from audit.log where action = 'jobs.cancelled' and detail->>'reason' = 'restore_drill'`,
+    )
+    expect(audited.rows[0].n).toBe(2)
+    // Again: nothing left to cancel.
+    const again = await run(['cancel-live', '--target', target(source.name)], {})
+    expect(again.out).toContain('{"event":"restore_drill_cancelled","jobs":0}')
+  })
+
+  it('unseed removes the drill user, so a lost drill file can be replaced by a new seed', async () => {
+    const unseeded = await run(['unseed', '--target', target(source.name)], {})
+    expect(unseeded.out).toContain('{"event":"restore_drill_unseeded","removed":true,"cancelled":0}')
+    expect(unseeded.code).toBe(0)
+    const left = await source.admin.query(`select count(*)::int as n from auth."user" where email = $1`, [
+      drill.RESTORE_DRILL_EMAIL,
+    ])
+    expect(left.rows[0].n).toBe(0)
+    const file = join(dir, 'drill-2.env')
+    const reseeded = await run(['seed', '--target', target(source.name)], {
+      AUTH_SECRET: SECRETS.AUTH_SECRET,
+      PUBLIC_ORIGIN: SECRETS.PUBLIC_ORIGIN,
+      RESTORE_DRILL_FILE: file,
+    })
+    expect(reseeded.code).toBe(0)
+    expect(parseDrillFile(readFileSync(file, 'utf8')).RESTORE_DRILL_PASSWORD).not.toBe(
+      drill.RESTORE_DRILL_PASSWORD,
+    )
   })
 })

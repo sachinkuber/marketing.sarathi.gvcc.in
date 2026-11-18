@@ -335,10 +335,10 @@ Acceptance test 40: a backup restores into a clean database where a user signs i
 |---|---|
 | `sign-in with password and second factor` | Starts a real core process (`apps/core/src/main.ts`) on the copy, with the run-time roles and the core's secrets, and signs the drill user in over HTTP: the password, then a code from the drill user's authenticator secret, then `/api/v1/session` |
 | `a job waiting in the backup finishes after a worker starts` | The drill job was `created` (waiting) in the backup; a real worker process (the stand-in model, `NODE_ENV=test`, so no provider is called) is started and the job's run must reach `succeeded` within 180 s |
-| `audit chains verify` | The core's `verifyAudit`, as the owner-view role, over every chain |
+| `audit chains verify` | The core's `verifyAudit`, as the owner-view role, over every chain. It runs offline (no audit store), so it checks each chain's own hashes and links only: it cannot see entries missing from the end of a chain (a truncated tail); the daily `audit_verify` duty against the store can |
 | `isolation tests 1 to 6` | The isolation suites' probes (`packages/db/src/isolation-probes.ts`, `apps/core/src/access/isolation-probes.ts`): the catalog rules (tests 3 and 4) on the restored schema; test 2 on every restored brand's rows; tests 2 to 5 on two probe brands written in a transaction that is rolled back; test 1, the walk of every brand-scoped route as the drill user against the other drill brand (all 404), with the reads in its own brand as the control; test 6, a real attempt token for one new job refused on two others |
 
-The copy is throw-away and the drill changes it (sign-ins, the job's run, test 6's jobs). The drill core gets no mail, error-reporting or audit-store settings and the copy's network has no route out. The command refuses a target address that carries a password (exit 2), like `restore.sh`: the superuser's password comes from `PGPASSWORD`; everything else from the environment as well: the role passwords (`roles.env`), the core's four secrets and `PUBLIC_ORIGIN` (`core.env`; the second factor is stored encrypted with `AUTH_SECRET`, so the copy needs the same one) and the drill file.
+The copy is throw-away and the drill changes it (sign-ins, the job's run, test 6's jobs). The drill core gets no mail, error-reporting or audit-store settings and the copy's network has no route out. The command refuses, before it starts anything (exit 2), the live database itself (the seed records its cluster identifier and database name in the drill file; a copy restored into a new container always differs) and any target host named `postgres` (the live service). It refuses a target address that carries a password, like `restore.sh`: the superuser's password comes from `PGPASSWORD`; everything else from the environment as well: the role passwords (`roles.env`), the core's four secrets and `PUBLIC_ORIGIN` (`core.env`; the second factor is stored encrypted with `AUTH_SECRET`, so the copy needs the same one) and the drill file.
 
 **The drill user** exists before the backup. `restore-check.ts seed` creates, on the live database: the brands `restore-drill-a` and `restore-drill-b`; the user `restore-drill@drill.invalid` (a brand admin in `restore-drill-a` only) with a random password, enrolled in the second factor through the sign-in library with the core's `AUTH_SECRET` (the authenticator secret is made for this account and is no person's); an article in each brand; and one summary job in `restore-drill-a`, which waits in the queue while no worker runs. It writes the password, the authenticator secret and the job's id to the drill file (`0600`, refused if it exists) and prints only `{"event":"restore_drill_seeded"}`. Run again while the drill user exists (before a later drill: the waiting job must be in the backup that is drilled), it makes only a new waiting job and replaces the job's id in the existing drill file; the password and the authenticator secret stay. The drill user is a real account in production: its file stays root's, in `/opt/mkt/drill`.
 
@@ -368,7 +368,16 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
    unset PGPASSWORD
    ```
 
-   Then the night's backup (or `systemctl start mkt-backup.service`) holds the drill.
+   Then the night's backup (or `systemctl start mkt-backup.service`) holds the drill. **Once that backup has completed, and before the live worker starts again**, cancel the drill's jobs on the live database, so the worker never sends the drill's brief to the model (the copy in the backup keeps them waiting):
+
+   ```sh
+   read -rs PGPASSWORD && export PGPASSWORD   # the superuser password (postgres.env)
+   docker run --rm --network mkt_data -e PGPASSWORD -v mkt-drill-work:/work -w /work $NODE \
+     node apps/ops/src/restore-check.ts cancel-live --target postgres://postgres@postgres:5432/mkt
+   unset PGPASSWORD
+   ```
+
+   It prints `{"event":"restore_drill_cancelled","jobs":<n>}` (each cancel is in the audit log as `jobs.cancelled`, reason `restore_drill`). Only then `$C start worker`, if it was running.
 
 2. **A throw-away target and the restore**, from that backup (bring the set and the owner's key as in "Restore" above):
 
@@ -397,3 +406,5 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
    Four `PASS` lines and exit 0 are the pass. Copy the four lines, the backup set's name and the date into `docs/progress.md` under test 40.
 
 4. **Clean up**: `docker rm -f -v mkt-drill-target; docker volume rm mkt-drill-work; unset PGPASSWORD`. Keep `/opt/mkt/drill/drill.env` for later drills.
+
+**If the drill file is lost** (the seed then refuses: the drill user exists without it), remove the drill user and seed again: the same container as `cancel-live`, with `unseed` in its place. It cancels the drill's open jobs, removes the drill user (its sessions, password and second factor go with it) and prints `{"event":"restore_drill_unseeded","removed":true,...}`; the drill brands and their rows stay, and the next seed reuses them.
