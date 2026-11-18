@@ -23,7 +23,7 @@ describe('scrubEvent', () => {
           query_string: 'a=1',
           method: 'POST',
         },
-        user: { id: '1', email: 'a@b.example', ip_address: '1.2.3.4' },
+        user: { id: '1', email: 'a@b.example', ip_address: '192.0.2.4' },
       }),
     )
     expect(out.request?.data).toBeUndefined()
@@ -41,7 +41,7 @@ describe('scrubEvent', () => {
             'user-agent': 'curl',
             authorization: 'Bearer x',
             cookie: 'sid=1',
-            'x-forwarded-for': '1.2.3.4',
+            'x-forwarded-for': '192.0.2.4',
           },
         },
       }),

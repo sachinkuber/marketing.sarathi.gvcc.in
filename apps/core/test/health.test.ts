@@ -125,7 +125,7 @@ describe('health endpoints', () => {
     await server.close()
     server = await startTestServer(
       workerApp(async () => {
-        throw new Error('connect ECONNREFUSED 10.0.0.5:5432')
+        throw new Error('connect ECONNREFUSED 192.0.2.5:5432')
       }),
     )
     const down = await fetch(`${server.url}/health/worker`)
