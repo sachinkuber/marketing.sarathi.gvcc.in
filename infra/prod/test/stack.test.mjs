@@ -172,8 +172,6 @@ before(() => {
     WORKER_SECRET: values.worker,
   })
   writeEnv('dashboard', { NODE_ENV: 'production' })
-  // Read by the backup service (profile ops), which this test does not run; compose needs the file to exist.
-  writeEnv('backup', { BACKUP_AGE_RECIPIENT: 'CHANGE_ME' })
   // A stack left by an interrupted run would hold the ports and the old volume.
   compose(['down', '-v', '--remove-orphans'], { ops: true })
 })

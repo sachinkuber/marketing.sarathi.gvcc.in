@@ -107,6 +107,23 @@ function backupDir(name) {
 
 const listing = (dir) => inBackup(dir, 'cd /backups && ls -1A').trim().split('\n').filter(Boolean).sort()
 
+// The offsite service (offsite.sh): /backups read-only, a host folder at /remote standing in for the bucket
+// (a local path is an rclone remote like any other).
+const runOffsite = (dir, remoteDir, env = {}, check = true) =>
+  compose(
+    [
+      'run',
+      '--rm',
+      '-T',
+      '--no-deps',
+      '-v',
+      `${remoteDir}:/remote`,
+      ...Object.keys(env).flatMap((k) => ['-e', k]),
+      'offsite',
+    ],
+    { env: { MKT_BACKUP_DIR: dir, ...env }, check },
+  )
+
 const runBackup = (dir, env = {}, check = true) =>
   compose(['run', '--rm', '-T', ...Object.keys(env).flatMap((k) => ['-e', k]), 'backup'], {
     env: { MKT_BACKUP_DIR: dir, ...env },
@@ -441,9 +458,9 @@ test(
     const dir = backupDir('main')
     const before = parseCounts(psql(COUNTS))
     const result = runBackup(dir)
-    // No off-server copy is configured here, and the run says so.
-    assert.match(result, /"event":"offsite_skipped"/)
     assert.match(result, /"event":"backup_done"/)
+    // The backup makes no off-server copy itself (the offsite service does).
+    assert.doesNotMatch(result, /offsite/)
     ;[firstSet] = sets(dir)
     assert.ok(firstSet, 'no backup set was written')
     assert.deepEqual(
@@ -660,27 +677,90 @@ test('on the server the newest 7 backups are kept', { timeout: 10 * 60_000 }, ()
 })
 
 test(
-  'the off-server copy: copied when RCLONE_REMOTE is set, and a failed copy fails the run',
+  'the offsite service copies the newest complete set to daily/ and, once a month, to monthly/',
   { timeout: 10 * 60_000 },
   () => {
     const dir = backupDir('offsite')
-    // A local path stands in for the remote (rclone treats both alike).
-    const copied = runBackup(dir, { RCLONE_REMOTE: '/backups/offsite' })
-    assert.match(copied, /"event":"offsite_copied"/)
-    const [set] = sets(dir)
-    assert.deepEqual(inBackup(dir, 'ls -1 /backups/offsite').trim().split('\n').sort(), [
+    const remote = `${HOST_BASE}/remote`
+    // No complete set yet: the run fails, it never copies nothing and calls it a success.
+    const empty = runOffsite(dir, remote, { RCLONE_REMOTE: '/remote/mkt' }, false)
+    assert.notEqual(empty.status, 0, output(empty))
+    assert.match(output(empty), /"event":"offsite_failed","step":"find_set"/)
+    runBackup(dir)
+    // An older set and a half-written newer one (no checksum): the newest complete set is the real one.
+    inBackup(
+      dir,
+      'cd /backups && for f in dump.age dump.age.sha256 roles.sql.age roles.sql.age.sha256; do echo x > mkt-20200101T213000Z.$f; done; echo x > mkt-29990101T000000Z.dump.age',
+    )
+    const [, set] = sets(dir)
+    const files = [
       `${set}.dump.age`,
       `${set}.dump.age.sha256`,
       `${set}.roles.sql.age`,
       `${set}.roles.sql.age.sha256`,
-    ])
-    // A remote that does not exist: the run fails, and the local copy it made is kept.
-    const failed = runBackup(dir, { RCLONE_REMOTE: 'nosuchremote:bucket/mkt' }, false)
+    ]
+    const remoteList = (sub) =>
+      inBackup(remote, `ls -1 /backups/mkt/${sub} 2>/dev/null || true`)
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .sort()
+
+    const first = lastJson(runOffsite(dir, remote, { RCLONE_REMOTE: '/remote/mkt' }))
+    assert.deepEqual(first, { event: 'offsite_copied', name: set, monthly: true })
+    assert.deepEqual(remoteList('daily'), files)
+    assert.deepEqual(remoteList('monthly'), files)
+    // Again in the same month: daily again (unchanged files are left as they are), no second monthly copy.
+    const second = lastJson(runOffsite(dir, remote, { RCLONE_REMOTE: '/remote/mkt' }))
+    assert.deepEqual(second, { event: 'offsite_copied', name: set, monthly: false })
+    assert.deepEqual(remoteList('monthly'), files)
+
+    // Unset: skipped, and says so.
+    assert.match(runOffsite(dir, remote), /"event":"offsite_skipped"/)
+    // A remote that does not exist: the run fails, naming the step.
+    const failed = runOffsite(dir, remote, { RCLONE_REMOTE: 'nosuchremote:mkt-backups/mkt' }, false)
     assert.notEqual(failed.status, 0, output(failed))
-    assert.match(output(failed), /"event":"backup_failed","step":"offsite"/)
-    assert.equal(sets(dir).length, 2)
+    assert.match(output(failed), /"event":"offsite_failed","step":"daily"/)
   },
 )
+
+test('the offsite service cannot write the backups or reach the database, and holds no database secret', () => {
+  const dir = `${HOST_BASE}/offsite`
+  const probe = compose(
+    [
+      'run',
+      '--rm',
+      '-T',
+      '--no-deps',
+      '--entrypoint',
+      'sh',
+      'offsite',
+      '-c',
+      'touch /backups/x 2>/dev/null && echo writable; env | grep -c -e ADMIN_DATABASE_URL -e POSTGRES_PASSWORD || true; getent hosts postgres >/dev/null && echo resolves || true',
+    ],
+    { env: { MKT_BACKUP_DIR: dir } },
+  )
+  assert.equal(probe.trim(), '0')
+})
+
+test('a malformed ADMIN_DATABASE_URL fails the backup without its password reaching the log', () => {
+  const dir = backupDir('badurl')
+  const password = `pw-${randomBytes(8).toString('hex')}`
+  for (const url of [
+    `postgres://postgres:${password}@[not-a-host:5432/mkt`,
+    `postgres://postgres:${password}@/mkt`,
+  ]) {
+    const result = runBackup(dir, { ADMIN_DATABASE_URL: url }, false)
+    assert.notEqual(result.status, 0)
+    const all = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    assert.ok(!all.includes(password), 'the password was printed')
+    assert.match(
+      all,
+      /"event":"backup_refused","reason":"ADMIN_DATABASE_URL is not a valid postgres:\/\/ address with a host, user and database"/,
+    )
+  }
+  assert.deepEqual(listing(dir), [])
+})
 
 test('ops alert raises one severity 1 platform alert for a failed backup', { timeout: 5 * 60_000 }, () => {
   const first = lastJson(compose(['run', '--rm', '-T', 'ops', 'alert', 'backup_failed']))
@@ -708,9 +788,10 @@ test('the timer runs the backup daily at 21:00 UTC (02:30 IST); a failure runs t
   assert.match(service, /^Type=oneshot$/m)
   const run =
     '/usr/bin/docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T'
-  const execStart = (text) => text.match(/^ExecStart=(.*)$/m)?.[1]
-  assert.equal(execStart(service), `${run} backup`)
+  const execStart = (text) => [...text.matchAll(/^ExecStart=(.*)$/gm)].map((m) => m[1])
+  // The backup, then (only if it succeeded) the off-server copy; either failing fails the unit.
+  assert.deepEqual(execStart(service), [`${run} backup`, `${run} offsite`])
   const alert = unit('mkt-backup-alert.service')
-  assert.equal(execStart(alert), `${run} ops alert backup_failed`)
+  assert.deepEqual(execStart(alert), [`${run} ops alert backup_failed`])
   for (const text of [service, alert]) assert.match(text, /^WorkingDirectory=\/opt\/mkt\/marketing$/m)
 })

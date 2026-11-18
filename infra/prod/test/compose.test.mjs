@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const composeFile = join(root, 'infra/prod/compose.yaml')
 const examples = join(root, 'infra/prod/secrets.example')
-const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard', 'backup']
+const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard', 'backup', 'offsite']
 const PRODUCT = ['postgres', 'core', 'worker', 'dashboard']
 const GiB = 1024 ** 3
 let secretsDir
@@ -84,12 +84,14 @@ test('the compose file loads with the example env files', () => {
     'backup',
     'core',
     'dashboard',
+    'offsite',
     'ops',
     'postgres',
     'worker',
   ])
   assert.deepEqual(resolved.services.ops.profiles, ['ops'])
   assert.deepEqual(resolved.services.backup.profiles, ['ops'])
+  assert.deepEqual(resolved.services.offsite.profiles, ['ops'])
   // The database lives in the volume mkt_pg (project mkt, volume pg).
   assert.equal(resolved.volumes.pg.name, 'mkt_pg')
   assert.ok(resolved.services.postgres.volumes.some((v) => v.type === 'volume' && v.source === 'pg'))
@@ -164,11 +166,14 @@ test('the worker is not on app', () => {
   assert.deepEqual(Object.keys(services.ops.networks), ['data'])
 })
 
-// The daily backup (Task 8): the ops image with backup.sh as its entry point, root without capabilities, the host
-// folder /opt/mkt/backups at /backups, postgres.env and backup.env, and its own way out for the off-server copy.
-test('the backup service: ops image, root with no capabilities, /opt/mkt/backups, its own egress network', () => {
-  const resolved = config(['ops'])
-  const backup = resolved.services.backup
+const envFileNames = (service) =>
+  (service.env_file ?? []).map((f) => (typeof f === 'string' ? f : f.path).split('/').pop())
+
+// The daily backup (Task 8), split in two (ruling R18). `backup`: the ops image with backup.sh, root without
+// capabilities, the host folder /opt/mkt/backups at /backups, the database's credentials, and the data network
+// only. `offsite`: offsite.sh, /backups read-only, only the remote's settings, and backup_egress only.
+test('the backup service: ops image, root with no capabilities, /opt/mkt/backups, on data only', () => {
+  const backup = config(['ops']).services.backup
   assert.equal(backup.build.target, 'ops')
   assert.deepEqual(backup.entrypoint, ['/usr/local/bin/mkt-backup'])
   assert.equal(backup.user, '0:0')
@@ -179,30 +184,74 @@ test('the backup service: ops image, root with no capabilities, /opt/mkt/backups
     backup.volumes.map((v) => `${v.type} ${v.source} ${v.target} ${v.read_only === true}`),
     ['bind /opt/mkt/backups /backups false'],
   )
+  assert.deepEqual(envFileNames(backup), ['postgres.env', 'backup.env'])
+  // backup.env may be absent (a new installation); backup.sh then refuses, naming BACKUP_AGE_RECIPIENT.
   assert.deepEqual(
-    (backup.env_file ?? []).map((f) => (typeof f === 'string' ? f : f.path).split('/').pop()),
-    ['postgres.env', 'backup.env'],
+    backup.env_file.map((f) => f.required !== false),
+    [true, false],
   )
-  assert.deepEqual(Object.keys(backup.networks).sort(), ['backup_egress', 'data'])
+  assert.deepEqual(Object.keys(backup.networks), ['data'])
   assert.equal(backup.depends_on?.postgres?.condition, 'service_healthy')
-  // backup_egress: the backup's alone, an ordinary bridge (not internal), IPv4 only.
+})
+
+test('the offsite service: /backups read-only, the remote settings only, on backup_egress only', () => {
+  const resolved = config(['ops'])
+  const offsite = resolved.services.offsite
+  assert.equal(offsite.build.target, 'ops')
+  assert.deepEqual(offsite.entrypoint, ['/usr/local/bin/mkt-offsite'])
+  assert.equal(offsite.user, '0:0')
+  assert.deepEqual(offsite.cap_drop, ['ALL'])
+  assert.deepEqual(offsite.security_opt, ['no-new-privileges:true'])
+  assert.deepEqual(
+    offsite.volumes.map((v) => `${v.type} ${v.source} ${v.target} ${v.read_only === true}`),
+    ['bind /opt/mkt/backups /backups true'],
+  )
+  assert.deepEqual(envFileNames(offsite), ['offsite.env'])
+  assert.equal(offsite.env_file[0].required, false)
+  assert.deepEqual(Object.keys(offsite.networks), ['backup_egress'])
+  assert.equal(offsite.depends_on, undefined)
+  // No database setting in its environment or its env file.
+  for (const key of Object.keys(offsite.environment ?? {}))
+    assert.doesNotMatch(key, /DATABASE|POSTGRES|^PG/, key)
+  const example = readFileSync(join(examples, 'offsite.env.example'), 'utf8')
+  assert.doesNotMatch(example, /^\s*#?\s*(ADMIN_DATABASE_URL|POSTGRES_\w*|PG\w*)=/m)
+  // backup_egress: the offsite service's alone, an ordinary bridge (not internal), IPv4 only.
   const egress = resolved.networks.backup_egress
   assert.equal(egress.driver, 'bridge')
   assert.notEqual(egress.internal, true)
   assert.equal(egress.enable_ipv6, false)
   for (const [name, service] of Object.entries(resolved.services)) {
-    if (name !== 'backup') assert.ok(!Object.keys(service.networks ?? {}).includes('backup_egress'), name)
+    if (name !== 'offsite') assert.ok(!Object.keys(service.networks ?? {}).includes('backup_egress'), name)
   }
-  // The Dockerfile puts both scripts in the ops image under the names compose and the runbook use.
+  // The Dockerfile puts the three scripts in the ops image under the names compose and the runbook use.
   const dockerfile = readFileSync(join(root, 'infra/prod/Dockerfile'), 'utf8')
-  assert.match(
-    dockerfile,
-    /^COPY --chmod=0755 infra\/prod\/backup\/backup\.sh \/usr\/local\/bin\/mkt-backup$/m,
-  )
-  assert.match(
-    dockerfile,
-    /^COPY --chmod=0755 infra\/prod\/backup\/restore\.sh \/usr\/local\/bin\/mkt-restore$/m,
-  )
+  for (const [script, name] of [
+    ['backup', 'mkt-backup'],
+    ['restore', 'mkt-restore'],
+    ['offsite', 'mkt-offsite'],
+  ]) {
+    assert.ok(
+      dockerfile.includes(`\nCOPY --chmod=0755 infra/prod/backup/${script}.sh /usr/local/bin/${name}\n`),
+      script,
+    )
+  }
+})
+
+// A new installation runs `ops prepare` before the owner has given the age key or the bucket: backup.env and
+// offsite.env may be absent.
+test('the ops profile loads without backup.env and offsite.env', () => {
+  const fresh = mkdtempSync(join(tmpdir(), 'mkt-compose-fresh-'))
+  try {
+    for (const name of ENV_FILES.filter((n) => n !== 'backup' && n !== 'offsite')) {
+      copyFileSync(join(examples, `${name}.env.example`), join(fresh, `${name}.env`))
+    }
+    const services = JSON.parse(
+      compose(['--profile', 'ops', 'config', '--format', 'json'], { MKT_SECRETS: fresh }),
+    ).services
+    assert.ok(services.ops && services.backup && services.offsite)
+  } finally {
+    rmSync(fresh, { recursive: true, force: true })
+  }
 })
 
 test('published ports bind 127.0.0.1 only', () => {

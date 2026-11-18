@@ -10,18 +10,15 @@
 # Writes into /backups (the host's /opt/mkt/backups, root 0700):
 #   mkt-<UTC timestamp>.dump.age       and  mkt-<ts>.dump.age.sha256
 #   mkt-<UTC timestamp>.roles.sql.age  and  mkt-<ts>.roles.sql.age.sha256
-# then copies the four files off the server with rclone (when RCLONE_REMOTE is set), then keeps the newest 7 sets
-# on the server. Off the server, retention is the remote's own rule (docs/operations.md).
+# then keeps the newest 7 sets on the server. The off-server copy is offsite.sh, in the `offsite` service, which
+# has no database credentials and no route to the database (ruling R18); this service has no route out.
 #
 # Environment (env files, never the command line):
 #   ADMIN_DATABASE_URL    postgres.env: the superuser's address. Split into libpq's PG* variables here, so the
 #                         password is never in a process's arguments.
-#   BACKUP_AGE_RECIPIENT  backup.env: the owner's age public key (age1...).
-#   RCLONE_REMOTE         backup.env, optional until the bucket exists (A4): an rclone remote and path, e.g.
-#                         r2:<bucket>/mkt, configured by RCLONE_CONFIG_<NAME>_* variables. Unset: no copy, and the
-#                         run says so. Set: a failed copy fails the run.
+#   BACKUP_AGE_RECIPIENT  backup.env: the owner's age public key (age1...). Missing or blank: refused.
 #
-# Exits non-zero on any failed step, on a database dump under 1 kB, and on a failed off-server copy. Each outcome
+# Exits non-zero on any failed step and on a database dump under 1 kB. Each outcome
 # is one JSON line; a failure names its step and exit code only. The tools' own messages are not printed (they can
 # carry addresses or data); run the step by hand to see one.
 set -euo pipefail
@@ -56,19 +53,30 @@ refuse() {
 case "$ADMIN_DATABASE_URL" in *CHANGE_ME*) refuse 'ADMIN_DATABASE_URL still contains CHANGE_ME' ;; esac
 case "${BACKUP_AGE_RECIPIENT:-}" in
   age1*) ;;
+  '') refuse 'BACKUP_AGE_RECIPIENT is not set: the owner age public key (age1...) goes in backup.env' ;;
   *) refuse 'BACKUP_AGE_RECIPIENT is not an age public key (age1...)' ;;
 esac
 
-# libpq reads these; the address itself is not passed to any program.
+# libpq reads these; the address itself is not passed to any program. The parts come back through a pipe, never a
+# file. Any failure of the parse (a malformed address makes URL() throw, and Node would print the address with
+# its password in the error) is caught: nothing is printed, and the script refuses with a fixed reason.
 STEP=connection
-node -e '
-  const u = new URL(process.env.ADMIN_DATABASE_URL)
-  const d = decodeURIComponent
-  process.stdout.write([u.hostname, u.port || "5432", d(u.username), d(u.pathname.slice(1)), d(u.password)].join("\n") + "\n")
-' >"$WORK/conn"
-{ IFS= read -r PGHOST; IFS= read -r PGPORT; IFS= read -r PGUSER; IFS= read -r PGDATABASE; IFS= read -r PGPASSWORD; } <"$WORK/conn"
-rm -f "$WORK/conn"
-[ -n "$PGHOST" ] && [ -n "$PGUSER" ] && [ -n "$PGDATABASE" ] || refuse 'ADMIN_DATABASE_URL lacks a host, user or database'
+BAD_URL='ADMIN_DATABASE_URL is not a valid postgres:// address with a host, user and database'
+mapfile -t CONN < <(node -e '
+  try {
+    const u = new URL(process.env.ADMIN_DATABASE_URL)
+    const d = decodeURIComponent
+    const parts = [u.hostname, u.port || "5432", d(u.username), d(u.pathname.slice(1)), d(u.password)]
+    if (!/^postgres(ql)?:$/.test(u.protocol) || !parts[0] || !parts[2] || !parts[3]) process.exit(3)
+    if (parts.some((p) => p.includes("\n"))) process.exit(3)
+    process.stdout.write(parts.join("\n") + "\n")
+  } catch {
+    process.exit(3)
+  }
+' 2>/dev/null || true)
+[ "${#CONN[@]}" -eq 5 ] || refuse "$BAD_URL"
+PGHOST=${CONN[0]} PGPORT=${CONN[1]} PGUSER=${CONN[2]} PGDATABASE=${CONN[3]} PGPASSWORD=${CONN[4]}
+unset CONN
 export PGHOST PGPORT PGUSER PGDATABASE PGPASSWORD
 unset ADMIN_DATABASE_URL
 
@@ -107,18 +115,6 @@ mv "$DIR/.$ROLES.part" "$DIR/$ROLES"
 # The set is whole: from here on a failure keeps it.
 PARTIAL=()
 
-STEP=offsite
-if [ -n "${RCLONE_REMOTE:-}" ]; then
-  for f in "$DUMP" "$DUMP.sha256" "$ROLES" "$ROLES.sha256"; do
-    rclone copyto --immutable "$DIR/$f" "${RCLONE_REMOTE%/}/$f" >/dev/null 2>&1
-  done
-  OFFSITE=copied
-  printf '{"event":"offsite_copied","name":"%s"}\n' "$NAME"
-else
-  OFFSITE=skipped
-  printf '{"event":"offsite_skipped","reason":"RCLONE_REMOTE is not set"}\n'
-fi
-
 # The newest $KEEP sets stay on the server; older ones go, all four files of each. Only names this script writes
 # are touched.
 STEP=retention
@@ -132,5 +128,4 @@ for old in "${SETS[@]:KEEP}"; do
 done
 
 STEP=done
-printf '{"event":"backup_done","name":"%s","dump_bytes":%d,"offsite":"%s","removed":%d}\n' \
-  "$NAME" "$BYTES" "$OFFSITE" "$REMOVED"
+printf '{"event":"backup_done","name":"%s","dump_bytes":%d,"removed":%d}\n' "$NAME" "$BYTES" "$REMOVED"

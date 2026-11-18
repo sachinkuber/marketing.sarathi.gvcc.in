@@ -13,7 +13,7 @@ Files this runbook uses:
 | `infra/prod/proxy/cloudflare-ips.txt` | Cloudflare's address ranges, dated: the only peers the proxy believes |
 | `infra/prod/smoke.mjs` | The smoke check of a deployed origin |
 | `infra/prod/firewall/mkt-egress.sh`, `mkt-egress.service` | The worker's egress firewall and the unit that installs it before Docker starts |
-| `infra/prod/backup/backup.sh`, `restore.sh` | The daily encrypted backup and its restore, run in the `backup` service (ops image) |
+| `infra/prod/backup/backup.sh`, `restore.sh`, `offsite.sh` | The daily encrypted backup and its restore (the `backup` service), and the off-server copy (the `offsite` service); both services use the ops image |
 | `infra/prod/backup/mkt-backup.service`, `.timer`, `mkt-backup-alert.service` | The host units: the daily run at 02:30 IST and the alert on its failure |
 
 ## Hosts
@@ -111,7 +111,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
    ```sh
    install -d -m 0700 -o root -g root /opt/mkt /opt/mkt/secrets
    cd /opt/mkt/marketing
-   for f in postgres roles core worker dashboard backup; do
+   for f in postgres roles core worker dashboard backup offsite; do
      install -m 0600 -o root -g root infra/prod/secrets.example/$f.env.example /opt/mkt/secrets/$f.env
    done
    install -m 0600 -o root -g root infra/prod/compose.env.example /opt/mkt/compose.env
@@ -119,12 +119,12 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
    `/opt/mkt/compose.env` holds no secret; its defaults are right unless "Worker egress firewall", "Settings" below says otherwise.
 
-   Then edit each file and replace every `CHANGE_ME` with its own `openssl rand -hex 32` (hex keeps database URLs valid): the superuser password (twice in `postgres.env`), the four role passwords (`roles.env`, and the same four in the URLs of `core.env` and `worker.env`), and `AUTH_SECRET`, `WORKER_SECRET` (the same in `core.env` and `worker.env`), `ATTEMPT_TOKEN_SECRET` and `TRIGGER_SECRET`. `ANTHROPIC_API_KEY` is the provider's key (A3). `BACKUP_AGE_RECIPIENT` in `backup.env` is not generated here: it is the owner's age public key ("Backups" below). Check: `ls -l /opt/mkt/secrets` shows `-rw------- root root` for every file, and `grep -l CHANGE_ME /opt/mkt/secrets/*.env` prints nothing (the core and the worker refuse to start otherwise). Leave `MKT_SECRETS` unset: it exists only for the tests, and unset the stack reads `/opt/mkt/secrets`.
+   Then edit each file and replace every `CHANGE_ME` with its own `openssl rand -hex 32` (hex keeps database URLs valid): the superuser password (twice in `postgres.env`), the four role passwords (`roles.env`, and the same four in the URLs of `core.env` and `worker.env`), and `AUTH_SECRET`, `WORKER_SECRET` (the same in `core.env` and `worker.env`), `ATTEMPT_TOKEN_SECRET` and `TRIGGER_SECRET`. `ANTHROPIC_API_KEY` is the provider's key (A3). `backup.env` and `offsite.env` stay as installed for now (blank values, no `CHANGE_ME`): the owner's age public key and the bucket come later ("Backups" below), and nothing else needs them. Check: `ls -l /opt/mkt/secrets` shows `-rw------- root root` for every file, and `grep -l CHANGE_ME /opt/mkt/secrets/*.env` prints nothing (the core and the worker refuse to start otherwise). Leave `MKT_SECRETS` unset: it exists only for the tests, and unset the stack reads `/opt/mkt/secrets`.
 
 2. **Build**, the `ops` image included (without `--profile ops` it is not rebuilt, and step 3 would run the old migrations). One image at a time on a shared host:
 
    ```sh
-   for s in core worker dashboard ops backup; do docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops build "$s"; done
+   for s in core worker dashboard ops backup offsite; do docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops build "$s"; done
    ```
 
 3. **Prepare** the database (migrations, run-time role passwords, the queue): `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm ops prepare`. Its last line is JSON with `"event":"prepared"`.
@@ -269,17 +269,19 @@ Plan decision 6. Every night at 02:30 IST (21:00 UTC) `mkt-backup.timer` starts 
 | `mkt-<UTC timestamp>.dump.age`, `.dump.age.sha256` | The database, encrypted, and its checksum |
 | `mkt-<UTC timestamp>.roles.sql.age`, `.roles.sql.age.sha256` | The roles, without passwords, encrypted, and its checksum |
 
-Then it copies the four files off the server with `rclone` (when `RCLONE_REMOTE` is set), and keeps the newest **7** sets on the server, removing older sets whole. It exits non-zero on any failed step, on a dump under 1 kB, and on a failed off-server copy; a failed run removes its own partial files (a set that is complete is kept even if the copy then fails). Its log is one JSON line per outcome in `journalctl -u mkt-backup.service`: `backup_done` (name, dump size, `offsite` copied or skipped, sets removed), `offsite_skipped` while `RCLONE_REMOTE` is blank, `backup_refused` (a setting is missing), and `backup_failed` with the step (`settings`, `connection`, `folder`, `pg_dump`, `dump_size`, `pg_dumpall`, `checksum`, `offsite`, `retention`) and exit code. The tools' own messages are not logged, since they can carry addresses or data; to see one, run that step by hand in the backup container.
+Then it keeps the newest **7** sets on the server, removing older sets whole. It exits non-zero on any failed step and on a dump under 1 kB; a failed run removes its own partial files. Its log is one JSON line per outcome in `journalctl -u mkt-backup.service`: `backup_done` (name, dump size, sets removed), `backup_refused` (a setting is missing or malformed: `BACKUP_AGE_RECIPIENT` blank, `ADMIN_DATABASE_URL` not a valid address; the address itself is never printed), and `backup_failed` with the step (`settings`, `connection`, `folder`, `pg_dump`, `dump_size`, `pg_dumpall`, `checksum`, `retention`) and exit code. The tools' own messages are not logged, since they can carry addresses or data; to see one, run that step by hand in the backup container.
 
-On a failure, systemd starts `mkt-backup-alert.service` (`OnFailure=`), which runs `ops alert backup_failed`: a **severity 1** platform alert, written with `app.raise_alert` (the function the core's `raiseAlert` uses) through the superuser's address in `postgres.env`, so no secret is on a command line. The core delivers it to every platform owner by email and on the second channel at its next notify run (the worker timer's `/worker/reconcile`, every `RECONCILE_INTERVAL_SECONDS`). While that alert is unresolved, another failure adds no second one. If the database itself is down, the alert unit fails too; `systemctl --failed` then lists both units.
+When the backup succeeded, the same unit runs `infra/prod/backup/offsite.sh` in the `offsite` service: the off-server copy (ruling R18 splits it from the backup). It copies the newest complete set in `/opt/mkt/backups` (four files, both checksums holding) to `<RCLONE_REMOTE>/daily/`, and to `<RCLONE_REMOTE>/monthly/` when that prefix has no set of the set's month yet. It logs `offsite_copied` (name, and whether the monthly copy was made), `offsite_skipped` while `RCLONE_REMOTE` is blank (the run succeeds), or `offsite_failed` with the step (`find_set`: no complete set; `daily`; `monthly`) and exit code; a failure fails the unit.
 
-The backup's network: `data` for postgres, and its own `backup_egress` for the off-server copy. The host firewall restricts only the worker's bridge (`mkt-egress0`), so `backup_egress` is unrestricted outbound, used for a few minutes a day by a container that serves nothing. It is not the worker's network, and the worker cannot use it.
+On a failure of either, systemd starts `mkt-backup-alert.service` (`OnFailure=`), which runs `ops alert backup_failed`: a **severity 1** platform alert, written with `app.raise_alert` (the function the core's `raiseAlert` uses) through the superuser's address in `postgres.env`, so no secret is on a command line. The core delivers it to every platform owner by email and on the second channel at its next notify run (the worker timer's `/worker/reconcile`, every `RECONCILE_INTERVAL_SECONDS`). While that alert is unresolved, another failure adds no second one. If the database itself is down, the alert unit fails too; `systemctl --failed` then lists both units.
+
+The two services are split by what they hold. `backup` has the database's credentials (`postgres.env`) and the age public key (`backup.env`), writes `/opt/mkt/backups`, and is on `data` only: no way out. `offsite` sees `/opt/mkt/backups` read-only, holds only the remote's settings (`offsite.env`, no database setting), and is on its own `backup_egress` only: it cannot reach postgres. The host firewall restricts only the worker's bridge (`mkt-egress0`), so `backup_egress` is unrestricted outbound, used for a few minutes a day by a container that serves nothing and holds only encrypted files. **Pending the owner's decision:** whether to restrict it to the bucket's endpoint as the worker's is restricted.
 
 ### Install
 
 On the production host, as root, after the first deployment. Not on the staging host (ruling R11), and nothing here touches the staging host's own `gvcc-backup` unit.
 
-1. **The owner's key pair**, made by the owner on the owner's own machine, never on the server: `age-keygen -o mkt-backup-identity.txt`. The file is the private key: keep it off the server, in two places. Its `# public key: age1...` line is the recipient: put that value in `/opt/mkt/secrets/backup.env` as `BACKUP_AGE_RECIPIENT` (installed in "First deployment", step 1).
+1. **The owner's key pair**, made by the owner on the owner's own machine, never on the server: `age-keygen -o mkt-backup-identity.txt`. The file is the private key: keep it off the server, in two places. Its `# public key: age1...` line is the recipient: put that value in `/opt/mkt/secrets/backup.env` as `BACKUP_AGE_RECIPIENT` (installed in "First deployment", step 1). Until it is there, the backup refuses (`backup_refused`, naming the variable) and the alert is raised.
 2. **The folder and the units:**
 
    ```sh
@@ -292,22 +294,22 @@ On the production host, as root, after the first deployment. Not on the staging 
    systemctl enable --now mkt-backup.timer
    ```
 
-3. **Run it once by hand** and check: `systemctl start mkt-backup.service` (it waits for the run), then `journalctl -u mkt-backup.service -n 5 -o cat` ends with `"event":"backup_done"`, `ls -l /opt/mkt/backups` shows the four files `-rw------- root root`, and `systemctl list-timers mkt-backup.timer` shows the next run at 21:00 UTC.
+3. **Run it once by hand** and check: `systemctl start mkt-backup.service` (it waits for the run), then `journalctl -u mkt-backup.service -n 5 -o cat` shows `"event":"backup_done"` then `"event":"offsite_copied"` (or `offsite_skipped` before the bucket is set up), `ls -l /opt/mkt/backups` shows the four files `-rw------- root root`, and `systemctl list-timers mkt-backup.timer` shows the next run at 21:00 UTC.
 4. **A restore rehearsal** on a machine where the owner can bring the private key (below, "Restore"), at least once before go-live and after any change to the database's shape.
 
 ### Off-server copy (A4)
 
-Waiting for the owner's bucket. Until then `RCLONE_REMOTE` stays blank and every run logs `offsite_skipped`. When the R2 bucket exists:
+The bucket is `mkt-backups` (R2). Until `offsite.env` is filled in, `RCLONE_REMOTE` stays blank and every run logs `offsite_skipped`. To set it up:
 
-1. In `/opt/mkt/secrets/backup.env`, uncomment the `RCLONE_CONFIG_R2_*` lines and fill them in with an access key limited to this bucket (write and list only, if R2 allows it), and set `RCLONE_REMOTE=r2:<bucket>/mkt/daily`.
-2. Check the remote from the backup container: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T --no-deps --entrypoint rclone backup lsf r2:<bucket>/mkt/daily`. Then `systemctl start mkt-backup.service` logs `offsite_copied`, and the same `lsf` lists the four files. From then on a failed copy fails the run and raises the alert.
-3. **Retention off the server: 30 daily and 12 monthly.** On the server the script keeps 7; off it, the bucket keeps them. Two prefixes, each with an R2 lifecycle rule (Cloudflare dashboard, R2, the bucket, Settings, Object lifecycle rules): `mkt/daily/` deletes objects 30 days after upload, and `mkt/monthly/` deletes them 365 days after upload. On the first day of each month, the day's set is copied to the monthly prefix, server side: `rclone copy --immutable r2:<bucket>/mkt/daily r2:<bucket>/mkt/monthly --include "mkt-$(date -u +%Y%m01)T*"` (run in the backup container, as in step 2). That copy is a manual step until it is automated with the bucket in place; it is an open item of this task.
+1. In `/opt/mkt/secrets/offsite.env`, set `RCLONE_REMOTE=r2:mkt-backups/mkt` and uncomment and fill in the `RCLONE_CONFIG_R2_*` lines with an access key scoped to the backup bucket(s) with Object Read & Write. Read is needed as well as write: `rclone copyto --immutable` reads each object (HEAD) before writing it, and never overwrites one that differs.
+2. Check the remote from the offsite container: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T --entrypoint rclone offsite lsf r2:mkt-backups/mkt/daily`. Then `systemctl start mkt-backup.service` logs `offsite_copied`, and the same `lsf` lists the four files (the first run of a month also fills `mkt/monthly/`). From then on a failed copy fails the run and raises the alert.
+3. **Retention off the server: 30 daily and 12 monthly.** On the server the backup keeps 7; off it, the bucket's lifecycle rules do (Cloudflare dashboard, R2, `mkt-backups`, Settings, Object lifecycle rules): prefix `mkt/daily/` deletes objects 30 days after upload, prefix `mkt/monthly/` deletes them 365 days after upload. `offsite.sh` puts one set a month in `mkt/monthly/`: the first complete set it copies in a month (by the set's UTC timestamp) for which `mkt/monthly/` has none yet, so a missed day is caught up by the next run.
 
 ### Restore
 
 Into an **empty** database only: `restore.sh` refuses a target that has any table in schema `app`. It checks the `.sha256` files when they are beside the backups, creates the roles that are missing (the dump has no passwords), then restores the dump in one transaction that stops at the first error. The target's address names the superuser and no password (an address with a password is refused); the password comes from `PGPASSWORD`.
 
-For a whole-server restore: deploy steps 1 and 2 of "First deployment" on the new host, with a new, empty volume, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d --wait postgres`. Bring the set into `/opt/mkt/backups` (from the bucket: `rclone copy r2:<bucket>/mkt/daily /backups --include "mkt-<ts>.*"` in the backup container). Then, as root:
+For a whole-server restore: deploy steps 1 and 2 of "First deployment" on the new host, with a new, empty volume, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d --wait postgres`. Bring the set into `/opt/mkt/backups`: from the bucket, through the offsite container (its `/backups` is read-only, so into a second folder first): `install -d -m 0700 /opt/mkt/restore-in`, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T -v /opt/mkt/restore-in:/in --entrypoint rclone offsite copy r2:mkt-backups/mkt/daily /in --include "mkt-<ts>.*"`, then `mv /opt/mkt/restore-in/* /opt/mkt/backups/`. Then, as root:
 
 ```sh
 C='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml'
@@ -323,4 +325,4 @@ $C --profile ops run --rm ops prepare      # gives the run-time roles their pass
 
 The last line of the restore is `"event":"restored"`. Then continue with step 4 of "First deployment" (firewall, start) and the smoke check. The audit chains are checked by the next daily `audit_verify` duty; to check at once, compare the restored database's row counts with the old one's if it still exists.
 
-`infra/prod/test/backup.test.mjs` rehearses all of this on throw-away containers (project `mkt-m7test-bk`): a backup restored into a clean postgres has the same row counts in `app`, `auth`, `audit` and `pgboss`, its audit chains verify with the core's `verifyAudit`, also for a backup taken while 50 audit entries are being written; a read-only folder fails the run; a target with `app` tables is refused; the files do not open with another key; 7 sets are kept; and the off-server copy and the alert command work.
+`infra/prod/test/backup.test.mjs` rehearses all of this on throw-away containers (project `mkt-m7test-bk`): a backup restored into a clean postgres has the same row counts in `app`, `auth`, `audit` and `pgboss`, its audit chains verify with the core's `verifyAudit`, also for a backup taken while 50 audit entries are being written; a read-only folder fails the run; a target with `app` tables is refused; the files do not open with another key; 7 sets are kept; a malformed `ADMIN_DATABASE_URL` fails without its password reaching the log; the offsite service copies the newest complete set to `daily/` and once a month to `monthly/`, fails with no complete set or a bad remote, and can neither write the backups nor reach the database; and the alert command works.

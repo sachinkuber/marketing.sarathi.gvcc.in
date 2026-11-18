@@ -133,6 +133,7 @@ COPY apps/ops apps/ops
 # The backup and restore scripts (Task 8), run by the `backup` service of compose.yaml.
 COPY --chmod=0755 infra/prod/backup/backup.sh /usr/local/bin/mkt-backup
 COPY --chmod=0755 infra/prod/backup/restore.sh /usr/local/bin/mkt-restore
+COPY --chmod=0755 infra/prod/backup/offsite.sh /usr/local/bin/mkt-offsite
 USER node
 ENTRYPOINT ["node", "apps/ops/src/main.ts"]
 CMD ["prepare"]
