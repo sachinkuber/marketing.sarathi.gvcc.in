@@ -121,7 +121,11 @@ describe('production refusals', () => {
 describe('the maintenance interval', () => {
   // The core reports the worker stale after 900 s without a beat; 450 s leaves room for one missed tick.
   it('accepts up to 450 seconds', () => {
-    const config = loadWorkerConfig({ ...base, ANTHROPIC_API_KEY: SECRET_KEY, RECONCILE_INTERVAL_SECONDS: '450' })
+    const config = loadWorkerConfig({
+      ...base,
+      ANTHROPIC_API_KEY: SECRET_KEY,
+      RECONCILE_INTERVAL_SECONDS: '450',
+    })
     expect(config.reconcileIntervalSeconds).toBe(450)
   })
 
