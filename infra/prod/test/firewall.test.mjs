@@ -123,16 +123,20 @@ test('the systemd unit runs the install before Docker starts', () => {
   assert.match(unit, /^WantedBy=.*docker\.service/m)
 })
 
-test('no resolver found (only the 127.0.0.53 stub) and MKT_EGRESS_DNS unset: install fails and adds nothing', () => {
+test('no resolver found (only the 127.0.0.53 stub): install still hooks a chain with no DNS rule, and fails', () => {
   const out = dryRun(['install'], { resolv: 'nameserver 127.0.0.53\n' })
   assert.notEqual(out.status, 0)
   assert.match(out.stderr, /no DNS resolver/)
   assert.match(out.stderr, /MKT_EGRESS_DNS/)
-  assert.equal(rules(out.stdout).length, 0)
+  const all = rules(out.stdout)
+  assert.ok(!all.some((l) => /--dport 53/.test(l)), all.join('\n'))
+  assert.ok(all.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'))
+  assert.ok(all.includes('iptables -A MKT-EGRESS-A -d 10.0.0.0/8 -j DROP'))
+  assert.equal(all.filter((l) => / -A MKT-EGRESS-A /.test(l)).at(-1), 'iptables -A MKT-EGRESS-A -j DROP')
   // An empty MKT_EGRESS_DNS names no resolver either.
   const empty = dryRun(['install'], {}, { MKT_EGRESS_DNS: '' })
   assert.notEqual(empty.status, 0)
-  assert.equal(rules(empty.stdout).length, 0)
+  assert.ok(!rules(empty.stdout).some((l) => /--dport 53/.test(l)))
 })
 
 test('MKT_EGRESS_BRIDGE names another bridge', () => {
@@ -157,6 +161,7 @@ function stubbed(args, { dockerUser = [], chains = {}, extra = {}, fresh = false
     join(bin, 'iptables'),
     `#!/bin/bash
 echo "iptables $*" >> "${join(state, 'log')}"
+if [ -n "$STUB_FAIL_ON" ] && [[ "$*" == *"$STUB_FAIL_ON"* ]]; then exit 1; fi
 S="${state}"
 case "$1" in
   -n) [ -f "$S/$3" ]; exit ;;
@@ -212,6 +217,63 @@ test('the first install on a fresh host (no DOCKER-USER chain yet) creates it an
   const at = (line) => out.log.indexOf(line)
   assert.ok(at('iptables -N DOCKER-USER') >= 0, out.log.join('\n'))
   assert.ok(at('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A') > at('iptables -N MKT-EGRESS-A'))
+})
+
+// Calls that change something (everything but -S, -L, -C).
+const changes = (log) => log.filter((l) => !/^iptables (-S|-n -L|-C) /.test(l))
+
+test('fresh host, no resolver: fails closed (a hooked chain that drops DNS and private ranges) and exits 1', () => {
+  const out = stubbed(['install'], { fresh: true, extra: { MKT_EGRESS_DNS: '' } })
+  assert.notEqual(out.status, 0)
+  assert.match(out.stderr, /no DNS resolver/)
+  const log = out.log
+  assert.ok(!log.some((l) => /--dport 53/.test(l)), log.join('\n'))
+  assert.ok(log.includes('iptables -A MKT-EGRESS-A -d 10.0.0.0/8 -j DROP'))
+  assert.ok(log.includes('iptables -A MKT-EGRESS-A -j DROP'))
+  assert.ok(
+    log.indexOf('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A') >
+      log.indexOf('iptables -A MKT-EGRESS-A -j DROP'),
+  )
+})
+
+test('existing good chain, no resolver: the chain is left exactly as it is, and install exits 1', () => {
+  const out = stubbed(['install'], {
+    dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
+    chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
+    extra: { MKT_EGRESS_DNS: '' },
+  })
+  assert.notEqual(out.status, 0)
+  assert.match(out.stderr, /left in place/)
+  assert.deepEqual(changes(out.log), [])
+})
+
+test('a failure while building on a fresh host leaves the bridge dropped, not open', () => {
+  const out = stubbed(['install'], { fresh: true, extra: { STUB_FAIL_ON: '--dport 443' } })
+  assert.notEqual(out.status, 0)
+  assert.ok(out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j DROP'), out.log.join('\n'))
+  assert.ok(!out.log.includes('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'))
+  assert.match(out.stderr, /dropped/)
+})
+
+test('a failure while building beside a good chain leaves the good chain hooked and adds nothing to DOCKER-USER', () => {
+  const out = stubbed(['install'], {
+    dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j MKT-EGRESS-B'],
+    chains: { 'MKT-EGRESS-B': GOOD_CHAIN },
+    extra: { STUB_FAIL_ON: '--dport 443' },
+  })
+  assert.notEqual(out.status, 0)
+  assert.ok(!out.log.some((l) => /^iptables (-I|-D) DOCKER-USER/.test(l)), out.log.join('\n'))
+  assert.ok(!out.log.includes('iptables -X MKT-EGRESS-B'))
+})
+
+test('a successful install removes an emergency DROP left by a failed one', () => {
+  const out = stubbed(['install'], { dockerUser: ['-A DOCKER-USER -i mkt-egress0 -j DROP'] })
+  assert.equal(out.status, 0, out.stderr)
+  const log = out.log
+  assert.ok(
+    log.indexOf('iptables -D DOCKER-USER -i mkt-egress0 -j DROP') >
+      log.indexOf('iptables -I DOCKER-USER 1 -i mkt-egress0 -j MKT-EGRESS-A'),
+  )
 })
 
 const GOOD_CHAIN = [

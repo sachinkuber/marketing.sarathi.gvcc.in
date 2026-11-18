@@ -202,6 +202,46 @@ test('worker_egress has a fixed bridge name, the firewall script uses it, a fixe
   )
 })
 
+// infra/prod/compose.env.example, copied to /opt/mkt/compose.env: read by compose (--env-file), by the firewall
+// unit (systemd EnvironmentFile=) and by a shell. Its values are the defaults of compose.yaml and mkt-egress.sh,
+// and no value line carries a trailing comment (systemd would keep it as part of the value).
+test('compose.env.example holds the compose and firewall defaults, in a form all three readers accept', () => {
+  const exampleFile = join(root, 'infra/prod/compose.env.example')
+  const text = readFileSync(exampleFile, 'utf8')
+  const values = {}
+  for (const line of text.split('\n')) {
+    if (line.trim() === '' || /^\s*#/.test(line)) continue
+    const [, key, value] = line.match(/^([A-Z][A-Z0-9_]*)=("[^"#]*"|[^\s"#]+)$/) ?? []
+    assert.ok(key, `not KEY=value, or a trailing comment or space: ${JSON.stringify(line)}`)
+    values[key] = value
+  }
+  const raw = readFileSync(composeFile, 'utf8')
+  const composeDefault = (name) => raw.match(new RegExp(`\\$\\{${name}:-([^}]+)\\}`))?.[1]
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.deepEqual(Object.keys(values).sort(), ['MKT_EGRESS_BRIDGE', 'MKT_EGRESS_SUBNET'])
+  assert.equal(values.MKT_EGRESS_BRIDGE, composeDefault('MKT_EGRESS_BRIDGE'))
+  assert.equal(values.MKT_EGRESS_BRIDGE, script.match(/^BRIDGE=\$\{MKT_EGRESS_BRIDGE:-([^}]+)\}$/m)?.[1])
+  assert.equal(values.MKT_EGRESS_SUBNET, composeDefault('MKT_EGRESS_SUBNET'))
+  // The resolvers are offered as a commented line only.
+  assert.match(text, /^# MKT_EGRESS_DNS="[^"]+"$/m)
+  // Compose reads it as written (the egress variables absent from the environment, so only the file sets them).
+  const env = { ...process.env, MKT_SECRETS: secretsDir }
+  delete env.MKT_EGRESS_BRIDGE
+  delete env.MKT_EGRESS_SUBNET
+  const read = spawnSync(
+    'docker',
+    ['compose', '--env-file', exampleFile, '-f', composeFile, 'config', '--format', 'json'],
+    { encoding: 'utf8', env },
+  )
+  assert.equal(read.status, 0, read.stderr)
+  const viaFile = JSON.parse(read.stdout).networks.worker_egress
+  assert.equal(viaFile.driver_opts['com.docker.network.bridge.name'], 'mkt-egress0')
+  assert.deepEqual(
+    viaFile.ipam.config.map((c) => c.subnet),
+    ['10.247.73.0/24'],
+  )
+})
+
 // infra/prod/compose.proxy-network.yaml, for a proxy that runs in Docker (Task 7). The base file's own tests above
 // stay as they are; this override only adds the core and the dashboard to the proxy's external network.
 test('the proxy-network override adds only core and dashboard to the named external network', () => {

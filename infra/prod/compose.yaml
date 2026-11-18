@@ -1,8 +1,10 @@
 # Production stack (plan, Task 5): postgres, core, worker and dashboard, plus the one-shot `ops` (profile ops).
-# Run from the repository root on the server; the images are built here from infra/prod/Dockerfile:
-#   docker compose -f infra/prod/compose.yaml --profile ops build   (one service at a time on a shared host)
-#   docker compose -f infra/prod/compose.yaml --profile ops run --rm ops prepare   (migrations, roles, queue)
-#   docker compose -f infra/prod/compose.yaml up -d
+# Run from the repository root on the server, always with the settings file /opt/mkt/compose.env (a copy of
+# infra/prod/compose.env.example); the images are built here from infra/prod/Dockerfile:
+#   C='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml'
+#   $C --profile ops build   (one service at a time on a shared host)
+#   $C --profile ops run --rm ops prepare   (migrations, roles, queue)
+#   $C up -d, and last, on every deployment: /opt/mkt/firewall/mkt-egress.sh check
 # `--profile ops` on the build is needed: without it the ops image is not rebuilt, and `run` would use the old one
 # and miss new migrations.
 # Configuration and every secret come from root-owned 0600 env files in /opt/mkt/secrets (MKT_SECRETS moves
@@ -163,9 +165,9 @@ networks:
   data:
     internal: true
   # The firewall (infra/prod/firewall/mkt-egress.sh) matches the bridge name: both read MKT_EGRESS_BRIDGE (default
-  # mkt-egress0, at most 15 characters), kept in /opt/mkt/compose.env and exported before compose runs. The
-  # subnet is fixed so it never moves onto another network's range; set MKT_EGRESS_SUBNET only to avoid a clash
-  # with a range already used on the host.
+  # mkt-egress0, at most 15 characters), kept in /opt/mkt/compose.env (--env-file). The subnet is fixed so it
+  # never moves onto another network's range; set MKT_EGRESS_SUBNET only to avoid a clash with a range already
+  # used on the host.
   # A test stack sets both to its own values (stack.test.mjs), so it can run beside `mkt` (docs/operations.md).
   # IPv6 off: the firewall rules are IPv4 only.
   worker_egress:

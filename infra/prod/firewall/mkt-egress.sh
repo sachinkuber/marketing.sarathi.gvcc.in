@@ -19,7 +19,8 @@
 #   MKT_EGRESS_DNS       "a.b.c.d ..." the resolvers to allow. Unset: read from MKT_EGRESS_RESOLV_CONF (default
 #                        /run/systemd/resolve/resolv.conf, else /etc/resolv.conf), waiting up to
 #                        MKT_EGRESS_DNS_WAIT seconds (default 60) for a resolver to appear there at boot.
-#                        Install fails when no resolver is found: the worker could not resolve anything.
+#                        With no resolver, install fails closed: it keeps a chain already in place, or
+#                        installs one with no DNS rule, and exits 1.
 #   MKT_EGRESS_DRY_RUN=1 print each iptables command instead of running it (infra/prod/test/firewall.test.mjs).
 # A re-run builds the new rules in the other of two chains (MKT-EGRESS-A, MKT-EGRESS-B), points the jump at it,
 # and only then removes the old chain, so the bridge is never left without rules.
@@ -79,14 +80,36 @@ current_chain() {
     sed -n "s/^-A DOCKER-USER -i $BRIDGE -j \(MKT-EGRESS-[AB]\)\$/\1/p" | head -1
 }
 
+# Fail closed. If install stops before the bridge points at a complete chain, and nothing else covers the bridge,
+# everything from it is dropped (the worker gets no way out at all) until an install succeeds. Docker is never
+# stopped for it: other projects on the host are not affected.
+INSTALLED=
+fail_closed() {
+  [ -n "$INSTALLED" ] && return 0
+  dry && return 0
+  if ! { iptables -S DOCKER-USER 2>/dev/null || true; } |
+    grep -qE -- "^-A DOCKER-USER -i $BRIDGE -j (MKT-EGRESS-[AB]|DROP)\$"; then
+    iptables -n -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER || true
+    iptables -I DOCKER-USER 1 -i "$BRIDGE" -j DROP || true
+    echo "mkt-egress: install failed; everything from $BRIDGE is dropped until an install succeeds" >&2
+  fi
+  iptables -C INPUT -i "$BRIDGE" -j DROP 2>/dev/null || iptables -I INPUT 1 -i "$BRIDGE" -j DROP || true
+}
+
 install() {
   check_backend
-  local dns
+  trap fail_closed EXIT
+  # Anything from the bridge to the host's own services; independent of the chain, so first.
+  if dry || ! iptables -C INPUT -i "$BRIDGE" -j DROP 2>/dev/null; then
+    ipt -I INPUT 1 -i "$BRIDGE" -j DROP
+  fi
+  local dns old new
   dns=$(resolvers)
-  [ -n "$dns" ] ||
-    fail "no DNS resolver found (only a loopback stub, or none); set MKT_EGRESS_DNS in /opt/mkt/compose.env to the host's upstream resolvers. Nothing was changed."
-  local old new
   old=$(current_chain)
+  if [ -z "$dns" ] && [ -n "$old" ]; then
+    INSTALLED=1
+    fail "no DNS resolver found (only a loopback stub, or none); the existing rules ($old) are left in place. Set MKT_EGRESS_DNS in /opt/mkt/compose.env to the host's upstream resolvers and run install again."
+  fi
   if [ "$old" = MKT-EGRESS-A ]; then new=MKT-EGRESS-B; else new=MKT-EGRESS-A; fi
   if ! dry; then
     iptables -n -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
@@ -99,7 +122,8 @@ install() {
   fi
   ipt -N "$new"
   ipt -A "$new" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-  # DNS first: cloud resolvers often sit in 10/8 or 169.254/16, which are dropped just below.
+  # DNS first: cloud resolvers often sit in 10/8 or 169.254/16, which are dropped just below. With no resolver
+  # (fail closed) there is no DNS rule: the worker cannot resolve, and everything but 443 stays dropped.
   for resolver in $dns; do
     ipt -A "$new" -d "$resolver/32" -p udp --dport 53 -j RETURN
     ipt -A "$new" -d "$resolver/32" -p tcp --dport 53 -j RETURN
@@ -111,16 +135,18 @@ install() {
   ipt -A "$new" -m addrtype --dst-type LOCAL -j DROP
   ipt -A "$new" -p tcp --dport 443 -j RETURN
   ipt -A "$new" -j DROP
-  # Point the bridge at the new chain, then retire the old one.
+  # Point the bridge at the new chain; from here on it is covered. Then retire the old chain and any emergency
+  # DROP a failed install left.
   ipt -I DOCKER-USER 1 -i "$BRIDGE" -j "$new"
+  INSTALLED=1
   if [ -n "$old" ]; then
     unhook "$old"
     iptables -F "$old"
     iptables -X "$old"
   fi
-  # Anything from the bridge to the host's own services.
-  if dry || ! iptables -C INPUT -i "$BRIDGE" -j DROP 2>/dev/null; then
-    ipt -I INPUT 1 -i "$BRIDGE" -j DROP
+  dry || unhook DROP
+  if [ -z "$dns" ]; then
+    fail "no DNS resolver found (only a loopback stub, or none): installed $new with no DNS rule (fail closed; the worker cannot resolve names). Set MKT_EGRESS_DNS in /opt/mkt/compose.env to the host's upstream resolvers and run install again."
   fi
   echo "mkt-egress: installed $new for $BRIDGE (DNS: $(echo $dns))"
 }

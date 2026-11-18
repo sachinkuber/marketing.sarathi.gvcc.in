@@ -3,7 +3,8 @@
 # proxy is on, under the names mkt-core and mkt-dashboard; the proxy site then names mkt-core:4000 and
 # mkt-dashboard:3000 (infra/prod/proxy/marketing.caddy). Use a network shared by the proxy and this stack only:
 #   docker network create mkt_proxy && docker network connect mkt_proxy caddy   (owner-approved proxy change)
-#   MKT_PROXY_NETWORK=mkt_proxy docker compose -f infra/prod/compose.yaml -f infra/prod/compose.proxy-network.yaml up -d
+#   MKT_PROXY_NETWORK=mkt_proxy docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml \
+#     -f infra/prod/compose.proxy-network.yaml up -d
 # RISK: every container on that network reaches the core directly, around the proxy, and TRUST_PROXY=1 is only a
 # hop count: the core believes one X-Forwarded-For address from whoever connects. On a network other projects'
 # containers share (staging's `web`), any of them could forge addresses and get around the invite and sign-in
