@@ -22,7 +22,8 @@ let secretsDir
 function compose(args, env = {}) {
   const result = spawnSync('docker', ['compose', '-f', composeFile, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, MKT_SECRETS: secretsDir, ...env },
+    // The egress variables unset (empty), so the file's own defaults are what is tested.
+    env: { ...process.env, MKT_SECRETS: secretsDir, MKT_EGRESS_BRIDGE: '', MKT_EGRESS_SUBNET: '', ...env },
   })
   if (result.status !== 0) {
     throw new Error(
@@ -182,8 +183,23 @@ test('worker_egress has a fixed bridge name, the firewall script uses it, a fixe
     egress.ipam?.config?.map((c) => c.subnet),
     ['10.247.73.0/24'],
   )
+  // The firewall script reads the same variable with the same default.
   const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
-  assert.match(script, /^BRIDGE=mkt-egress0$/m)
+  assert.match(script, /^BRIDGE=\$\{MKT_EGRESS_BRIDGE:-mkt-egress0\}$/m)
+  const raw = readFileSync(composeFile, 'utf8')
+  assert.match(raw, /com\.docker\.network\.bridge\.name: \$\{MKT_EGRESS_BRIDGE:-mkt-egress0\}$/m)
+  // Overridden, as the test stack does.
+  const other = JSON.parse(
+    compose(['config', '--format', 'json'], {
+      MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0',
+      MKT_EGRESS_SUBNET: '10.247.74.0/24',
+    }),
+  ).networks.worker_egress
+  assert.equal(other.driver_opts['com.docker.network.bridge.name'], 'mkt-m7t-egress0')
+  assert.deepEqual(
+    other.ipam.config.map((c) => c.subnet),
+    ['10.247.74.0/24'],
+  )
 })
 
 // infra/prod/compose.proxy-network.yaml, for a proxy that runs in Docker (Task 7). The base file's own tests above

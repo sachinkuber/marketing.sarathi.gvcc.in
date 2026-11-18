@@ -16,11 +16,11 @@
 #   worker         core and worker; internal (no route out).
 #   data           postgres, core, worker and ops; internal. Postgres publishes no port.
 #   worker_egress  the worker alone: its way out, for the model provider. An ordinary bridge with a fixed
-#                  bridge name (mkt-egress0) and subnet, so the host firewall (infra/prod/firewall, installed
-#                  before the stack starts) can key on it. Without that firewall it is unrestricted outbound. With
-#                  it: TCP 443 to public addresses only, no private range, not the host. That is wider than plan
-#                  decision 3 ("the model provider only"): a deviation awaiting the owner's approval (ruling R15,
-#                  docs/operations.md). The worker reaches the core only on `worker`.
+#                  bridge name (mkt-egress0 by default) and subnet, so the host firewall (infra/prod/firewall,
+#                  installed before the stack starts) can key on it. Without that firewall it is unrestricted
+#                  outbound. With it: TCP 443 to public addresses only, no private range, not the host. That is wider
+#                  than plan decision 3 ("the model provider only"): a deviation awaiting the owner's approval
+#                  (ruling R15, docs/operations.md). The worker reaches the core only on `worker`.
 # Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
 # that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
@@ -162,14 +162,17 @@ networks:
     internal: true
   data:
     internal: true
-  # The firewall (infra/prod/firewall/mkt-egress.sh) matches the bridge name; keep the two equal. The subnet is
-  # fixed so it never moves onto another network's range; change MKT_EGRESS_SUBNET only to avoid a clash with a
-  # range already used on the host (docs/operations.md). IPv6 off: the firewall rules are IPv4 only.
+  # The firewall (infra/prod/firewall/mkt-egress.sh) matches the bridge name: both read MKT_EGRESS_BRIDGE (default
+  # mkt-egress0, at most 15 characters), kept in /opt/mkt/compose.env and exported before compose runs. The
+  # subnet is fixed so it never moves onto another network's range; set MKT_EGRESS_SUBNET only to avoid a clash
+  # with a range already used on the host.
+  # A test stack sets both to its own values (stack.test.mjs), so it can run beside `mkt` (docs/operations.md).
+  # IPv6 off: the firewall rules are IPv4 only.
   worker_egress:
     driver: bridge
     enable_ipv6: false
     driver_opts:
-      com.docker.network.bridge.name: mkt-egress0
+      com.docker.network.bridge.name: ${MKT_EGRESS_BRIDGE:-mkt-egress0}
     ipam:
       config:
         - subnet: ${MKT_EGRESS_SUBNET:-10.247.73.0/24}

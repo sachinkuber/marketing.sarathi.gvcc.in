@@ -102,7 +102,7 @@ Cloudflare changes its ranges rarely and announces it. To refresh: fetch `https:
 
 ## First deployment
 
-On the production host, as root, from a checkout of the release (`/opt/mkt/marketing`). Steps 1 to 4 are the order of every later deployment too (the firewall is already in place then) (migrations, then the queue, then core, worker and dashboard; the core and the worker always together).
+On the production host, as root, from a checkout of the release (`/opt/mkt/marketing`). Steps 2 to 4 are the order of every later deployment too: migrations, then the queue, then core, worker and dashboard, with the core and the worker always together. By then the firewall from step 4 is already in place. Export `/opt/mkt/compose.env` first if it exists (see "Worker egress firewall").
 
 1. **Folders and secrets.** Every value is generated on the host with `openssl rand` and goes only into these files, never onto a command line that is logged, into the repository or an image:
 
@@ -155,14 +155,31 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 ## Worker egress firewall
 
-The worker's only way out is the network `mkt_worker_egress`, an ordinary bridge (ruling R9). Compose gives it a fixed bridge name, `mkt-egress0`, a fixed subnet, `10.247.73.0/24`, and no IPv6. `infra/prod/firewall/mkt-egress.sh` limits traffic from that bridge to:
+The worker's only way out is the network `mkt_worker_egress`, an ordinary bridge (ruling R9). Compose gives it a fixed bridge name (`mkt-egress0`), a fixed subnet (`10.247.73.0/24`) and no IPv6. `infra/prod/firewall/mkt-egress.sh` limits traffic from that bridge to:
 
 - replies to connections already made;
-- DNS (UDP and TCP 53) to the host's resolvers only, read from `/run/systemd/resolve/resolv.conf` or `/etc/resolv.conf` (or named in `MKT_EGRESS_DNS`). These come first, because cloud resolvers often sit in 10/8 or 169.254/16;
+- DNS (UDP and TCP 53) to the host's resolvers only. These come first, because cloud resolvers often sit in 10/8 or 169.254/16;
 - then it drops every private, shared, loopback, link-local, multicast and reserved range, and the host's own addresses (`DOCKER-USER`, plus a DROP in `INPUT` for the host's services);
 - then it allows TCP 443 and drops everything else.
 
 **Deviation awaiting the owner's approval (ruling R15).** Plan decision 3 says the worker reaches "the model provider only". This firewall enforces TCP 443 to any public address, which is wider. It does not try to follow the provider's address ranges. Until the owner accepts this, or asks for a provider-only rule (for example an egress proxy with a host allow-list), the plan's rule is not met.
+
+### Settings: `/opt/mkt/compose.env`
+
+One root-owned file holds the few settings that both compose and the firewall must agree on. Every line is optional; absent, the defaults apply.
+
+```sh
+# /opt/mkt/compose.env (root, 0600)
+MKT_EGRESS_BRIDGE=mkt-egress0        # the egress bridge's name, at most 15 characters
+MKT_EGRESS_SUBNET=10.247.73.0/24     # only if this range is already used on the host or its network
+MKT_EGRESS_DNS="<resolver> <resolver>"   # the host's upstream resolvers, if they cannot be read (below)
+```
+
+The firewall unit reads it (`EnvironmentFile=`). Compose does not: export it in the shell before any `docker compose` command, with `set -a; . /opt/mkt/compose.env; set +a`. If compose and the firewall disagree on the bridge name, `mkt-egress.sh check` says so.
+
+**Resolvers.** Without `MKT_EGRESS_DNS`, the script reads the IPv4 nameservers in `/run/systemd/resolve/resolv.conf`, or in `/etc/resolv.conf` if that file is missing, leaving out loopback (`127.0.0.53` is a stub a container cannot use). At boot the unit runs after the network is online and after `systemd-resolved`, and the script waits up to 60 seconds (`MKT_EGRESS_DNS_WAIT`) for a resolver to appear. If none does, `install` **fails and changes nothing**, rather than install rules under which the worker cannot resolve the provider; `systemctl status mkt-egress` then shows why. Set `MKT_EGRESS_DNS` in `compose.env` on a host whose resolvers cannot be read that way, and whenever they are fixed by hand. Run `systemctl restart mkt-egress.service` after they change.
+
+### Install
 
 The rules are keyed on the bridge's name, not on its subnet, so they can be in place before the network exists. A systemd unit installs them at every boot **before Docker starts**, so the worker never runs unrestricted: Docker restarts the containers as soon as it starts, and it keeps what is in `DOCKER-USER`. On the production host, before the first `up -d`:
 
@@ -174,9 +191,11 @@ systemctl daemon-reload
 systemctl enable --now mkt-egress.service
 ```
 
-The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. Re-run `systemctl restart mkt-egress.service` after the resolvers change. The `iptables` here is whichever variant the host's Docker uses (legacy or nft); `infra/prod/test/firewall.test.mjs` checks the rule order.
+A re-run (a restart of the unit, or a new release of the script) builds the new rules in a second chain (`MKT-EGRESS-A` and `MKT-EGRESS-B` alternate), points the bridge at it, and only then removes the old chain. The bridge is never left without rules.
 
-If `10.247.73.0/24` is already used on the host or its network (`ip route`, `docker network inspect`), set another unused private /24 in `MKT_EGRESS_SUBNET`, in the environment of every `docker compose` command (for example in `/opt/mkt/compose.env`, sourced first). Nothing in the firewall changes, because it matches the bridge name.
+The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. The `iptables` here is whichever variant the host's Docker uses (legacy or nft). `infra/prod/test/firewall.test.mjs` checks the rule order, the swap, the refusal without a resolver, and `check`.
+
+A test stack (`infra/prod/test/stack.test.mjs`, project `mkt-m7test`) uses its own bridge (`mkt-m7t-egress0`) and subnet (`10.247.74.0/24`), so it can run on a host beside `mkt`. It installs no firewall. A hand-run rehearsal should do the same, setting `MKT_EGRESS_BRIDGE` and `MKT_EGRESS_SUBNET` to unused values in its own shell.
 
 ### Check
 

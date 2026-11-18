@@ -24,6 +24,7 @@ const PROJECT = 'mkt-m7test'
 const CORE = 'http://127.0.0.1:4100'
 const OWNER = 'owner@example.test'
 const JOBS = 5
+const TEST_EGRESS = { MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0', MKT_EGRESS_SUBNET: '10.247.74.0/24' }
 
 // Hex keeps every value valid inside a database URL and within the role-password rules.
 const secret = () => randomBytes(32).toString('hex')
@@ -54,7 +55,9 @@ function run(args, options = {}) {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...options,
-    env: { ...process.env, MKT_SECRETS: secretsDir, ...options.env },
+    // Its own egress bridge and subnet, so it can run beside a `mkt` stack on the same host; no firewall is
+    // installed for it.
+    env: { ...process.env, MKT_SECRETS: secretsDir, ...TEST_EGRESS, ...options.env },
   })
   return result
 }
@@ -198,6 +201,14 @@ test(
     // Published on the loopback address only; the data and worker networks have no route out.
     assert.equal(compose(['port', 'core', '4000']).trim(), '127.0.0.1:4100')
     assert.equal(compose(['port', 'dashboard', '3000']).trim(), '127.0.0.1:3100')
+    const egress = run([
+      'network',
+      'inspect',
+      '--format',
+      '{{index .Options "com.docker.network.bridge.name"}} {{range .IPAM.Config}}{{.Subnet}}{{end}}',
+      `${PROJECT}_worker_egress`,
+    ])
+    assert.equal(egress.stdout.trim(), `${TEST_EGRESS.MKT_EGRESS_BRIDGE} ${TEST_EGRESS.MKT_EGRESS_SUBNET}`)
     for (const network of ['data', 'worker']) {
       const internal = run(['network', 'inspect', '--format', '{{.Internal}}', `${PROJECT}_${network}`])
       assert.equal(internal.stdout.trim(), 'true', network)
