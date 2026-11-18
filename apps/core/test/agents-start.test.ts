@@ -142,9 +142,10 @@ describe('starting a summary run', () => {
       expect(reply.json.error.code).toBe('agent_unavailable')
       expect(await runCount()).toBe(runs)
     } finally {
-      await stack.db.admin.query(`update app.agent_definition_version set live = true where id = any($1::uuid[])`, [
-        live.rows.map((x) => x.id),
-      ])
+      await stack.db.admin.query(
+        `update app.agent_definition_version set live = true where id = any($1::uuid[])`,
+        [live.rows.map((x) => x.id)],
+      )
     }
   })
 
