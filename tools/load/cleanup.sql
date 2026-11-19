@@ -43,10 +43,18 @@ end $$;
 delete from app.membership where user_id in (select id from cleanup_users);
 delete from app.platform_owner where user_id in (select id from cleanup_users);
 delete from auth."user" where id in (select id from cleanup_users);
+-- Notifications still queued about the load-test brands stop here: they went to the test users (removed above)
+-- and the platform owners, and a send that keeps failing raises an alert (emailed to every owner). Marked
+-- failed directly, so no alert is raised for them.
+update app.notification set state = 'failed', next_attempt_at = null
+ where brand_id in (select id from cleanup_brands) and state = 'queued';
+
 update app.brand set status = 'closed', updated_at = now()
  where id in (select id from cleanup_brands) and status <> 'closed';
 
 select 'users removed' as what, count(*) as n from cleanup_users
 union all select 'brands closed', count(*) from cleanup_brands
+union all select 'notifications still queued in them', count(*) from app.notification
+   where brand_id in (select id from cleanup_brands) and state = 'queued'
 union all select 'platform owners left', count(*) from app.platform_owner;
 commit;

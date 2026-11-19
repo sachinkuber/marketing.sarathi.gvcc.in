@@ -12,7 +12,6 @@ import { createAuth, type Auth } from './auth/options.ts'
 import type { Config } from './config.ts'
 import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
-import { UnconfiguredAlertChannel } from './adapters.ts'
 import { errorName, systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import type { JobsDeps } from './jobs/service.ts'
@@ -29,7 +28,7 @@ export interface CoreDeps {
   audit: AuditSink
   // The work engine's dependencies. Unset: the service has no queue (tests that never create jobs).
   jobs?: JobsDeps
-  // The second alert channel; unset (production until the real one exists) it is one that always fails.
+  // The second alert channel; unset, alerts go by email only (owner ruling R29, 2026-11-19).
   alertChannel?: AlertChannel
   // Unset: the system clock.
   clock?: Clock
@@ -87,7 +86,7 @@ export function buildCore(deps: CoreDeps): {
   const notify: NotifyDeps = {
     pool: deps.appPool,
     mailer: deps.mailer,
-    channel: deps.alertChannel ?? new UnconfiguredAlertChannel(),
+    channel: deps.alertChannel,
     clock: deps.clock ?? systemClock,
     audit: deps.audit,
     logger: deps.logger,

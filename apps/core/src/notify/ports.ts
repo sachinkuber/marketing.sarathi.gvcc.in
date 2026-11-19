@@ -8,7 +8,9 @@ export interface AlertMessage {
 }
 
 // The second channel an alert goes out on besides email (a chat message or an SMS; the choice is owner item
-// A11). A send that returns has been confirmed by the provider; one that cannot confirm throws.
+// A11). A send that returns has been confirmed by the provider; one that cannot confirm throws. Optional: the
+// owner chose email-only alerts for now (2026-11-19, ruling R29), and with no channel an alert is delivered
+// once every platform owner has been emailed.
 export interface AlertChannel {
   send(message: AlertMessage): Promise<SendReceipt>
 }
@@ -23,7 +25,7 @@ export const systemClock: Clock = { now: () => new Date() }
 export interface NotifyDeps {
   pool: Pool
   mailer: Mailer
-  channel: AlertChannel
+  channel?: AlertChannel
   clock: Clock
   audit: AuditSink
   logger?: Pick<Logger, 'warn' | 'error'>
