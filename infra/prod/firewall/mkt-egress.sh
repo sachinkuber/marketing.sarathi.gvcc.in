@@ -7,8 +7,8 @@
 # infra/prod/compose.yaml uses the same variables and defaults. From each bridge it allows TCP 443 to public
 # addresses only: no other port, no private, shared, loopback, link-local, multicast or reserved range, and not
 # the host itself. DNS is allowed to the host's resolvers only.
-# For the worker this is wider than plan decision 3 ("the model provider only"), a deviation awaiting the owner's
-# approval (ruling R15, docs/operations.md).
+# For the worker this is wider than plan decision 3 ("the model provider only"), a deviation the owner approved on
+# 2026-11-18 (ruling R15, docs/operations.md).
 #
 # Keyed on the bridges' names, not their subnets, so the rules can be installed before the networks exist: the
 # systemd unit mkt-egress.service runs `install` before Docker starts, at every boot. Docker keeps what is in its

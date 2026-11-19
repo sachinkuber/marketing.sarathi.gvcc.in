@@ -5,8 +5,11 @@ the container figures it also needs the Docker CLI. It prints figures, statuses 
 prints a credential or a test user's address.
 
 ```sh
-LOAD_USERS_FILE=/root/load-users.json ADMIN_DATABASE_URL=postgres://postgres:...@postgres:5432/mkt \
-N8N_API_URL=https://n8n.example N8N_API_KEY=... \
+# Secrets are read from the host's files or typed at a hidden prompt: never written on the command line, so
+# never in the shell's history.
+export ADMIN_DATABASE_URL="$(sed -n 's/^ADMIN_DATABASE_URL=//p' /opt/mkt/secrets/postgres.env)"
+read -rs N8N_API_KEY && export N8N_API_KEY
+LOAD_USERS_FILE=/root/load-users.json N8N_API_URL=https://n8n.example \
 node tools/load/run.mjs --origin https://marketing.sarathi.gvcc.in --connect http://127.0.0.1:4100 \
   --minutes 30 --jobs 300 --users 10 --probe-every 10 --project mkt --slot-cap 3 \
   --results docs/acceptance/<date>-test-41.md

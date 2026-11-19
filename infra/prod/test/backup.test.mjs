@@ -115,7 +115,7 @@ const listing = (dir) => inBackup(dir, 'cd /backups && ls -1A').trim().split('\n
 
 // The offsite service (offsite.sh): /backups read-only, a host folder at /remote standing in for the bucket
 // (a local path is an rclone remote like any other).
-const runOffsite = (dir, remoteDir, env = {}, check = true) =>
+const runOffsite = (dir, remoteDir, env = {}, check = true, mounts = []) =>
   compose(
     [
       'run',
@@ -124,6 +124,7 @@ const runOffsite = (dir, remoteDir, env = {}, check = true) =>
       '--no-deps',
       '-v',
       `${remoteDir}:/remote`,
+      ...mounts.flatMap((m) => ['-v', m]),
       ...Object.keys(env).flatMap((k) => ['-e', k]),
       'offsite',
     ],
@@ -419,7 +420,8 @@ after(() => {
 
 test('the stack is seeded: prepare, the owner bootstrap and audit entries', { timeout: 60 * 60_000 }, () => {
   // One image at a time: the host's processors are shared.
-  for (const service of ['core', 'ops', 'backup']) compose(['build', service])
+  // offsite too: the tests of offsite.sh must run the script in the working tree, not an older image of it.
+  for (const service of ['core', 'ops', 'backup', 'offsite']) compose(['build', service])
   ;({ key: identity, pub: recipient } = keyPair())
   writeEnv('backup', { BACKUP_AGE_RECIPIENT: recipient })
   compose(['up', '-d', '--wait', 'postgres'])
@@ -727,6 +729,61 @@ test(
     const failed = runOffsite(dir, remote, { RCLONE_REMOTE: 'nosuchremote:mkt-backups/mkt' }, false)
     assert.notEqual(failed.status, 0, output(failed))
     assert.match(output(failed), /"event":"offsite_failed","step":"daily"/)
+  },
+)
+
+test(
+  'a monthly set left partial by a failed run is completed by the next run, not skipped',
+  { timeout: 10 * 60_000 },
+  () => {
+    const dir = backupDir('offsite-partial')
+    const remote = `${HOST_BASE}/remote-partial`
+    runBackup(dir)
+    const [set] = sets(dir)
+    const files = [
+      `${set}.dump.age`,
+      `${set}.dump.age.sha256`,
+      `${set}.roles.sql.age`,
+      `${set}.roles.sql.age.sha256`,
+    ]
+    const env = { RCLONE_REMOTE: '/remote/mkt' }
+    runOffsite(dir, remote, env)
+    const monthly = (cmd) => inBackup(remote, `cd /backups/mkt/monthly && ${cmd}`)
+    // The state a run that failed after the dump was copied leaves: the dump (and its checksum), no roles file.
+    monthly(`rm -f ${set}.roles.sql.age ${set}.roles.sql.age.sha256`)
+    assert.deepEqual(monthly('ls -1').trim().split('\n').sort(), files.slice(0, 2))
+    const again = lastJson(runOffsite(dir, remote, env))
+    assert.deepEqual(again, { event: 'offsite_copied', name: set, monthly: true })
+    assert.deepEqual(monthly('ls -1').trim().split('\n').sort(), files)
+    // A complete set is left alone.
+    assert.deepEqual(lastJson(runOffsite(dir, remote, env)), {
+      event: 'offsite_copied',
+      name: set,
+      monthly: false,
+    })
+  },
+)
+
+test(
+  'a monthly listing that fails for a reason other than a missing folder fails the step, not "no set yet"',
+  { timeout: 10 * 60_000 },
+  () => {
+    const dir = backupDir('offsite-lsf')
+    const remote = `${HOST_BASE}/remote-lsf`
+    runBackup(dir)
+    const env = { RCLONE_REMOTE: '/remote/mkt' }
+    runOffsite(dir, remote, env)
+    // A listing that fails with exit 1 (a stand-in rclone ahead of the real one on PATH; everything but `lsf`
+    // goes to the real binary). Treated as "no set yet" it would add a second monthly set; it must fail the step.
+    inBackup(
+      remote,
+      `printf '%s\\n' '#!/bin/sh' 'if [ "$1" = lsf ]; then exit 1; fi' 'exec /usr/local/bin/rclone "$@"' > /backups/rclone-stub && chmod 755 /backups/rclone-stub`,
+    )
+    const failed = runOffsite(dir, remote, env, false, [`${remote}/rclone-stub:/usr/local/sbin/rclone:ro`])
+    assert.notEqual(failed.status, 0, output(failed))
+    assert.match(output(failed), /"event":"offsite_failed","step":"monthly","code":1/)
+    // The same stand-in with a first run on an empty prefix is not needed: exit 3 (no folder) is the first-run
+    // path, covered by the test above.
   },
 )
 

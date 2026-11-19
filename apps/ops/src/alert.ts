@@ -6,7 +6,7 @@ import pg from 'pg'
 // It goes through app.raise_alert, the database function the core's raiseAlert (apps/core/src/notify/alerts.ts)
 // calls: same row, same dedupe (one open alert per kind, by its ref). It does not send anything itself. The core
 // delivers it with the alerts it could not send at once: the worker timer's /worker/reconcile runs the notify
-// stage, whose retryAlerts emails every platform owner and posts to the second channel, within one timer interval
+// stage, whose retryAlerts emails every platform owner (the second channel is not configured: owner decision A11), within one timer interval
 // (RECONCILE_INTERVAL_SECONDS). So the ops container needs no mail or channel credentials, and no secret reaches a
 // command line: the superuser's address comes from postgres.env, like `prepare`'s.
 export const ALERT_KINDS = ['backup_failed'] as const

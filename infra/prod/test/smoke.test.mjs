@@ -218,7 +218,21 @@ test('without --direct the forged checks are skipped and the run exits 2', async
     assert.equal(out.code, 2, out.stdout)
     assert.equal(r.get('forged-invite'), 'SKIP')
     assert.equal(r.get('forged-sign-in'), 'SKIP')
-    for (const name of CHECKS.filter((n) => !n.startsWith('forged-'))) assert.equal(r.get(name), 'PASS', name)
+    // No trigger secret either: that check cannot prove the query string survived, so it is skipped too.
+    assert.equal(r.get('trigger'), 'SKIP')
+    for (const name of CHECKS.filter((n) => !n.startsWith('forged-') && n !== 'trigger'))
+      assert.equal(r.get(name), 'PASS', name)
+  } finally {
+    await fake.close()
+  }
+})
+
+test('without the trigger secret the trigger check is skipped, even against a core that refuses', async () => {
+  const fake = await startFakeOrigin({ origin: ORIGIN })
+  try {
+    const out = await runSmoke([ORIGIN, '--connect', fake.url, '--direct', fake.url])
+    assert.equal(results(out.stdout).get('trigger'), 'SKIP', out.stdout)
+    assert.equal(out.code, 2, out.stdout)
   } finally {
     await fake.close()
   }
@@ -242,7 +256,17 @@ test('an unreachable origin fails every check', async () => {
   const fake = await startFakeOrigin({ origin: ORIGIN })
   const url = fake.url
   await fake.close()
-  const out = await runSmoke([ORIGIN, '--connect', url, '--direct', url, '--timeout', '2000'])
+  const out = await runSmoke([
+    ORIGIN,
+    '--connect',
+    url,
+    '--direct',
+    url,
+    '--trigger-secret-file',
+    secretFile,
+    '--timeout',
+    '2000',
+  ])
   assert.equal(out.code, 1)
   for (const name of CHECKS) assert.equal(results(out.stdout).get(name), 'FAIL', name)
 })

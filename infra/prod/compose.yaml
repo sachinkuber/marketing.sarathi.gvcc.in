@@ -22,12 +22,13 @@
 #                  bridge name (mkt-egress0 by default) and subnet, so the host firewall (infra/prod/firewall,
 #                  installed before the stack starts) can key on it. Without that firewall it is unrestricted
 #                  outbound. With it: TCP 443 to public addresses only, no private range, not the host. That is wider
-#                  than plan decision 3 ("the model provider only"): a deviation awaiting the owner's approval
+#                  than plan decision 3 ("the model provider only"): a deviation the owner approved on 2026-11-18
 #                  (ruling R15, docs/operations.md). The worker reaches the core only on `worker`.
 #   backup_egress  offsite alone: its way out, for the off-server copy. Like worker_egress, a fixed bridge name
 #                  (mkt-bkegress0 by default) and subnet, and the same firewall: TCP 443 to public addresses only
 #                  (owner decision 2026-11-18, ruling R19).
-# Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100), for a proxy on the host. A proxy
+# Ports: the core and the dashboard listen on 127.0.0.1 only (4100 and 3100 unless MKT_CORE_PORT and
+# MKT_DASHBOARD_PORT say otherwise: the tests use others, so a test stack can run beside `mkt`), for a proxy on the host. A proxy
 # that runs in Docker joins them through infra/prod/compose.proxy-network.yaml instead (docs/operations.md).
 name: mkt
 
@@ -71,7 +72,7 @@ services:
     restart: unless-stopped
     <<: *node-hardening
     env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/core.env']
-    ports: ['127.0.0.1:4100:4000']
+    ports: ['127.0.0.1:${MKT_CORE_PORT:-4100}:4000']
     networks: [app, worker, data]
     depends_on:
       postgres: { condition: service_healthy }
@@ -120,7 +121,7 @@ services:
     restart: unless-stopped
     <<: *node-hardening
     env_file: ['${MKT_SECRETS:-/opt/mkt/secrets}/dashboard.env']
-    ports: ['127.0.0.1:3100:3000']
+    ports: ['127.0.0.1:${MKT_DASHBOARD_PORT:-3100}:3000']
     networks: [app]
     depends_on:
       core: { condition: service_healthy }

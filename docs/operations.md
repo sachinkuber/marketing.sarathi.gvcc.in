@@ -96,6 +96,24 @@ systemctl reload caddy
 
 `__MKT_TLS__` is one line as the host issues certificates: a `tls <cert> <key>` line for a Cloudflare origin certificate, `import stg <name>` on staging, or empty for Caddy's automatic HTTPS. With Caddy in Docker the site goes into its sites folder, the check is `docker exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`, and with `admin off` the change is applied by restarting the proxy container, which briefly interrupts every site it serves: agree the moment with the owner first.
 
+**Caddy in Docker (as on staging): the same steps with the container's paths.** The sites folder is the one mounted into the container (`<caddy-dir>/sites` on the host), the certificates are under the container's `/etc/caddy/certs` or wherever its compose file mounts them, and the check and the reload go through the container. A container cannot reach the host's `127.0.0.1`, so the core and the dashboard are the names on the proxy's own network (case 2 above), not `127.0.0.1:4100`:
+
+```sh
+cd /opt/mkt/marketing
+sed -e 's/__MKT_HOST__/<host>/' \
+    -e 's|__MKT_TLS__|import stg <name>|' \
+    -e 's/__MKT_CORE__/mkt-core:4000/' \
+    -e 's/__MKT_DASHBOARD__/mkt-dashboard:3000/' \
+    infra/prod/proxy/marketing.caddy > <caddy-dir>/sites/60-marketing.caddy
+grep -c '__MKT_' <caddy-dir>/sites/60-marketing.caddy    # must print 0
+docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker restart <caddy-container>    # with `admin off`; this interrupts every site the proxy serves: agree the moment first
+```
+
+Run `validate` before the restart, always: a site that does not validate would stop the proxy from coming back, and every site on it with it. The smoke check (below) needs no change for this layout: the proxy publishes 443 on the host, so `--direct https://127.0.0.1:443` reaches it, and `docker run --network host` works as written.
+
+**Staging: the certificate comes first.** The proxy there issues no certificates itself (`auto_https disable_certs`) and the `import stg <name>` snippet loads `<name>.pem` and `<name>.key` from its certificates folder. `validate` fails, inside the running proxy, while they are missing, and a restart with the site in place would then take every staging site down. So, before copying the site in: make a certificate signing request for the name with the staging key, `openssl req -new -key <certs>/staging.key -subj "/CN=<name>" -addext "subjectAltName=DNS:<name>" -out <name>.csr`; in Cloudflare (SSL/TLS, Origin Server, Create Certificate) choose "use my private key" and paste the request; save the certificate it returns as `<certs>/<name>.pem`, and link or copy the key as `<certs>/<name>.key`. One host per certificate: the existing ones are not wildcards. On production a `tls <cert> <key>` line with the origin certificate is used instead, or Caddy's automatic HTTPS.
+
 `infra/prod/test/proxy.test.mjs` renders the template, has the same Caddy validate it, and runs the smoke script and the header, body and address rules through it.
 
 ### Cloudflare ranges
@@ -119,7 +137,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
    `/opt/mkt/compose.env` holds no secret; its defaults are right unless "Egress firewall", "Settings" below says otherwise.
 
-   Then edit each file and replace every `CHANGE_ME` with its own `openssl rand -hex 32` (hex keeps database URLs valid): the superuser password (twice in `postgres.env`), the four role passwords (`roles.env`, and the same four in the URLs of `core.env` and `worker.env`), and `AUTH_SECRET`, `WORKER_SECRET` (the same in `core.env` and `worker.env`), `ATTEMPT_TOKEN_SECRET` and `TRIGGER_SECRET`. `ANTHROPIC_API_KEY` is the provider's key (A3). `backup.env` and `offsite.env` stay as installed for now (blank values, no `CHANGE_ME`): the owner's age public key and the bucket come later ("Backups" below), and nothing else needs them. Check: `ls -l /opt/mkt/secrets` shows `-rw------- root root` for every file, and `grep -l CHANGE_ME /opt/mkt/secrets/*.env` prints nothing (the core and the worker refuse to start otherwise). Leave `MKT_SECRETS` unset: it exists only for the tests, and unset the stack reads `/opt/mkt/secrets`.
+   Then edit each file and replace every `CHANGE_ME` with its own `openssl rand -hex 32` (hex keeps database URLs valid): the superuser password (twice in `postgres.env`), the four role passwords (`roles.env`, and the same four in the URLs of `core.env` and `worker.env`), and `AUTH_SECRET`, `WORKER_SECRET` (the same in `core.env` and `worker.env`), `ATTEMPT_TOKEN_SECRET` and `TRIGGER_SECRET`. `ANTHROPIC_API_KEY` is the provider's key (A3). `backup.env` and `offsite.env` stay as installed for now (blank values, no `CHANGE_ME`): the owner's age public key and the bucket come later ("Backups" below), and nothing else needs them. Check: `ls -l /opt/mkt/secrets` shows `-rw------- root root` for every file, and `grep -l '^[^#]*CHANGE_ME' /opt/mkt/secrets/*.env` prints nothing (the header comments of the examples name the word, so only lines that are not comments count; the core and the worker refuse to start otherwise). Leave `MKT_SECRETS` unset: it exists only for the tests, and unset the stack reads `/opt/mkt/secrets`.
 
 2. **Build**, the `ops` image included (without `--profile ops` it is not rebuilt, and step 3 would run the old migrations). One image at a time on a shared host:
 
@@ -129,7 +147,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 3. **Prepare** the database (migrations, run-time role passwords, the queue): `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm ops prepare`. Its last line is JSON with `"event":"prepared"`.
 
-4. **Egress firewall** (the worker's and the backup upload's), installed before the stack first starts (below). Then **start**: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`, and `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`.
+4. **Egress firewall** (the worker's and the backup upload's), installed before the stack first starts (below). Then **start**: `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d` (add `-f infra/prod/compose.proxy-network.yaml` in case 2 above). Then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml ps` shows postgres, core, worker and dashboard healthy, `curl -fsS http://127.0.0.1:4100/api/health/ready` answers `{"status":"ok"}`, and `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`. At the first deployment it also prints `mkt-egress: mkt_backup_egress does not exist yet (the rules are in place for when it does)`: that is expected, because the offsite service creates that network the first time it runs. Run `check` again after the offsite probes in "Check" below, so the bridge-name and IPv6 checks run for it as well.
 
 5. **Dashboard file permissions.** After the first start, `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml logs dashboard | grep -i eacces` must print nothing: an `EACCES` on `.next` means the image's cache folder is not writable by the `node` user.
 
@@ -150,7 +168,9 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 9. **Bootstrap**, run by the owner (A9) with the superuser's address in the environment only, never on the command line. The temporary password is printed once, to the owner's terminal:
 
    ```sh
-   read -rs BOOTSTRAP_DATABASE_URL && export BOOTSTRAP_DATABASE_URL   # postgres://postgres:<password>@postgres:5432/mkt
+   # The superuser's address is already on the host, in postgres.env (step 1 generated its password): read it from there,
+   # so it is never typed, printed or put on a command line.
+   export BOOTSTRAP_DATABASE_URL="$(sed -n 's/^ADMIN_DATABASE_URL=//p' /opt/mkt/secrets/postgres.env)"
    docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml exec -T -e BOOTSTRAP_DATABASE_URL core \
      node apps/core/src/bootstrap.ts --owner-email <owner's email>
    unset BOOTSTRAP_DATABASE_URL
@@ -158,7 +178,7 @@ On the production host, as root, from a checkout of the release (`/opt/mkt/marke
 
 10. **Smoke check** (below). Every check passes.
 
-11. **Firewall check, the last step of every deployment** (the first and every later one): `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok`. A deployment is not finished until it does.
+11. **Firewall check, the last step of every deployment** (the first and every later one): `/opt/mkt/firewall/mkt-egress.sh check` prints `mkt-egress: ok` (the `mkt_backup_egress does not exist yet` line may precede it only until the offsite service has run once). A deployment is not finished until it does.
 
 ## Egress firewall
 
@@ -178,7 +198,7 @@ The stack has two ways out, each an ordinary bridge with a fixed name, a fixed s
 
 **Backup upload: owner decision (2026-11-18, ruling R19).** The owner decided the backup upload gets the same limit as the worker: DNS to the host's resolvers, no host or private and special ranges, TCP 443 to public addresses, everything else dropped, failing closed on its own. Each bridge is installed separately, with its own fallback: one failing never leaves the other unprotected, and `install` then exits 1.
 
-**Deviation awaiting the owner's approval (ruling R15).** Plan decision 3 says the worker reaches "the model provider only". This firewall enforces TCP 443 to any public address, which is wider. It does not try to follow the provider's address ranges. Until the owner accepts this, or asks for a provider-only rule (for example an egress proxy with a host allow-list), the plan's rule is not met.
+**Owner-approved deviation from plan decision 3 (ruling R15, 2026-11-18).** Plan decision 3 says the worker reaches "the model provider only". This firewall enforces TCP 443 to any public address, which is wider. The owner approved that; it does not try to follow the provider's address ranges. A provider-only rule (for example an egress proxy with a host allow-list) would be a later change.
 
 ### Settings: `/opt/mkt/compose.env`
 
@@ -230,9 +250,11 @@ systemctl enable --now mkt-egress.service
 
 A re-run (a restart of the unit, or a new release of the script) builds each bridge's new rules in its second chain (`MKT-EGRESS-A` and `MKT-EGRESS-B` alternate, and `MKT-BKEGRESS-A` and `-B`), points the bridge at it, and only then removes the old chain. A bridge is never left without rules. On a host where an earlier release of the script covered the worker's bridge only, a restart of the unit (`systemctl restart mkt-egress.service`, after installing the new script and unit as above) adds the backup bridge; run it before the next `up -d`.
 
+On a host that ran a release before the backup bridge was fixed, the network `mkt_backup_egress` may already exist with a random bridge name and subnet, and `check` then says `mkt_backup_egress is not on bridge mkt-bkegress0`. Run `docker network rm mkt_backup_egress` while no offsite run is active (it has no containers between runs; the nightly timer is at 21:00 UTC), then `check` again after the next offsite run, which creates it afresh.
+
 The script refuses loudly if Docker is set to its own nftables firewall backend (`"firewall-backend": "nftables"` in `/etc/docker/daemon.json`; `docker info` shows it as `FirewallBackend`), because then there is no `DOCKER-USER` chain and the rules would not apply. Stop and ask in that case. The `iptables` here is whichever variant the host's Docker uses (legacy or nft). `infra/prod/test/firewall.test.mjs` checks the rule order, the swap, the refusal without a resolver, each bridge failing closed on its own, and `check` for both bridges.
 
-A test stack (`infra/prod/test/stack.test.mjs`, project `mkt-m7test`, and `backup.test.mjs`) uses its own bridges (`mkt-m7t-egress0`, `mkt-m7t-bkegr0`) and subnets (`10.247.74.0/24`, `10.247.76.0/24`), so it can run on a host beside `mkt`. It installs no firewall. A hand-run rehearsal should do the same, setting `MKT_EGRESS_BRIDGE`, `MKT_EGRESS_SUBNET`, `MKT_BACKUP_EGRESS_BRIDGE` and `MKT_BACKUP_EGRESS_SUBNET` to unused values in its own shell.
+A test stack (`infra/prod/test/stack.test.mjs`, project `mkt-m7test`, and `backup.test.mjs`) uses its own bridges (`mkt-m7t-egress0`, `mkt-m7t-bkegr0`) and subnets (`10.247.74.0/24`, `10.247.76.0/24`), so it can run on a host beside `mkt`; it also publishes the core and the dashboard on `4110` and `3110` (`MKT_CORE_PORT` and `MKT_DASHBOARD_PORT`; the defaults are `4100` and `3100`), so they do not clash with a running `mkt`. It installs no firewall. A hand-run rehearsal should do the same, setting `MKT_EGRESS_BRIDGE`, `MKT_EGRESS_SUBNET`, `MKT_BACKUP_EGRESS_BRIDGE`, `MKT_BACKUP_EGRESS_SUBNET`, `MKT_CORE_PORT` and `MKT_DASHBOARD_PORT` to unused values in its own shell (not a port a browser refuses, such as 4190).
 
 ### Check
 
@@ -253,7 +275,7 @@ $O "fetch('http://example.com/').then(r=>console.log('80 open',r.status),e=>cons
 
 ## Smoke check
 
-`node infra/prod/smoke.mjs <origin>` checks: `/api/health/ready` and `/api/health/worker` answer 200; `/` answers 200 with the app's security headers and the proxy's HSTS and COOP; `/api/v1/session` without a cookie answers 401; a trigger with a query string is refused by the core (`trigger_refused`); a DELETE body reaches the core; a 900 kB checkpoint body is not refused by the proxy; and, sent to the origin server directly (not through Cloudflare) with forged `CF-Connecting-IP` and `X-Forwarded-For`, both the invite limiter and the sign-in limiter limit by the real address. One line per check; exit 0 when all pass, 1 when one fails, 2 when some were skipped. It prints statuses and error codes only. Its options are in the script's header.
+`node infra/prod/smoke.mjs <origin>` checks: `/api/health/ready` and `/api/health/worker` answer 200; `/` answers 200 with the app's security headers and the proxy's HSTS and COOP; `/api/v1/session` without a cookie answers 401; a trigger with a query string is refused by the core (`trigger_refused`; skipped, so exit 2, without `--trigger-secret-file`, because without the secret a dropped query string cannot be told from a kept one); a DELETE body reaches the core; a 900 kB checkpoint body is not refused by the proxy; and, sent to the origin server directly (not through Cloudflare) with forged `CF-Connecting-IP` and `X-Forwarded-For`, both the invite limiter and the sign-in limiter limit by the real address. One line per check; exit 0 when all pass, 1 when one fails, 2 when some were skipped. It prints statuses and error codes only. Its options are in the script's header.
 
 From anywhere, through Cloudflare (the forged-address checks are skipped, exit 2):
 
@@ -290,13 +312,15 @@ Then it keeps the newest **7** sets on the server, removing older sets whole. It
 
 When the backup succeeded, the same unit runs `infra/prod/backup/offsite.sh` in the `offsite` service: the off-server copy (ruling R18 splits it from the backup). It copies the newest complete set in `/opt/mkt/backups` (four files, both checksums holding) to `<RCLONE_REMOTE>/daily/`, and to `<RCLONE_REMOTE>/monthly/` when that prefix has no set of the set's month yet. It logs `offsite_copied` (name, and whether the monthly copy was made), `offsite_skipped` while `RCLONE_REMOTE` is blank (the run succeeds), or `offsite_failed` with the step (`find_set`: no complete set; `daily`; `monthly`) and exit code; a failure fails the unit.
 
-On a failure of either, systemd starts `mkt-backup-alert.service` (`OnFailure=`), which runs `ops alert backup_failed`: a **severity 1** platform alert, written with `app.raise_alert` (the function the core's `raiseAlert` uses) through the superuser's address in `postgres.env`, so no secret is on a command line. The core delivers it to every platform owner by email and on the second channel at its next notify run (the worker timer's `/worker/reconcile`, every `RECONCILE_INTERVAL_SECONDS`). While that alert is unresolved, another failure adds no second one. If the database itself is down, the alert unit fails too; `systemctl --failed` then lists both units.
+On a failure of either, systemd starts `mkt-backup-alert.service` (`OnFailure=`), which runs `ops alert backup_failed`: a **severity 1** platform alert, written with `app.raise_alert` (the function the core's `raiseAlert` uses) through the superuser's address in `postgres.env`, so no secret is on a command line. The core delivers it to every platform owner by email at its next notify run (the worker timer's `/worker/reconcile`, every `RECONCILE_INTERVAL_SECONDS`). The second alert channel is not configured (owner decision A11): the core still tries it, so until that is changed the alert view shows each alert as not delivered or `delivery_stalled` even though the email went out. While that alert is unresolved, another failure adds no second one. If the database itself is down, the alert unit fails too; `systemctl --failed` then lists both units.
 
 The two services are split by what they hold. `backup` has the database's credentials (`postgres.env`) and the age public key (`backup.env`), writes `/opt/mkt/backups`, and is on `data` only: no way out. `offsite` sees `/opt/mkt/backups` read-only, holds only the remote's settings (`offsite.env`, no database setting), and is on its own `backup_egress` only: it cannot reach postgres. The host firewall limits `backup_egress` (bridge `mkt-bkegress0`) as it limits the worker's: DNS to the host's resolvers and TCP 443 to public addresses only (owner decision 2026-11-18, ruling R19; "Egress firewall" above). The bucket's endpoint is reached over HTTPS, so nothing else is needed.
 
 ### Install
 
-On the production host, as root, after the first deployment. Not on the staging host (ruling R11), and nothing here touches the staging host's own `gvcc-backup` unit.
+On the production host, as root, after the first deployment. Nothing here touches the staging host's own `gvcc-backup` unit.
+
+**Rehearsal host.** The staging rehearsal did install `mkt-backup.timer` (the owner's binding decision), so it uploads nightly. Its remote prefix must not be production's: use a separate one (`r2:mkt-backups/staging`). The bucket's lifecycle rules for `mkt/daily/` and `mkt/monthly/` do not cover that prefix: add rules for it, or its sets accumulate. When the rehearsal ends, disable the timer (`systemctl disable --now mkt-backup.timer`).
 
 1. **The owner's key pair**, made by the owner on the owner's own machine, never on the server: `age-keygen -o mkt-backup-identity.txt`. The file is the private key: keep it off the server, in two places. Its `# public key: age1...` line is the recipient: put that value in `/opt/mkt/secrets/backup.env` as `BACKUP_AGE_RECIPIENT` (installed in "First deployment", step 1). Until it is there, the backup refuses (`backup_refused`, naming the variable) and the alert is raised.
 2. **The folder and the units:**
@@ -326,17 +350,19 @@ The bucket is `mkt-backups` (R2). Until `offsite.env` is filled in, `RCLONE_REMO
 
 Into an **empty** database only: `restore.sh` refuses a target that has any table in schema `app`. It checks the `.sha256` files when they are beside the backups, creates the roles that are missing (the dump has no passwords), then restores the dump in one transaction that stops at the first error. The target's address names the superuser and no password (an address with a password is refused); the password comes from `PGPASSWORD`.
 
-For a whole-server restore: deploy steps 1 and 2 of "First deployment" on the new host, with a new, empty volume, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d --wait postgres`. Bring the set into `/opt/mkt/backups`: from the bucket, through the offsite container (its `/backups` is read-only, so into a second folder first): `install -d -m 0700 /opt/mkt/restore-in`, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T -v /opt/mkt/restore-in:/in --entrypoint rclone offsite copy r2:mkt-backups/mkt/daily /in --include "mkt-<ts>.*"`, then `mv /opt/mkt/restore-in/* /opt/mkt/backups/`. Then, as root:
+For a whole-server restore: deploy steps 1 and 2 of "First deployment" on the new host, with a new, empty volume, then install the egress firewall ("Egress firewall", "Install" above: the script and the unit, `systemctl enable --now`), so the pull below is firewalled too, and `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml up -d --wait postgres`. Bring the set into `/opt/mkt/backups`: from the bucket, through the offsite container (its `/backups` is read-only, so into a second folder first): `install -d -m 0700 /opt/mkt/restore-in`, then `docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T -v /opt/mkt/restore-in:/in --entrypoint rclone offsite copy r2:mkt-backups/mkt/daily /in --include "mkt-<ts>.*"`, then `mv /opt/mkt/restore-in/* /opt/mkt/backups/`. Then, as root:
 
 ```sh
 C='docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml'
-# The owner pastes the private key; it is on the server only for the restore.
-(umask 077 && cat > /opt/mkt/backups/.restore-identity)
-read -rs PGPASSWORD && export PGPASSWORD    # the new superuser password (postgres.env)
-$C --profile ops run --rm -T -e PGPASSWORD -e AGE_IDENTITY_FILE=/backups/.restore-identity \
+# The owner pastes the private key; it is on the server only for the restore, in memory (tmpfs), never on disk.
+install -d -m 0700 /dev/shm/mkt-restore
+(umask 077 && cat > /dev/shm/mkt-restore/id)
+# The superuser password is the POSTGRES_PASSWORD line of postgres.env (written in step 1 of "First deployment"):
+PGPASSWORD=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/mkt/secrets/postgres.env) && export PGPASSWORD
+$C --profile ops run --rm -T -e PGPASSWORD -e AGE_IDENTITY_FILE=/key/id -v /dev/shm/mkt-restore:/key:ro \
   --entrypoint mkt-restore backup \
   /backups/mkt-<ts>.dump.age /backups/mkt-<ts>.roles.sql.age postgres://postgres@postgres:5432/mkt
-shred -u /opt/mkt/backups/.restore-identity; unset PGPASSWORD
+rm -rf /dev/shm/mkt-restore; unset PGPASSWORD
 $C --profile ops run --rm ops prepare      # gives the run-time roles their passwords; migrates nothing
 ```
 
@@ -378,7 +404,7 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
 
    ```sh
    install -d -m 0700 -o root -g root /opt/mkt/drill
-   read -rs PGPASSWORD && export PGPASSWORD   # the superuser password (postgres.env)
+   PGPASSWORD=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/mkt/secrets/postgres.env) && export PGPASSWORD   # the superuser password
    docker run --rm --network mkt_data --env-file /opt/mkt/secrets/core.env -e PGPASSWORD \
      -e RESTORE_DRILL_FILE=/drill/drill.env -v /opt/mkt/drill:/drill -v mkt-drill-work:/work -w /work $NODE \
      node apps/ops/src/restore-check.ts seed --target postgres://postgres@postgres:5432/mkt
@@ -388,7 +414,7 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
    Then the night's backup (or `systemctl start mkt-backup.service`) holds the drill. **Once that backup has completed, and before the live worker starts again**, cancel the drill's jobs on the live database, so the worker never sends the drill's brief to the model (the copy in the backup keeps them waiting):
 
    ```sh
-   read -rs PGPASSWORD && export PGPASSWORD   # the superuser password (postgres.env)
+   PGPASSWORD=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/mkt/secrets/postgres.env) && export PGPASSWORD   # the superuser password
    docker run --rm --network mkt_data -e PGPASSWORD -v mkt-drill-work:/work -w /work $NODE \
      node apps/ops/src/restore-check.ts cancel-live --target postgres://postgres@postgres:5432/mkt
    unset PGPASSWORD
@@ -399,15 +425,15 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
 2. **A throw-away target and the restore**, from that backup (bring the set and the owner's key as in "Restore" above):
 
    ```sh
-   read -rs PGPASSWORD && export PGPASSWORD   # a new password for the throw-away target: paste openssl rand -hex 32
+   PGPASSWORD=$(openssl rand -hex 32) && export PGPASSWORD   # a new password for the throw-away target (not the live one)
    POSTGRES_PASSWORD=$PGPASSWORD docker run -d --name mkt-drill-target --network mkt_data --shm-size 256m \
      -e POSTGRES_PASSWORD -e POSTGRES_DB=mkt $PG
    until docker exec mkt-drill-target pg_isready -h 127.0.0.1 -U postgres -d mkt; do sleep 2; done
-   (umask 077 && cat > /opt/mkt/backups/.restore-identity)
-   $C --profile ops run --rm -T -e PGPASSWORD -e AGE_IDENTITY_FILE=/backups/.restore-identity \
+   install -d -m 0700 /dev/shm/mkt-restore && (umask 077 && cat > /dev/shm/mkt-restore/id)   # the owner's key, in memory only
+   $C --profile ops run --rm -T -e PGPASSWORD -e AGE_IDENTITY_FILE=/key/id -v /dev/shm/mkt-restore:/key:ro \
      --entrypoint mkt-restore backup \
      /backups/mkt-<ts>.dump.age /backups/mkt-<ts>.roles.sql.age postgres://postgres@mkt-drill-target:5432/mkt
-   shred -u /opt/mkt/backups/.restore-identity
+   rm -rf /dev/shm/mkt-restore
    ADMIN_DATABASE_URL=postgres://postgres:$PGPASSWORD@mkt-drill-target:5432/mkt \
      $C --profile ops run --rm -T -e ADMIN_DATABASE_URL ops prepare   # the roles' passwords from roles.env
    ```

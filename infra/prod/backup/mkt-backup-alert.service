@@ -1,6 +1,6 @@
 # Started by mkt-backup.service's OnFailure=: `ops alert backup_failed` raises a severity 1 platform alert through
-# app.raise_alert, and the core delivers it to the platform owners (email and the second channel) at its next
-# notify run (apps/ops/src/alert.ts). If the database itself is down this fails too; its own failure is then in
+# app.raise_alert, and the core delivers it to the platform owners by email at its next
+# notify run (the second channel is not configured: owner decision A11) (apps/ops/src/alert.ts). If the database itself is down this fails too; its own failure is then in
 # `systemctl --failed` and `journalctl -u mkt-backup-alert.service`.
 # Installed as /etc/systemd/system/mkt-backup-alert.service; docs/operations.md, "Backups".
 [Unit]

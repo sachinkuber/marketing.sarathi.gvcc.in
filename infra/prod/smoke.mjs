@@ -15,7 +15,8 @@
 //   --trigger-secret-file <path>  A file holding TRIGGER_SECRET (e.g. read from core.env into a 0600 file). With
 //                                 it the trigger check also sends one correctly signed ping, proving the path,
 //                                 headers and body reach the core unchanged, and that a query string is refused
-//                                 even when the bare path is correctly signed. Never printed.
+//                                 even when the bare path is correctly signed. Never printed. Without it the
+//                                 trigger check is SKIP: it cannot prove the query string survived.
 //   --header <name:value>         Add a header to every request (repeatable; never printed).
 //   --insecure                    Do not verify certificates on --connect either (rehearsals with a local CA).
 //   --no-proxy                    Nothing in front of the core and dashboard (local rehearsal): the checks that
@@ -257,13 +258,17 @@ async function trigger() {
       'x-mkt-signature': createHmac('sha256', key).update(text).digest('hex'),
     }
   }
-  const key = options.triggerSecret ?? hex(32)
+  // Without the secret the call is signed with a random key, so a 401 trigger_refused comes back whether or not
+  // the proxy kept the query string: nothing is proved, so the check is skipped (the run exits 2), not passed.
+  if (!options.triggerSecret)
+    return new Skip(
+      'no --trigger-secret-file: a query string kept by the proxy cannot be told from one dropped',
+    )
+  const key = options.triggerSecret
   const refused = await request(`${path}?smoke=1`, { method: 'POST', headers: signed(path, key), body })
   if (refused.status !== 401 || codeOf(refused) !== 'trigger_refused') {
     throw new Error(`a trigger with a query string answered ${described(refused)}, not 401 trigger_refused`)
   }
-  if (!options.triggerSecret)
-    return '401 trigger_refused with a query string (no secret: the signed call is not proved)'
   const accepted = await request(path, { method: 'POST', headers: signed(path, key), body })
   if (accepted.status !== 200) {
     throw new Error(`a correctly signed trigger answered ${described(accepted)}, not 200`)

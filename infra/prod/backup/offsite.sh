@@ -63,10 +63,15 @@ STEP=daily
 copy_to "$REMOTE/daily"
 
 # One set a month: the first complete set copied in a month that monthly/ has none of. Named by the set's own UTC
-# month, so a missed or failed day is caught up by the next run.
+# month, so a missed or failed day is caught up by the next run. A month counts as done only when the last file
+# copy_to writes (the roles file's checksum) is there, so a run that failed part-way leaves a partial set that the
+# next run completes (`--immutable` leaves the files already there as they are). Only rclone's exit 3 (the folder
+# does not exist: the first run) means "none"; any other failure of the listing fails the step.
 STEP=monthly
 MONTH=${NAME:4:6}
-EXISTING=$(rclone lsf --files-only --include "mkt-$MONTH*.dump.age" "$REMOTE/monthly" 2>/dev/null || true)
+LSF_CODE=0
+EXISTING=$(rclone lsf --files-only --include "mkt-$MONTH*.roles.sql.age.sha256" "$REMOTE/monthly" 2>/dev/null) || LSF_CODE=$?
+if [ "$LSF_CODE" -ne 0 ] && [ "$LSF_CODE" -ne 3 ]; then exit "$LSF_CODE"; fi
 MONTHLY=false
 if [ -z "$EXISTING" ]; then
   copy_to "$REMOTE/monthly"
