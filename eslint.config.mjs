@@ -64,6 +64,23 @@ export default defineConfig(
     },
   },
   {
+    // The evaluation harness is an operator command, not the running worker: it writes its run records through
+    // the admin pool (@mkt/db) and reuses the core's cost arithmetic. It still never imports a database client
+    // or the queue directly.
+    files: ['apps/worker/src/eval/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['pg', 'kysely', 'pg-boss'].map((name) => ({
+            name,
+            message: 'Business data is reached only through @mkt/db (withBrand).',
+          })),
+        },
+      ],
+    },
+  },
+  {
     // The dashboard runs in the browser and talks to the core over HTTP only: no workspace package, no
     // database client, and never next/og (16.3.4 had a critical advisory in it, fixed in 16.3.8; plan decision 4). This rule
     // replaces the earlier no-restricted-imports one for these files, so it repeats those paths.
