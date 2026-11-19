@@ -11,6 +11,9 @@ const schema = z.object({
   JOB_CLASSES: z.string().optional(),
   PROCESSES_PER_CLASS: z.coerce.number().int().min(1).default(1),
   MODEL_BACKEND: z.enum(['anthropic', 'standin']).default('anthropic'),
+  // The stand-in's answer time in whole milliseconds (the load test, spec 17 test 41). Checked and used only
+  // when MODEL_BACKEND=standin; with the real model it is not read.
+  STANDIN_DELAY_MS: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   // The maintenance tick is the heartbeat, and the core reports the worker stale after 900 s without one:
   // at most 450 s leaves room for one missed tick.
@@ -22,6 +25,8 @@ const schema = z.object({
   RELEASE: z.string().min(1).max(200).optional(),
 })
 
+const STANDIN_DELAY_MAX_MS = 60_000
+
 export interface WorkerConfig {
   nodeEnv: 'development' | 'test' | 'production'
   coreUrl: string
@@ -31,6 +36,8 @@ export interface WorkerConfig {
   classes: JobClass[]
   processesPerClass: number
   modelBackend: 'anthropic' | 'standin'
+  // 0 unless MODEL_BACKEND=standin and STANDIN_DELAY_MS is set.
+  standinDelayMs: number
   anthropicApiKey: string | null
   reconcileIntervalSeconds: number
   superviseIntervalSeconds: number | undefined
@@ -65,6 +72,14 @@ export function loadWorkerConfig(env: Record<string, string | undefined>): Worke
   if (c.MODEL_BACKEND === 'standin' && c.NODE_ENV !== 'test') {
     throw new Error('Invalid configuration: MODEL_BACKEND')
   }
+  let standinDelayMs = 0
+  if (c.MODEL_BACKEND === 'standin' && c.STANDIN_DELAY_MS !== undefined) {
+    // Digits only, so '', ' 20', '1.5', '2e3' and '0x10' are refused rather than coerced.
+    if (!/^\d{1,5}$/.test(c.STANDIN_DELAY_MS) || Number(c.STANDIN_DELAY_MS) > STANDIN_DELAY_MAX_MS) {
+      throw new Error('Invalid configuration: STANDIN_DELAY_MS')
+    }
+    standinDelayMs = Number(c.STANDIN_DELAY_MS)
+  }
   if (c.MODEL_BACKEND === 'anthropic' && !c.ANTHROPIC_API_KEY) {
     throw new Error('Invalid configuration: ANTHROPIC_API_KEY')
   }
@@ -77,6 +92,7 @@ export function loadWorkerConfig(env: Record<string, string | undefined>): Worke
     classes,
     processesPerClass: c.PROCESSES_PER_CLASS,
     modelBackend: c.MODEL_BACKEND,
+    standinDelayMs,
     anthropicApiKey: c.ANTHROPIC_API_KEY ?? null,
     reconcileIntervalSeconds: c.RECONCILE_INTERVAL_SECONDS,
     superviseIntervalSeconds: c.SUPERVISE_INTERVAL_SECONDS,

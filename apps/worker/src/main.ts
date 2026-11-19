@@ -87,6 +87,7 @@ export async function chooseModel(config: WorkerConfig): Promise<ModelClient> {
     return (await import('./standin.ts')).standInModel({
       logFile: process.env.MODEL_LOG ?? '/dev/null',
       replyFor: () => STANDIN_SUMMARY,
+      delayMs: config.standinDelayMs,
     })
   }
   return anthropicModel(config.anthropicApiKey!)
