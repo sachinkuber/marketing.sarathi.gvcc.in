@@ -77,7 +77,7 @@ docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml exec -
 
 It touches only `loadtest<N>@load-test.invalid` users and `load-test-` brands, and refuses while a load-test run
 is still open or when anything else refers to those users. The users go with their sessions, passwords and
-second factors. The brands are kept as `closed`: their runs, model calls and cost rows are the test's evidence.
+second factors. Notifications still queued about the load-test brands are marked failed without raising alerts (the 2026-11-19 run left 939 of them, which would have emailed the owner an alert each). The brands are kept as `closed`: their runs, model calls and cost rows are the test's evidence.
 Running it twice is harmless. It ends by printing how many platform owners are left (the real owner only).
 
 ## What it does

@@ -289,6 +289,43 @@ describe('alert delivery', () => {
     expect(channel.sent).toHaveLength(1)
   })
 
+  // Ruling R29: email-only alerts until a second channel is chosen.
+  it('with no second channel, is delivered once every owner is emailed, and records no channel confirmation', async () => {
+    const emailOnly: NotifyDeps = { ...deps, channel: undefined }
+    const result = await raiseAlert(stack.appPool, emailOnly, {
+      brandId: null,
+      severity: 1,
+      kind: 'audit_chain_mismatch',
+      ref: 'platform:email_only',
+    })
+    expect(result).toMatchObject({ created: true, delivered: true })
+    expect(mailer.sent.map((m) => m.to).sort()).toEqual([OWNER_1, OWNER_2])
+    expect(channel.sent).toHaveLength(0)
+    const [row] = await alertRows()
+    expect(row).toMatchObject({ delivery_stalled: false, delivery_attempts: 1 })
+    expect(row.delivered_at).not.toBeNull()
+    expect(row.channel_confirmed_at).toBeNull()
+  })
+
+  it('with no second channel, stays undelivered while an email fails, and the retry emails only the rest', async () => {
+    const emailOnly: NotifyDeps = { ...deps, channel: undefined }
+    mailer.failNext(1)
+    const first = await raiseAlert(stack.appPool, emailOnly, {
+      brandId: brandA,
+      severity: 2,
+      kind: 'dead_job',
+      ref: 'email-only-retry',
+    })
+    expect(first.delivered).toBe(false)
+    expect((await alertRows())[0]).toMatchObject({ delivered_at: null, delivery_issue: 'email' })
+    clock.advance(2 * 60_000)
+    expect(await retryAlerts(stack.appPool, emailOnly, 10)).toBe(1)
+    // One owner was emailed the first time; the retry emails only the other.
+    expect(mailer.sent).toHaveLength(2)
+    expect(new Set(mailer.sent.map((m) => m.to))).toEqual(new Set([OWNER_1, OWNER_2]))
+    expect((await alertRows())[0].delivered_at).not.toBeNull()
+  })
+
   it('stays undelivered when the channel confirms but an email fails', async () => {
     mailer.failNext(1)
     const result = await raiseAlert(stack.appPool, deps, {

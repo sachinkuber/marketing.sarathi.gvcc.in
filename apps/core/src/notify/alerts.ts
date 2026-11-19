@@ -54,9 +54,10 @@ export async function raiseAlert(pool: Pool, deps: NotifyDeps, alert: NewAlert):
   return { alertId: id, created: true, delivered }
 }
 
-// Email to every platform owner and a message on the second channel. The alert is `delivered` only when the
-// provider confirmed (returned a provider id) every one of them; an owner without an address, no owner at
-// all, or any failure leaves it undelivered for retryAlerts. A retry sends again to those already told.
+// Email to every platform owner and, when one is configured, a message on the second channel. The alert is
+// `delivered` only when the provider confirmed (returned a provider id) every one of them; an owner without
+// an address, no owner at all, or any failure leaves it undelivered for retryAlerts. A retry sends only to
+// those not yet told. With no second channel (ruling R29) that leg is skipped and recorded as not confirmed.
 export async function deliverAlert(pool: Pool, deps: NotifyDeps, alert: AlertRow): Promise<boolean> {
   const subject = `Marketing Sarathi alert (severity ${alert.severity}): ${alert.kind.replace(/_/g, ' ')}`
   const text = `${subject}. ${alert.brand_id ? 'A brand is affected.' : 'It concerns the platform.'} Open Marketing Sarathi to see it.`
@@ -82,10 +83,11 @@ export async function deliverAlert(pool: Pool, deps: NotifyDeps, alert: AlertRow
     if (ok) newlyMailed.push(owner)
     else emailFailed = true
   }
-  let channelOk = Boolean(alert.channel_confirmed_at)
+  const channel = deps.channel
+  let channelOk = channel === undefined || Boolean(alert.channel_confirmed_at)
   let channelNew = false
-  if (!channelOk) {
-    channelOk = await guard('channel', () => deps.channel.send({ subject, text }))
+  if (!channelOk && channel) {
+    channelOk = await guard('channel', () => channel.send({ subject, text }))
     channelNew = channelOk
   }
   const issues: string[] = []
