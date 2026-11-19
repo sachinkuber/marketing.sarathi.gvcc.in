@@ -120,6 +120,18 @@ Run `validate` before the restart, always: a site that does not validate would s
 
 Cloudflare changes its ranges rarely and announces it. To refresh: fetch `https://www.cloudflare.com/ips-v4` and `https://www.cloudflare.com/ips-v6`, replace the lists in `cloudflare-ips.txt`, update its date, copy every range into the global `trusted_proxies`, validate and reload. A Cloudflare address missing from the list makes requests from it look like Cloudflare's own address (one shared limiter bucket), never like a forged one.
 
+### The public name and its relay (production, 2026-11-19)
+
+`marketing.sarathi.gvcc.in` is two levels below the zone `gvcc.in`. Cloudflare's free certificate covers one level only (`*.gvcc.in`), and the owner chose not to pay for Advanced Certificate Manager for now. So, as for staging (`stg-marketing-relay`):
+
+| Piece | What it is |
+|---|---|
+| Worker `marketing-relay` (Cloudflare, Workers & Pages) | Custom domain `marketing.sarathi.gvcc.in`, which gets its own free certificate. Code: `infra/prod/proxy/marketing-relay.js`, pasted in the dashboard editor. It forwards every request unchanged to the origin name and adds `X-Gvcc-Relay: marketing`. Its `workers.dev` address is off |
+| DNS `marketing-sarathi.gvcc.in` (A, proxied) | The origin name, covered by the free `*.gvcc.in` certificate |
+| Proxy site | Rendered from `marketing.caddy` with `__MKT_HOST__` = `marketing-sarathi.gvcc.in`, then three additions by hand: `@direct not header X-Gvcc-Relay marketing` with `redir @direct https://marketing.sarathi.gvcc.in{uri} 302` after the TLS line, and `header_up Host marketing.sarathi.gvcc.in` and `header_up X-Forwarded-Host marketing.sarathi.gvcc.in` in both `reverse_proxy` blocks. The rendered copy is kept at `/opt/mkt/proxy/60-marketing.relay.caddy` |
+
+`PUBLIC_ORIGIN` stays `https://marketing.sarathi.gvcc.in`. The relay is a same-zone subrequest, so Cloudflare still sends the visitor's own address in `CF-Connecting-IP`. Checked on 2026-11-19: four sign-ins from one address were limited at the fourth (429) while a fifth from another address in the same 10 seconds was not (401). The smoke check runs against the public name without `--direct` (the forged-address checks need the origin's own site name). If the owner later buys Advanced Certificate Manager, remove the Worker's custom domain, point an A record for the public name at the origin, and render the site from the template unchanged.
+
 ## First deployment
 
 On the production host, as root, from a checkout of the release (`/opt/mkt/marketing`). Every later deployment repeats steps 2 to 4 in the same order: migrations, then the queue, then core, worker and dashboard, with the core and the worker always together. The firewall from step 4 is already in place by then. Every deployment, the first and every later one, ends with step 11, the firewall check. Every compose command names `--env-file /opt/mkt/compose.env` (step 1).
