@@ -29,6 +29,20 @@ export async function addSuggestions(
   deps: Deps,
   input: { brandId: string; runId: string | null; items: SuggestionInput[] },
 ): Promise<string[]> {
+  const wanted = [...new Set(input.items.flatMap((i) => i.sourceIds))]
+  if (wanted.length > 0) {
+    const known = await client.query<{ n: number }>(
+      `select count(*)::int as n from app.research_source where brand_id = $1 and id = any($2::uuid[])`,
+      [input.brandId, wanted],
+    )
+    const missing = wanted.length - (known.rows[0]?.n ?? 0)
+    if (missing > 0)
+      throw new AppError(
+        422,
+        'unknown_source',
+        `${missing} source id(s) do not belong to this brand's research sources. Use only ids of sources read for this brand.`,
+      )
+  }
   const ids: string[] = []
   for (const item of input.items) {
     const made = await client.query<{ id: string }>(
@@ -116,6 +130,10 @@ async function decideWithin(
     actor: { userId: string }
   },
 ): Promise<{ createdId: string | null }> {
+  if (input.value !== undefined && input.decision !== 'edited')
+    throw new AppError(400, 'invalid_request', 'The request is not valid.', [
+      { part: 'body', path: 'value', message: 'value is only used with "edited"' },
+    ])
   const found = await client.query<SuggestionRow>(
     `select id, step, key, proposed, why, source_ids, confidence, decision, superseded_by
        from app.suggestion where brand_id = $1 and id = $2 for update`,
@@ -155,7 +173,7 @@ async function decideWithin(
       row.id,
       input.decision,
       decidedValue === null || decidedValue === undefined ? null : JSON.stringify(decidedValue),
-      input.reason ?? null,
+      input.reason?.trim() ? input.reason : null,
       input.actor.userId,
     ],
   )
@@ -280,7 +298,8 @@ export async function acceptFound(
       `select id from app.suggestion
         where brand_id = $1 and step = $2 and confidence = 'found'
           and decision is null and superseded_by is null
-        order by created_at, id`,
+        order by created_at, id
+        for update skip locked`,
       [input.brandId, input.step],
     )
     let accepted = 0
@@ -294,8 +313,9 @@ export async function acceptFound(
         })
         accepted += 1
       } catch (err) {
-        // These refusals happen before anything is written, so the transaction is still clean.
-        if (!(err instanceof AppError) || err.status !== 422) throw err
+        // Refusals happen before anything is written, so the transaction is still clean. A 409 means someone
+        // else decided or replaced the row meanwhile: skip it.
+        if (!(err instanceof AppError) || (err.status !== 422 && err.status !== 409)) throw err
       }
     }
     return { accepted }

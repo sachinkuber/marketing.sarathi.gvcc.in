@@ -26,6 +26,10 @@ const decisionBody = z
     reason: z.string().max(2000).optional(),
   })
   .superRefine((b, ctx) => {
+    if (b.value !== undefined && b.decision !== 'edited') {
+      ctx.addIssue({ code: 'custom', path: ['value'], message: 'value is only used with "edited"' })
+      return
+    }
     if (b.value === undefined) {
       if (b.decision === 'edited')
         ctx.addIssue({ code: 'custom', path: ['value'], message: 'An edit needs the new value' })

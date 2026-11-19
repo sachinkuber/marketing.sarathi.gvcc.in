@@ -372,4 +372,103 @@ describe('suggest then decide', () => {
     expect(adds.length).toBeGreaterThan(0)
     expect(adds.at(-1)?.detail).toMatchObject({ count: expect.any(Number) })
   })
+
+  it('accept-found skips a row another transaction holds, and does not wait or fail', async () => {
+    const step = 'choice' as const
+    const [a, b] = await add([
+      { step, key: 'lock-1' },
+      { step, key: 'lock-2' },
+    ])
+    const holder = await stack.db.admin.connect()
+    try {
+      await holder.query('begin')
+      await holder.query('select id from app.suggestion where id = $1 for update', [a])
+      const out = await acceptFound(stack.appPool, deps(), { brandId, step, actor: actor() })
+      expect(out.accepted).toBeGreaterThanOrEqual(1)
+      const state = Object.fromEntries(
+        (
+          await rows('select id, decision from app.suggestion where brand_id = $1 and id = any($2::uuid[])', [
+            [a, b],
+          ])
+        ).map((r) => [r.id, r.decision]),
+      )
+      expect(state[b!]).toBe('accepted')
+      expect(state[a!]).toBeNull()
+    } finally {
+      await holder.query('rollback')
+      holder.release()
+    }
+  })
+
+  it('refuses sources from another brand or unknown, and writes nothing', async () => {
+    const other = await addBrand(stack, `onboarding-other-${(seq += 1)}`)
+    const foreign = (
+      await stack.db.admin.query(
+        `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'site', 'ok', 'x') returning id`,
+        [other],
+      )
+    ).rows[0].id as string
+    const own = await source('site')
+    const before = (await rows('select count(*)::int as n from app.suggestion where brand_id = $1'))[0].n
+    await expect(
+      add([
+        { key: 'ok-one', sourceIds: [own] },
+        { key: 'bad-one', sourceIds: [foreign] },
+      ]),
+    ).rejects.toMatchObject({
+      status: 422,
+      code: 'unknown_source',
+      message: expect.stringContaining('1 source id'),
+    })
+    expect((await rows('select count(*)::int as n from app.suggestion where brand_id = $1'))[0].n).toBe(
+      before,
+    )
+  })
+
+  it('refuses value unless the decision is edited, naming value', async () => {
+    const [id] = await add([{}])
+    for (const decision of ['accepted', 'rejected']) {
+      const reply = await owner.request('POST', `${base()}/${id}/decision`, {
+        body: { decision, value: 'x' },
+      })
+      expect(reply.status).toBe(400)
+      const hit = reply.json.error.details.find((d: { path: string }) => d.path === 'value')
+      expect(hit.message).toContain('"edited"')
+    }
+    await expect(
+      decideSuggestion(stack.appPool, deps(), {
+        brandId,
+        suggestionId: id!,
+        decision: 'accepted',
+        value: 'x',
+        actor: actor(),
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+    expect(
+      (await rows('select decision from app.suggestion where brand_id = $1 and id = $2', [id]))[0].decision,
+    ).toBeNull()
+  })
+
+  it('stores a blank reason as null', async () => {
+    const [a, b] = await add([{}, {}])
+    await decideSuggestion(stack.appPool, deps(), {
+      brandId,
+      suggestionId: a!,
+      decision: 'rejected',
+      reason: '',
+      actor: actor(),
+    })
+    await decideSuggestion(stack.appPool, deps(), {
+      brandId,
+      suggestionId: b!,
+      decision: 'rejected',
+      reason: '  ',
+      actor: actor(),
+    })
+    const r = await rows(
+      'select decided_reason from app.suggestion where brand_id = $1 and id = any($2::uuid[])',
+      [[a, b]],
+    )
+    expect(r.map((x) => x.decided_reason)).toEqual([null, null])
+  })
 })
