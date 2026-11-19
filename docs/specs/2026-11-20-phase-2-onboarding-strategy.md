@@ -2,8 +2,8 @@
 
 | Document control | |
 |---|---|
-| Version | 1 (draft) |
-| Status | **Draft for the owner's approval** |
+| Version | 1 |
+| Status | **Approved** by Sachin Tripathi, platform owner, on 2026-11-20 ("approved, go ahead with the plan") |
 | Date | 2026-11-20 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
