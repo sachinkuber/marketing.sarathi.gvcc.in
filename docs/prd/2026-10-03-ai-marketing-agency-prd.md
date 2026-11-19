@@ -1,7 +1,7 @@
 # AI Marketing Agency Platform — Product Requirements Document
 
 **Date:** 2026-10-03
-**Status:** Master PRD v3, approved by the owner on 2026-10-04 for technical design, estimation and phased Aztek development, subject to resolution of the remaining launch blockers. Product name, baselines, deadline and budget are open (section 20). Recommended defaults awaiting confirmation are in section 21.
+**Status:** Master PRD v4. v3 approved by the owner on 2026-10-04; v4 (AI presenter videos: agent 9, P1-8, AI-21, section 15.9) approved by the owner on 2026-11-19, from `docs/prd/proposals/2026-11-19-ai-avatar-video.md`. v3 was approved for technical design, estimation and phased Aztek development, subject to resolution of the remaining launch blockers. Product name, baselines, deadline and budget are open (section 20). Recommended defaults awaiting confirmation are in section 21.
 **Owner:** Sachin Tripathi. **First brand:** Aztek (aztek.global). **Dashboard:** marketing.sarathi.gvcc.in
 
 ## 1. Summary
@@ -82,7 +82,7 @@ One agent per role in the agency structure supplied by the owner. "Approval" nam
 | 6 | **Graphic Designer** | Posts, carousels, ad creatives, thumbnails | Finished graphics | Per item |
 | 7 | **Copywriter / Content Manager** | Articles, captions, ad copy, emails, landing-page copy | Finished copy | Per item |
 | 8 | **Photographer** | Selects, edits and repurposes uploaded photos; generates AI images to fill gaps; writes shot lists | Edited images, shot lists | Per item |
-| 9 | **Videographer / Video Editor** | Edits uploaded footage into reels, shorts and ads; AI video to fill gaps | Finished videos | Per item |
+| 9 | **Videographer / Video Editor** | Edits uploaded footage into reels, shorts and ads; AI video to fill gaps; AI presenter (avatar) videos from an approved script, using an approved presenter (section 15.9) | Finished videos | Per item; each presenter approved once |
 | 10 | **Animator / Motion Graphics** | Animated explainers, motion titles, logo stings | Motion assets | Per item |
 
 ### 7.4 Digital marketing and distribution
@@ -232,6 +232,7 @@ All requirements in section 15 (AI governance) and section 16 (security, privacy
 | P1-5 | Influencer discovery and outreach drafts | Candidates and outreach drafts are produced; nothing is sent without approval. |
 | P1-6 | Budget and cost tracking | Ad spend and tool cost per brand are shown against approved budgets, with an alert before a cap is reached. |
 | P1-7 | Second brand | 11oils is onboarded as a tenant with no code change. |
+| P1-8 | AI presenter videos | For a brand with an approved presenter, the video agent turns an approved script into a presenter video in the brand's style, in 9:16, 1:1 and 16:9, with captions and the platform's AI label. The video reaches the approval inbox with its script, presenter and cost. Nothing is published without approval. |
 
 ### 11.3 P2 — selling it
 
@@ -447,6 +448,7 @@ The verified-facts list stops invented facts. It does not stop the other ways an
 | AI-10 | Unsafe-advice check | Any instruction that could cause damage, injury or loss must come from guidance on the verified-facts list. Otherwise it is blocked. In lead chats and public replies, agents give no technical or safety advice beyond approved answers. |
 | AI-18 | Maker and checker are separate | No agent approves its own work. Each check is a separate step from the step that produced the item. |
 | AI-19 | Quality scoring | Each content type has a scoring guide covering accuracy, brand voice, clarity, originality, platform fit, call to action and visual quality. The Creative Director agent scores each item, and its scores are compared with the approver's decisions. |
+| AI-21 | Synthetic people | Every video with an AI presenter or cloned voice carries the platform's AI-content label, and a visible "AI presenter" note where the platform has no label. The Legal agent blocks any presenter video without a valid presenter approval, and any cloned likeness without a current consent record (section 15.9). Scripts follow the verified-facts rule like any other copy. |
 
 ### 15.5 Prompt-injection protection
 
@@ -489,6 +491,14 @@ Triggers:
 | AI-20 | Monitoring | Automatic replies are sampled for review each week. Incorrect-claim rate, intervention rate and revision count are tracked, with an alert when any worsens. |
 
 Whether automated replies must say they are automated is open question 22.
+
+### 15.9 AI presenters
+
+1. **Stock presenter.** A generated person from the video tool's library, with commercial rights for this use, approved once per brand by the approver.
+2. **Cloned presenter** (a real person's face or voice). Only with that person's written, recorded consent naming the brand, the uses and the duration. Consent can be withdrawn at any time: from then on no new video uses the likeness, and unpublished drafts are deleted. The consent record is stored with the brand and checked before every render. No public figures, no customers, no minors.
+3. A presenter never makes a claim in their own name ("I used this coating…") unless the real person did and agreed to say it.
+4. Each render is recorded in the cost ledger and counts against the limits in AI-14; a render that would pass a limit is not started. The Creative Director agent scores presenter videos on the AI-19 guide, adding lip-sync and naturalness; a video below the brand's threshold never reaches the approver.
+5. The avatar, voice and editing tools are chosen in the phase 3 spec after a side-by-side trial on real Aztek scripts judged by the owner, behind the provider module so a tool can be swapped. Real footage stays the main video source; presenter videos are an addition.
 
 ## 16. Security, privacy and reliability requirements
 
@@ -756,3 +766,4 @@ Answers given by the owner on 2026-10-03.
 | Onboarding | Research first, then a tailored questionnaire |
 | Agent structure | One agent for each of the 22 agency roles |
 | Paid tools | Acceptable |
+| AI presenter videos | Approved 2026-11-19: agent 9 makes presenter videos; P1-8, AI-21 and section 15.9 added (PRD v4) |
