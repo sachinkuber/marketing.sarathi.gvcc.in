@@ -40,7 +40,7 @@ beforeAll(async () => {
   const today = jobs.now().toISOString().slice(0, 10)
   await stack.db.admin.query(
     `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
-     values ('claude-opus-5-5', $1::date - 30, 4000000, 20000000, 200000, 5000000, 'test')`,
+     values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 'test')`,
     [today],
   )
   await stack.db.admin.query(`select app.record_fx_rate($1::date - 1, 83500000, 'test')`, [today])
@@ -113,12 +113,12 @@ describe('acceptance test 37', () => {
     expect(calls[0]).toMatchObject({
       step: 'summarise',
       status: 'succeeded',
-      model: 'claude-opus-5-5',
+      model: 'claude-sonnet-5-5',
       input_tokens: 1000,
       output_tokens: 500,
       charged_currency: 'USD',
-      usd_micros: '14000',
-      inr_micros: '1169000',
+      usd_micros: '7000',
+      inr_micros: '584500',
     })
     const ledger = await q(
       'select usd_micros, inr_micros, charged_micros, charged_currency, fx_rate_id, run_id from app.cost_ledger where model_call_id = $1',
@@ -126,9 +126,9 @@ describe('acceptance test 37', () => {
     )
     expect(ledger).toHaveLength(1)
     expect(ledger[0]).toMatchObject({
-      usd_micros: '14000',
-      inr_micros: '1169000',
-      charged_micros: '14000',
+      usd_micros: '7000',
+      inr_micros: '584500',
+      charged_micros: '7000',
       charged_currency: 'USD',
       run_id: runId,
     })

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 
 const hasKey = Boolean(process.env.ANTHROPIC_API_KEY)
 
-describe.skipIf(!hasKey)('the pinned SDK works with claude-opus-5-5', () => {
+describe.skipIf(!hasKey)('the pinned SDK works with claude-sonnet-5-5', () => {
   it('returns text, a message ID and token usage', async () => {
     const client = new Anthropic()
     const response = await client.messages.create({
-      model: 'claude-opus-5-5',
+      model: 'claude-sonnet-5-5',
       max_tokens: 2048,
       output_config: { effort: 'low' },
       messages: [{ role: 'user', content: 'Reply with the single word: ready' }],

@@ -1,8 +1,8 @@
 // The production compose file, run (plan, Task 5 step 4): the whole stack comes up under the project name
 // mkt-m7test with secrets generated for this run, `prepare` readies the database, the core answers on
-// 127.0.0.1:4100, the owner bootstrap works, and a restart of the whole stack while five summary jobs wait
+// 127.0.0.1:4110, the owner bootstrap works, and a restart of the whole stack while five summary jobs wait
 // loses none of them.
-// Needs Docker with the Compose plugin, and ports 4100 and 3100 free on 127.0.0.1. It fails, never skips,
+// Needs Docker with the Compose plugin, and ports 4110 and 3110 free on 127.0.0.1. It fails, never skips,
 // without them. On the development server it runs through /opt/mkt-dev/server-run-infra.sh (host network);
 // in CI in the e2e job.
 //   node --test infra/prod/test/stack.test.mjs
@@ -21,9 +21,21 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const composeFile = join(root, 'infra/prod/compose.yaml')
 const PROJECT = 'mkt-m7test'
-const CORE = 'http://127.0.0.1:4100'
+// Published on its own ports (compose.yaml's MKT_CORE_PORT and MKT_DASHBOARD_PORT), so it can run beside `mkt`.
+const CORE_PORT = '4110'
+const DASHBOARD_PORT = '3110'
+const CORE = `http://127.0.0.1:${CORE_PORT}`
 const OWNER = 'owner@example.test'
 const JOBS = 5
+// Its own egress bridges and subnets (the worker's and the backup upload's), so it can run beside a `mkt` stack.
+const TEST_EGRESS = {
+  MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0',
+  MKT_EGRESS_SUBNET: '10.247.74.0/24',
+  MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0',
+  MKT_BACKUP_EGRESS_SUBNET: '10.247.76.0/24',
+  MKT_CORE_PORT: CORE_PORT,
+  MKT_DASHBOARD_PORT: DASHBOARD_PORT,
+}
 
 // Hex keeps every value valid inside a database URL and within the role-password rules.
 const secret = () => randomBytes(32).toString('hex')
@@ -54,7 +66,9 @@ function run(args, options = {}) {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     ...options,
-    env: { ...process.env, MKT_SECRETS: secretsDir, ...options.env },
+    // Its own egress bridge and subnet, so it can run beside a `mkt` stack on the same host; no firewall is
+    // installed for it.
+    env: { ...process.env, MKT_SECRETS: secretsDir, ...TEST_EGRESS, ...options.env },
   })
   return result
 }
@@ -182,7 +196,7 @@ after(() => {
 })
 
 test(
-  'the stack builds, prepares and starts; the core answers on 127.0.0.1:4100',
+  'the stack builds, prepares and starts; the core answers on its own port',
   { timeout: 90 * 60_000 },
   async (t) => {
     // One image at a time: the host's processors are shared with other projects.
@@ -196,13 +210,23 @@ test(
     assert.equal(await status('/api/health/ready'), 200)
     assert.equal(await status('/health/live'), 200)
     // Published on the loopback address only; the data and worker networks have no route out.
-    assert.equal(compose(['port', 'core', '4000']).trim(), '127.0.0.1:4100')
-    assert.equal(compose(['port', 'dashboard', '3000']).trim(), '127.0.0.1:3100')
+    assert.equal(compose(['port', 'core', '4000']).trim(), `127.0.0.1:${CORE_PORT}`)
+    assert.equal(compose(['port', 'dashboard', '3000']).trim(), `127.0.0.1:${DASHBOARD_PORT}`)
+    const egress = run([
+      'network',
+      'inspect',
+      '--format',
+      '{{index .Options "com.docker.network.bridge.name"}} {{range .IPAM.Config}}{{.Subnet}}{{end}}',
+      `${PROJECT}_worker_egress`,
+    ])
+    assert.equal(egress.stdout.trim(), `${TEST_EGRESS.MKT_EGRESS_BRIDGE} ${TEST_EGRESS.MKT_EGRESS_SUBNET}`)
     for (const network of ['data', 'worker']) {
       const internal = run(['network', 'inspect', '--format', '{{.Internal}}', `${PROJECT}_${network}`])
       assert.equal(internal.stdout.trim(), 'true', network)
     }
-    const dashboard = await fetch('http://127.0.0.1:3100/', { signal: AbortSignal.timeout(5000) })
+    const dashboard = await fetch(`http://127.0.0.1:${DASHBOARD_PORT}/`, {
+      signal: AbortSignal.timeout(5000),
+    })
     assert.equal(dashboard.status, 200)
   },
 )
@@ -244,7 +268,7 @@ test(
   async (t) => {
     // Prices and a rate for the stand-in's usage, as the e2e test enters them.
     psql(`insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
-          values ('claude-opus-5-5', current_date - 30, 4000000, 20000000, 200000, 5000000, 'test');
+          values ('claude-sonnet-5-5', current_date - 30, 2000000, 10000000, 100000, 2500000, 'test');
         select app.record_fx_rate(current_date - 1, 83500000, 'test');`)
     const brandId = psql(`select id from app.brand where slug = 'test-brand'`)
     const ownerId = psql(

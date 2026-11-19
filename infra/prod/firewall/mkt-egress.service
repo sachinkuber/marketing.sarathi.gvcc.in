@@ -1,0 +1,22 @@
+# Installs the egress firewall (mkt-egress.sh) at every boot, before Docker starts, for both of the stack's ways
+# out (the worker's bridge and the backup upload's), so neither ever runs on an unrestricted network: Docker
+# restarts the stack's containers as soon as it starts.
+# After the network is online and systemd-resolved has started, so the host's upstream resolvers are known (the
+# script also waits up to MKT_EGRESS_DNS_WAIT seconds for them, and fails rather than install no DNS rule).
+# Settings (MKT_EGRESS_BRIDGE, MKT_BACKUP_EGRESS_BRIDGE, MKT_EGRESS_DNS) come from /opt/mkt/compose.env, the file
+# the compose commands read too, so the bridge names are the same on both sides; absent, the defaults apply.
+# Installed as /etc/systemd/system/mkt-egress.service; docs/operations.md, "Egress firewall".
+[Unit]
+Description=Marketing platform: worker and backup egress firewall (TCP 443 to public addresses)
+After=network-online.target systemd-resolved.service ufw.service netfilter-persistent.service
+Wants=network-online.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/opt/mkt/compose.env
+ExecStart=/opt/mkt/firewall/mkt-egress.sh install
+
+[Install]
+WantedBy=multi-user.target docker.service

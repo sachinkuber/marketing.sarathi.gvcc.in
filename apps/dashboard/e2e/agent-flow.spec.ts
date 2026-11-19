@@ -50,8 +50,8 @@ test('the platform owner starts the summary agent, approves its item, reads the 
   const calls = page.locator('section[aria-labelledby="h-calls"] tbody tr')
   await expect(calls).toHaveCount(1)
   await expect(calls.first()).toContainText('Summarise')
-  await expect(calls.first()).toContainText('$0.014000 · ₹1.169000')
-  await expect(page.locator('dl.kv')).toContainText('$0.014000 · ₹1.169000')
+  await expect(calls.first()).toContainText('$0.007000 · ₹0.584500')
+  await expect(page.locator('dl.kv')).toContainText('$0.007000 · ₹0.584500')
 
   // The audit screen lists the run's entries.
   await page.goto(`/b/${brandId}/settings/audit`)

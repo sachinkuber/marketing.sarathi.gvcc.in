@@ -1,5 +1,7 @@
 import pg from 'pg'
 
+export { totp } from './totp.ts'
+
 export const databaseUrl: string =
   process.env.DATABASE_URL ?? 'postgres://mkt:mkt_dev_only@127.0.0.1:54329/mkt_dev'
 

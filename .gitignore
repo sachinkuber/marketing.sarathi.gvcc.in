@@ -11,3 +11,5 @@ next-env.d.ts
 *.tsbuildinfo
 test-results/
 playwright-report/
+secret-keys/
+2fa/

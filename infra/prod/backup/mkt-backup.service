@@ -1,0 +1,18 @@
+# The daily backup (plan decision 6): runs backup.sh in the `backup` service, then, only if it succeeded, the
+# off-server copy (offsite.sh) in the `offsite` service, from the checkout the stack is built from. Started by mkt-backup.timer; by hand: `systemctl start mkt-backup.service`, then `journalctl -u
+# mkt-backup.service` shows its JSON lines. A failure (any non-zero exit) starts mkt-backup-alert.service, which
+# raises a severity 1 alert through the core.
+# Installed as /etc/systemd/system/mkt-backup.service; docs/operations.md, "Backups".
+[Unit]
+Description=Marketing platform: encrypted database backup
+Requires=docker.service
+After=docker.service
+OnFailure=mkt-backup-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mkt/marketing
+ExecStart=/usr/bin/docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T backup
+ExecStart=/usr/bin/docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops run --rm -T offsite
+TimeoutStartSec=2h
+Nice=10

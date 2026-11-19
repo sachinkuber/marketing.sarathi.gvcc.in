@@ -2,6 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { MemoryExportStore } from '../src/audit/store.ts'
 import { StandInFxSource } from '../src/triggers/fx.ts'
 import { seedRun } from '@mkt/db/testing'
+import {
+  brandScopedRoutes,
+  otherBrandFindings,
+  ownBrandFindings,
+  type ProbeRequest,
+} from '../src/access/isolation-probes.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
 const PASSWORD = 'correct horse battery'
@@ -76,25 +82,17 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
     expect(scoped.some((r) => r.method === 'post' && r.path === '/brands/:brandId/audit/verify')).toBe(true)
   })
 
+  // The probes are shared with the restore drill (apps/ops/src/restore-check.ts).
+  const asAdmin: ProbeRequest = (method, path, body) => admin.request(method, path, { body })
+
   it('answers 404 to a member of brand A for every route when the path names brand B', async () => {
-    for (const route of stack.core.routes.list().filter((r) => r.path.includes(':brandId'))) {
-      const reply = await admin.request(route.method.toUpperCase(), `/api/v1${fill(route.path, brandB)}`, {
-        body: route.method === 'get' ? undefined : {},
-      })
-      expect(reply.status, `${route.method} ${route.path}`).toBe(404)
-      expect(reply.text).not.toContain(brandB)
-      expect(reply.json.error.code).toBe('not_found')
-    }
+    const routes = brandScopedRoutes(stack.core.routes)
+    expect(await otherBrandFindings(routes, asAdmin, (path) => fill(path, brandB), brandB)).toEqual([])
   })
 
   it('does not answer 404 for the same routes in the person’s own brand', async () => {
-    for (const route of stack.core.routes.list().filter((r) => r.path.includes(':brandId'))) {
-      const reply = await admin.request(route.method.toUpperCase(), `/api/v1${fill(route.path, brandA)}`, {
-        body: route.method === 'get' ? undefined : {},
-      })
-      expect([401, 404], `${route.method} ${route.path}`).not.toContain(reply.status)
-      expect(reply.status, `${route.method} ${route.path}`).toBeLessThan(500)
-    }
+    const routes = brandScopedRoutes(stack.core.routes)
+    expect(await ownBrandFindings(routes, asAdmin, (path) => fill(path, brandA))).toEqual([])
   })
 
   it('answers 401 with no session and 403 enrolment_required to someone not yet enrolled, for every such route', async () => {

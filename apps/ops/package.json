@@ -4,15 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "deploy:prepare": "node src/prepare.ts"
+    "deploy:prepare": "node src/prepare.ts",
+    "restore-check": "node src/restore-check.ts",
+    "restore-drill-seed": "node src/restore-check.ts seed"
   },
   "dependencies": {
     "@mkt/db": "*",
     "@mkt/queue": "*",
+    "@mkt/test-support": "*",
     "pg": "8.23.0"
   },
   "devDependencies": {
-    "@mkt/test-support": "*",
+    "@mkt/core": "*",
+    "@mkt/worker": "*",
     "@types/pg": "8.23.1"
   }
 }

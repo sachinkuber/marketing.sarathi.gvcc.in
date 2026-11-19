@@ -3,16 +3,25 @@ import { briefSchema } from '@mkt/shared'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 
+// Who starts the run: a person (the route), or the system (the load-test injector, apps/core/src/load-inject.ts).
+export type RunStarter = { userId: string } | { system: 'load_test' }
+
 export const SUMMARY_AGENT = 'summary'
 export const SUMMARY_RESULT_TYPE = 'summary.v1'
 
 // Starts the summary agent on a brief: the run, its first job and the audit entry commit together or not at
 // all. The brief is checked here too (the route checks it first), so no caller can start a run on a brief the
-// agent's contract refuses. The audit entry carries the brief's length, never its text.
+// agent's contract refuses. The audit entry carries the brief's length, never its text. The first job is
+// interactive (a person is waiting), except for the load test's production-class jobs (spec 17, test 41).
 export async function startSummaryRun(
   pool: Pool,
-  deps: JobsDeps,
-  input: { brandId: string; brief: string; actor: { userId: string } },
+  deps: Pick<JobsDeps, 'queue' | 'backlogLimit' | 'audit'>,
+  input: {
+    brandId: string
+    brief: string
+    actor: RunStarter
+    jobClass?: 'interactive' | 'production'
+  },
 ): Promise<{ runId: string; jobId: string }> {
   const parsed = briefSchema.safeParse({ brief: input.brief })
   if (!parsed.success) {
@@ -36,19 +45,21 @@ export async function startSummaryRun(
     const runId = await createRun(client, input.brandId, {
       agent: SUMMARY_AGENT,
       definitionVersionId,
-      startedByKind: 'user',
-      startedById: input.actor.userId,
+      startedByKind: 'userId' in input.actor ? 'user' : 'system',
+      startedById: 'userId' in input.actor ? input.actor.userId : null,
     })
     const jobId = await createJob(client, deps, input.brandId, {
       runId,
-      jobClass: 'interactive',
+      jobClass: input.jobClass ?? 'interactive',
       input: { brief },
       expectedResultType: SUMMARY_RESULT_TYPE,
     })
     await deps.audit.record(
       {
         action: 'agent.run_started',
-        actor: input.actor.userId,
+        ...('userId' in input.actor
+          ? { actor: input.actor.userId }
+          : { actor: null, actorKind: 'system' as const }),
         brandId: input.brandId,
         subject: runId,
         outcome: 'success',

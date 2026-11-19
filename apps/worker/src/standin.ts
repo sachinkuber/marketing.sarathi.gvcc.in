@@ -7,6 +7,8 @@ export interface StandInOptions {
   logFile: string
   crashBeforeReplyOn?: string
   crashAfterReplyOn?: string
+  // How long to wait before answering. The worker process takes it from STANDIN_DELAY_MS (the load test,
+  // spec 17 test 41: a fixed 2 s answer), which its configuration reads only when MODEL_BACKEND=standin.
   delayMs?: number
   // What the model answers for a request, given the content of its last message (default `reply:<content>`).
   replyFor?: (step: string) => string

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const composeFile = join(root, 'infra/prod/compose.yaml')
 const examples = join(root, 'infra/prod/secrets.example')
-const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard']
+const ENV_FILES = ['postgres', 'roles', 'core', 'worker', 'dashboard', 'backup', 'offsite']
 const PRODUCT = ['postgres', 'core', 'worker', 'dashboard']
 const GiB = 1024 ** 3
 let secretsDir
@@ -22,7 +22,16 @@ let secretsDir
 function compose(args, env = {}) {
   const result = spawnSync('docker', ['compose', '-f', composeFile, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, MKT_SECRETS: secretsDir, ...env },
+    // The egress variables unset (empty), so the file's own defaults are what is tested.
+    env: {
+      ...process.env,
+      MKT_SECRETS: secretsDir,
+      MKT_EGRESS_BRIDGE: '',
+      MKT_EGRESS_SUBNET: '',
+      MKT_BACKUP_EGRESS_BRIDGE: '',
+      MKT_BACKUP_EGRESS_SUBNET: '',
+      ...env,
+    },
   })
   if (result.status !== 0) {
     throw new Error(
@@ -79,8 +88,18 @@ const healthText = (service) => [service.healthcheck?.test ?? []].flat().join(' 
 test('the compose file loads with the example env files', () => {
   const resolved = JSON.parse(compose(['--profile', 'ops', 'config', '--format', 'json']))
   assert.equal(resolved.name, 'mkt')
-  assert.deepEqual(Object.keys(resolved.services).sort(), ['core', 'dashboard', 'ops', 'postgres', 'worker'])
+  assert.deepEqual(Object.keys(resolved.services).sort(), [
+    'backup',
+    'core',
+    'dashboard',
+    'offsite',
+    'ops',
+    'postgres',
+    'worker',
+  ])
   assert.deepEqual(resolved.services.ops.profiles, ['ops'])
+  assert.deepEqual(resolved.services.backup.profiles, ['ops'])
+  assert.deepEqual(resolved.services.offsite.profiles, ['ops'])
   // The database lives in the volume mkt_pg (project mkt, volume pg).
   assert.equal(resolved.volumes.pg.name, 'mkt_pg')
   assert.ok(resolved.services.postgres.volumes.some((v) => v.type === 'volume' && v.source === 'pg'))
@@ -155,6 +174,94 @@ test('the worker is not on app', () => {
   assert.deepEqual(Object.keys(services.ops.networks), ['data'])
 })
 
+const envFileNames = (service) =>
+  (service.env_file ?? []).map((f) => (typeof f === 'string' ? f : f.path).split('/').pop())
+
+// The daily backup (Task 8), split in two (ruling R18). `backup`: the ops image with backup.sh, root without
+// capabilities, the host folder /opt/mkt/backups at /backups, the database's credentials, and the data network
+// only. `offsite`: offsite.sh, /backups read-only, only the remote's settings, and backup_egress only.
+test('the backup service: ops image, root with no capabilities, /opt/mkt/backups, on data only', () => {
+  const backup = config(['ops']).services.backup
+  assert.equal(backup.build.target, 'ops')
+  assert.deepEqual(backup.entrypoint, ['/usr/local/bin/mkt-backup'])
+  assert.equal(backup.user, '0:0')
+  assert.deepEqual(backup.cap_drop, ['ALL'])
+  assert.deepEqual(backup.security_opt, ['no-new-privileges:true'])
+  assert.equal(backup.restart, 'no')
+  assert.deepEqual(
+    backup.volumes.map((v) => `${v.type} ${v.source} ${v.target} ${v.read_only === true}`),
+    ['bind /opt/mkt/backups /backups false'],
+  )
+  assert.deepEqual(envFileNames(backup), ['postgres.env', 'backup.env'])
+  // backup.env may be absent (a new installation); backup.sh then refuses, naming BACKUP_AGE_RECIPIENT.
+  assert.deepEqual(
+    backup.env_file.map((f) => f.required !== false),
+    [true, false],
+  )
+  assert.deepEqual(Object.keys(backup.networks), ['data'])
+  assert.equal(backup.depends_on?.postgres?.condition, 'service_healthy')
+})
+
+test('the offsite service: /backups read-only, the remote settings only, on backup_egress only', () => {
+  const resolved = config(['ops'])
+  const offsite = resolved.services.offsite
+  assert.equal(offsite.build.target, 'ops')
+  assert.deepEqual(offsite.entrypoint, ['/usr/local/bin/mkt-offsite'])
+  assert.equal(offsite.user, '0:0')
+  assert.deepEqual(offsite.cap_drop, ['ALL'])
+  assert.deepEqual(offsite.security_opt, ['no-new-privileges:true'])
+  assert.deepEqual(
+    offsite.volumes.map((v) => `${v.type} ${v.source} ${v.target} ${v.read_only === true}`),
+    ['bind /opt/mkt/backups /backups true'],
+  )
+  assert.deepEqual(envFileNames(offsite), ['offsite.env'])
+  assert.equal(offsite.env_file[0].required, false)
+  assert.deepEqual(Object.keys(offsite.networks), ['backup_egress'])
+  assert.equal(offsite.depends_on, undefined)
+  // No database setting in its environment or its env file.
+  for (const key of Object.keys(offsite.environment ?? {}))
+    assert.doesNotMatch(key, /DATABASE|POSTGRES|^PG/, key)
+  const example = readFileSync(join(examples, 'offsite.env.example'), 'utf8')
+  assert.doesNotMatch(example, /^\s*#?\s*(ADMIN_DATABASE_URL|POSTGRES_\w*|PG\w*)=/m)
+  // backup_egress: the offsite service's alone, an ordinary bridge (not internal), IPv4 only.
+  const egress = resolved.networks.backup_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.notEqual(egress.internal, true)
+  assert.equal(egress.enable_ipv6, false)
+  for (const [name, service] of Object.entries(resolved.services)) {
+    if (name !== 'offsite') assert.ok(!Object.keys(service.networks ?? {}).includes('backup_egress'), name)
+  }
+  // The Dockerfile puts the three scripts in the ops image under the names compose and the runbook use.
+  const dockerfile = readFileSync(join(root, 'infra/prod/Dockerfile'), 'utf8')
+  for (const [script, name] of [
+    ['backup', 'mkt-backup'],
+    ['restore', 'mkt-restore'],
+    ['offsite', 'mkt-offsite'],
+  ]) {
+    assert.ok(
+      dockerfile.includes(`\nCOPY --chmod=0755 infra/prod/backup/${script}.sh /usr/local/bin/${name}\n`),
+      script,
+    )
+  }
+})
+
+// A new installation runs `ops prepare` before the owner has given the age key or the bucket: backup.env and
+// offsite.env may be absent.
+test('the ops profile loads without backup.env and offsite.env', () => {
+  const fresh = mkdtempSync(join(tmpdir(), 'mkt-compose-fresh-'))
+  try {
+    for (const name of ENV_FILES.filter((n) => n !== 'backup' && n !== 'offsite')) {
+      copyFileSync(join(examples, `${name}.env.example`), join(fresh, `${name}.env`))
+    }
+    const services = JSON.parse(
+      compose(['--profile', 'ops', 'config', '--format', 'json'], { MKT_SECRETS: fresh }),
+    ).services
+    assert.ok(services.ops && services.backup && services.offsite)
+  } finally {
+    rmSync(fresh, { recursive: true, force: true })
+  }
+})
+
 test('published ports bind 127.0.0.1 only', () => {
   const published = []
   for (const [name, service] of Object.entries(config(['ops']).services)) {
@@ -168,6 +275,174 @@ test('published ports bind 127.0.0.1 only', () => {
     }
   }
   assert.deepEqual(published.sort(), ['core 127.0.0.1:4100:4000', 'dashboard 127.0.0.1:3100:3000'])
+})
+
+// The host firewall (infra/prod/firewall/mkt-egress.sh) keys on the egress bridge's name, installed before the
+// stack starts; the subnet is fixed and IPv6 is off (the rules are IPv4 only).
+test('worker_egress has a fixed bridge name, the firewall script uses it, a fixed subnet, and no IPv6', () => {
+  const egress = config().networks.worker_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.equal(egress.enable_ipv6, false)
+  assert.equal(egress.driver_opts?.['com.docker.network.bridge.name'], 'mkt-egress0')
+  assert.ok('mkt-egress0'.length <= 15)
+  assert.deepEqual(
+    egress.ipam?.config?.map((c) => c.subnet),
+    ['10.247.73.0/24'],
+  )
+  // The firewall script reads the same variable with the same default.
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.match(script, /^BRIDGE=\$\{MKT_EGRESS_BRIDGE:-mkt-egress0\}$/m)
+  const raw = readFileSync(composeFile, 'utf8')
+  assert.match(raw, /com\.docker\.network\.bridge\.name: \$\{MKT_EGRESS_BRIDGE:-mkt-egress0\}$/m)
+  // Overridden, as the test stack does.
+  const other = JSON.parse(
+    compose(['config', '--format', 'json'], {
+      MKT_EGRESS_BRIDGE: 'mkt-m7t-egress0',
+      MKT_EGRESS_SUBNET: '10.247.74.0/24',
+    }),
+  ).networks.worker_egress
+  assert.equal(other.driver_opts['com.docker.network.bridge.name'], 'mkt-m7t-egress0')
+  assert.deepEqual(
+    other.ipam.config.map((c) => c.subnet),
+    ['10.247.74.0/24'],
+  )
+})
+
+// The backup upload's way out gets the same firewall (ruling R19): a fixed bridge name the script also defaults
+// to, a fixed subnet, no IPv6; a test stack overrides both.
+test('backup_egress has a fixed bridge name, the firewall script uses it, a fixed subnet, and no IPv6', () => {
+  const egress = config(['ops']).networks.backup_egress
+  assert.equal(egress.driver, 'bridge')
+  assert.equal(egress.enable_ipv6, false)
+  assert.equal(egress.driver_opts?.['com.docker.network.bridge.name'], 'mkt-bkegress0')
+  assert.ok('mkt-bkegress0'.length <= 15)
+  assert.deepEqual(
+    egress.ipam?.config?.map((c) => c.subnet),
+    ['10.247.75.0/24'],
+  )
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.match(script, /^BACKUP_BRIDGE=\$\{MKT_BACKUP_EGRESS_BRIDGE:-mkt-bkegress0\}$/m)
+  const raw = readFileSync(composeFile, 'utf8')
+  assert.match(raw, /com\.docker\.network\.bridge\.name: \$\{MKT_BACKUP_EGRESS_BRIDGE:-mkt-bkegress0\}$/m)
+  const other = JSON.parse(
+    compose(['--profile', 'ops', 'config', '--format', 'json'], {
+      MKT_BACKUP_EGRESS_BRIDGE: 'mkt-m7t-bkegr0',
+      MKT_BACKUP_EGRESS_SUBNET: '10.247.76.0/24',
+    }),
+  ).networks.backup_egress
+  assert.equal(other.driver_opts['com.docker.network.bridge.name'], 'mkt-m7t-bkegr0')
+  assert.deepEqual(
+    other.ipam.config.map((c) => c.subnet),
+    ['10.247.76.0/24'],
+  )
+})
+
+// infra/prod/compose.env.example, copied to /opt/mkt/compose.env: read by compose (--env-file), by the firewall
+// unit (systemd EnvironmentFile=) and by a shell. Its values are the defaults of compose.yaml and mkt-egress.sh,
+// and no value line carries a trailing comment (systemd would keep it as part of the value).
+test('compose.env.example holds the compose and firewall defaults, in a form all three readers accept', () => {
+  const exampleFile = join(root, 'infra/prod/compose.env.example')
+  const text = readFileSync(exampleFile, 'utf8')
+  const values = {}
+  for (const line of text.split('\n')) {
+    if (line.trim() === '' || /^\s*#/.test(line)) continue
+    const [, key, value] = line.match(/^([A-Z][A-Z0-9_]*)=("[^"#]*"|[^\s"#]+)$/) ?? []
+    assert.ok(key, `not KEY=value, or a trailing comment or space: ${JSON.stringify(line)}`)
+    values[key] = value
+  }
+  const raw = readFileSync(composeFile, 'utf8')
+  const composeDefault = (name) => raw.match(new RegExp(`\\$\\{${name}:-([^}]+)\\}`))?.[1]
+  const script = readFileSync(join(root, 'infra/prod/firewall/mkt-egress.sh'), 'utf8')
+  assert.deepEqual(Object.keys(values).sort(), [
+    'MKT_BACKUP_EGRESS_BRIDGE',
+    'MKT_BACKUP_EGRESS_SUBNET',
+    'MKT_EGRESS_BRIDGE',
+    'MKT_EGRESS_SUBNET',
+  ])
+  assert.equal(values.MKT_EGRESS_BRIDGE, composeDefault('MKT_EGRESS_BRIDGE'))
+  assert.equal(values.MKT_EGRESS_BRIDGE, script.match(/^BRIDGE=\$\{MKT_EGRESS_BRIDGE:-([^}]+)\}$/m)?.[1])
+  assert.equal(values.MKT_EGRESS_SUBNET, composeDefault('MKT_EGRESS_SUBNET'))
+  assert.equal(values.MKT_BACKUP_EGRESS_BRIDGE, 'mkt-bkegress0')
+  assert.equal(values.MKT_BACKUP_EGRESS_BRIDGE, composeDefault('MKT_BACKUP_EGRESS_BRIDGE'))
+  assert.equal(
+    values.MKT_BACKUP_EGRESS_BRIDGE,
+    script.match(/^BACKUP_BRIDGE=\$\{MKT_BACKUP_EGRESS_BRIDGE:-([^}]+)\}$/m)?.[1],
+  )
+  assert.equal(values.MKT_BACKUP_EGRESS_SUBNET, '10.247.75.0/24')
+  assert.equal(values.MKT_BACKUP_EGRESS_SUBNET, composeDefault('MKT_BACKUP_EGRESS_SUBNET'))
+  // The resolvers are offered as a commented line only.
+  assert.match(text, /^# MKT_EGRESS_DNS="[^"]+"$/m)
+  // Compose reads it as written (the egress variables absent from the environment, so only the file sets them).
+  const env = { ...process.env, MKT_SECRETS: secretsDir }
+  delete env.MKT_EGRESS_BRIDGE
+  delete env.MKT_EGRESS_SUBNET
+  delete env.MKT_BACKUP_EGRESS_BRIDGE
+  delete env.MKT_BACKUP_EGRESS_SUBNET
+  const read = spawnSync(
+    'docker',
+    [
+      'compose',
+      '--env-file',
+      exampleFile,
+      '-f',
+      composeFile,
+      '--profile',
+      'ops',
+      'config',
+      '--format',
+      'json',
+    ],
+    { encoding: 'utf8', env },
+  )
+  assert.equal(read.status, 0, read.stderr)
+  const viaFile = JSON.parse(read.stdout).networks.worker_egress
+  assert.equal(viaFile.driver_opts['com.docker.network.bridge.name'], 'mkt-egress0')
+  assert.deepEqual(
+    viaFile.ipam.config.map((c) => c.subnet),
+    ['10.247.73.0/24'],
+  )
+  const backupViaFile = JSON.parse(read.stdout).networks.backup_egress
+  assert.equal(backupViaFile.driver_opts['com.docker.network.bridge.name'], 'mkt-bkegress0')
+  assert.deepEqual(
+    backupViaFile.ipam.config.map((c) => c.subnet),
+    ['10.247.75.0/24'],
+  )
+})
+
+// infra/prod/compose.proxy-network.yaml, for a proxy that runs in Docker (Task 7). The base file's own tests above
+// stay as they are; this override only adds the core and the dashboard to the proxy's external network.
+test('the proxy-network override adds only core and dashboard to the named external network', () => {
+  const overrideFile = join(root, 'infra/prod/compose.proxy-network.yaml')
+  const withOverride = (env) =>
+    spawnSync(
+      'docker',
+      ['compose', '-f', composeFile, '-f', overrideFile, '--profile', 'ops', 'config', '--format', 'json'],
+      { encoding: 'utf8', env: { ...process.env, MKT_SECRETS: secretsDir, ...env } },
+    )
+  // Refused without the network's name.
+  const unnamed = withOverride({ MKT_PROXY_NETWORK: '' })
+  assert.notEqual(unnamed.status, 0)
+  assert.match(unnamed.stderr, /MKT_PROXY_NETWORK/)
+  const result = withOverride({ MKT_PROXY_NETWORK: 'web' })
+  assert.equal(result.status, 0, result.stderr)
+  const { services, networks } = JSON.parse(result.stdout)
+  assert.equal(networks.proxy.name, 'web')
+  assert.equal(networks.proxy.external, true)
+  assert.deepEqual(Object.keys(services.core.networks).sort(), ['app', 'data', 'proxy', 'worker'])
+  assert.deepEqual(Object.keys(services.dashboard.networks).sort(), ['app', 'proxy'])
+  assert.deepEqual(services.core.networks.proxy.aliases, ['mkt-core'])
+  assert.deepEqual(services.dashboard.networks.proxy.aliases, ['mkt-dashboard'])
+  for (const name of ['postgres', 'worker', 'ops']) {
+    assert.ok(!Object.keys(services[name].networks ?? {}).includes('proxy'), name)
+  }
+  // Everything else is the base file's: the project's own networks stay internal and scoped, ports on 127.0.0.1.
+  assert.equal(networks.worker.internal, true)
+  assert.equal(networks.data.internal, true)
+  for (const key of ['app', 'worker', 'data', 'worker_egress']) assert.equal(networks[key].name, `mkt_${key}`)
+  assert.deepEqual(
+    Object.values(services).flatMap((s) => (s.ports ?? []).map((p) => p.host_ip)),
+    ['127.0.0.1', '127.0.0.1'],
+  )
 })
 
 test('worker stop_grace_period is at least 45s', () => {

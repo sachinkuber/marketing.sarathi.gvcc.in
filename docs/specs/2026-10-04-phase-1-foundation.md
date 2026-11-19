@@ -2,9 +2,9 @@
 
 | Document control | |
 |---|---|
-| Version | 5 |
+| Version | 7 |
 | Status | **Approved** |
-| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 5 approved"). Replaces version 4. The change was approved as described in the queue trial findings, section 5. |
+| Approved by | Sachin Tripathi, platform owner, on 2026-10-04 ("Phase 1 spec version 5 approved"). Replaces version 4. The change was approved as described in the queue trial findings, section 5. Version 6 (2026-11-18): the only change is Next.js 16.3.4 → 16.3.8 in section 3, approved by the owner on 2026-11-18 (milestone 7 plan, decision 9). Version 7 (2026-11-18): the only change is the default model, `claude-opus-5-5` → `claude-sonnet-5-5`, in section 3, approved by the owner on 2026-11-18 (ruling R20). |
 | Date | 2026-10-04 |
 | Owner | Sachin Tripathi (platform owner) |
 | Prepared by | Claude Code |
@@ -49,7 +49,7 @@ Aztek is created as the first brand. A second test brand with its own rows is cr
 
 ## 3. Pinned stack
 
-The stack is set by the approved **Tech stack version 2** (`docs/tech-stack/2026-10-04-tech-stack.md`), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts. Confirmed on Node 24.20.0 in milestone 1; see `docs/progress.md`.
+The stack is set by the approved **Tech stack version 4** (`docs/tech-stack/2026-10-04-tech-stack.md`; version 3 changes only Next.js to 16.3.8, and version 4 changes only the model to `claude-sonnet-5-5`, both approved 2026-11-18), which gives the reason for each choice. Its rule: the most stable, widely used option for each job, a major version about a year old or more, and no release younger than 30 days. The versions below are copied from it. The first work package (section 18, package 0) confirms they work together before other work starts. Confirmed on Node 24.20.0 in milestone 1; see `docs/progress.md`.
 
 | Component | Selection | Version |
 |---|---|---|
@@ -60,13 +60,13 @@ The stack is set by the approved **Tech stack version 2** (`docs/tech-stack/2026
 | Database driver | pg | 8.23.0 |
 | Schema changes | node-pg-migrate, running plain SQL files | 8.0.4 |
 | Queries | Kysely | 0.29.5 |
-| Dashboard | Next.js with React | 16.3.4 with 19.2.8 |
+| Dashboard | Next.js with React | 16.3.8 with 19.2.8 |
 | Styling and forms | Tailwind CSS; React Hook Form | 4.3.3; 7.87.0 |
 | Core HTTP framework | Express, with helmet | 5.2.1; 8.3.0 |
 | Schema validation | Zod, strict objects | 4.5.4 |
 | Sign-in | Better Auth, with its two-factor plugin | 1.7.2 |
 | Job queue | pg-boss, behind our own queue interface | 12.30.0 |
-| Model SDK | Anthropic TypeScript SDK; model `claude-opus-5-5` | 0.124.0 |
+| Model SDK | Anthropic TypeScript SDK; model `claude-sonnet-5-5` | 0.124.0 |
 | Unit and integration tests | Vitest, against a real Postgres of the pinned version | 4.1.11 |
 | Browser tests | Playwright | 1.63.0 |
 | Code checks and formatting | ESLint; Prettier | 10.10.0; 3.9.6 |

@@ -1,22 +1,12 @@
 import { databaseUrl } from '@mkt/test-support'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import pg from 'pg'
+import { RUNTIME_ROLES, seedProbeBrand, type RoleName } from './isolation-probes.ts'
 import { migrate } from './migrate.ts'
 
-export type RoleName = 'app' | 'queue' | 'audit_writer' | 'owner_view' | 'readonly'
-export const RUNTIME_ROLES: RoleName[] = ['app', 'queue', 'audit_writer', 'owner_view', 'readonly']
-
-// A payload and hash that satisfy the content_version triggers, for tests that need a version row and do
-// not care about its content. The payload names the row's own brand and item, as the trigger requires.
-export function versionRow(brandId: string, itemId: string): { payload: string; hash: string } {
-  const payload = JSON.stringify({
-    brand_id: brandId,
-    content_item_id: itemId,
-    kind: 'summary',
-    schema: 'content-version/1',
-  })
-  return { payload, hash: 'sha256:' + createHash('sha256').update(payload, 'utf8').digest('hex') }
-}
+// The role names, the version-row helper and the brand seed live with the isolation probes, which the restore
+// drill also runs; they are re-exported here for the tests.
+export { RUNTIME_ROLES, versionRow, type RoleName } from './isolation-probes.ts'
 
 export interface TestDatabase {
   name: string
@@ -95,35 +85,7 @@ export async function seedBrand(db: TestDatabase, id: string, slug: string): Pro
   await client.connect()
   try {
     await client.query('begin')
-    await client.query("select set_config('app.brand_id', $1, true)", [id])
-    await client.query('insert into app.brand (id, name, slug) values ($1, $2, $2)', [id, slug])
-    const user = await client.query(
-      `insert into auth."user" (name, email, "emailVerified") values ($1, $2, true) returning id`,
-      [slug, `${slug}@example.test`],
-    )
-    const userId = user.rows[0].id as string
-    await client.query("insert into app.membership (brand_id, user_id, role) values ($1, $2, 'approver')", [
-      id,
-      userId,
-    ])
-    await client.query(
-      "insert into app.invite (brand_id, email, role, token_hash, expires_at, invited_by) values ($1, $2, 'viewer', gen_random_bytes(32), now() + interval '72 hours', $3)",
-      [id, `${slug}@example.test`, userId],
-    )
-    const item = await client.query(
-      "insert into app.content_item (brand_id, kind) values ($1, 'summary') returning id",
-      [id],
-    )
-    const itemId = item.rows[0].id as string
-    const v = versionRow(id, itemId)
-    await client.query(
-      "insert into app.content_version (brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind) values ($1, $2, 1, $3, $4, 'cv1', 'system')",
-      [id, itemId, v.payload, v.hash],
-    )
-    await client.query(
-      "insert into app.kill_switch (brand_id, scope, active, set_by) values ($1, 'brand', false, gen_random_uuid())",
-      [id],
-    )
+    await seedProbeBrand(client, id, slug)
     await client.query('commit')
   } catch (error) {
     await client.query('rollback').catch(() => undefined)

@@ -103,7 +103,8 @@ RUN set -eu; cd /tmp; \
   unzip -q -j rclone.zip rclone-v1.75.2-linux-amd64/rclone -d rclone; \
   mkdir /out; mv age/age age/age-keygen rclone/rclone /out/; chmod 0755 /out/*
 
-# ---- ops: migrations, role passwords and the queue (`prepare`), plus the backup tools.
+# ---- ops: migrations, role passwords and the queue (`prepare`), the `alert` command, plus the backup tools
+# and scripts.
 # postgresql-client-17 comes from the PostgreSQL project's archive repository (every version stays there),
 # signed by the key with fingerprint B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8, checked before it is trusted.
 # The archive also holds betas and release candidates, so every package taken from it is pinned: the client
@@ -129,6 +130,10 @@ COPY packages/db packages/db
 COPY packages/queue packages/queue
 COPY packages/test-support packages/test-support
 COPY apps/ops apps/ops
+# The backup and restore scripts (Task 8), run by the `backup` service of compose.yaml.
+COPY --chmod=0755 infra/prod/backup/backup.sh /usr/local/bin/mkt-backup
+COPY --chmod=0755 infra/prod/backup/restore.sh /usr/local/bin/mkt-restore
+COPY --chmod=0755 infra/prod/backup/offsite.sh /usr/local/bin/mkt-offsite
 USER node
 ENTRYPOINT ["node", "apps/ops/src/main.ts"]
 CMD ["prepare"]
