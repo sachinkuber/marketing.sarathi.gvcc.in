@@ -41,7 +41,24 @@ Facts gathered read-only on 2026-11-18. This is the staging host, where the work
 
 ### Production host
 
-To be recorded when the owner gives access (A1), with the same commands, read-only: `nproc`, `free -h`, `swapon --show`, `df -h /`, `uptime`, `docker version`, `docker compose version`, `docker ps`, the proxy and its configuration, how TLS is issued, and n8n's container and limits (`docker inspect <n8n> --format '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}'`). The test 41 figures in spec section 17 are then corrected from these facts, as a change for the owner to approve.
+The owner's dedicated server PROD-C (A1), shared with n8n only. Facts gathered read-only on 2026-11-19, after the deployment, with the commands above:
+
+| Fact | Value |
+|---|---|
+| System | Ubuntu 24.04.5 LTS, built by the owner's infrastructure project |
+| Processors | 4 (`nproc`) |
+| Memory | 15 GiB total, about 13 GiB available with the product and n8n running (`free -h`) |
+| Swap | 4 GiB swap file, `vm.swappiness` 10, unused |
+| Free disk | 180 GB free of 193 GB on `/` (7 % used) |
+| Load | about 0.0 at rest |
+| Docker | Engine 29.10.0, Compose 5.8.0. `daemon.json` binds published ports to `127.0.0.1` by default and keeps containers running across daemon restarts |
+| Proxy | Caddy 2.10 (`caddy:2.10-alpine`) in Docker, compose project in `/opt/stack/caddy`, on the networks `web` and `mkt_proxy` (case 2 above), `admin off`. The marketing site is `/opt/stack/caddy/sites/60-marketing.caddy` |
+| TLS | Cloudflare in front, Full (strict). Caddy issues nothing: `import cf gvcc.in` loads the Cloudflare origin certificate in `/etc/gvcc-certs`, which covers `*.gvcc.in` and `*.sarathi.gvcc.in`. The public name goes through a Worker relay ("The public name and its relay", below) |
+| Firewall | `ufw`: SSH, and 80 and 443 from Cloudflare's ranges only, with the matching `DOCKER-USER` chain; the product's egress chains (below) come first in `DOCKER-USER` |
+| n8n | n8n 2.36.8 in Docker (`/opt/stack/n8n`), no processor or memory limit, about 0.5 GiB in use; its database is on the owner's separate Postgres cluster, reached over a private network |
+| Product | Its own Postgres container (owner decision 2026-11-19: not the shared cluster), core, worker and dashboard, within the compose limits (2 processor cores and 4 GB together) |
+
+Test 41 ran on this server on 2026-11-19 with spec section 17's figures unchanged (`docs/acceptance/2026-11-19-test-41.md`).
 
 ## How the proxy reaches the app
 

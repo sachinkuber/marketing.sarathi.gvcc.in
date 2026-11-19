@@ -65,6 +65,21 @@ The exit code is 0 when no criterion failed, 1 when one did, and 2 when the run 
 - **Quiet hour, no `ops`.** The one-shot `ops`, `backup` and `offsite` services must not run during the test.
   They are also left out of the container figures.
 
+## After the run
+
+Put the worker back on `anthropic` (above), then remove the two test users and close the load-test brands with
+`tools/load/cleanup.sql`, as the database superuser, in the postgres container:
+
+```sh
+docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U postgres -d mkt < tools/load/cleanup.sql
+```
+
+It touches only `loadtest<N>@load-test.invalid` users and `load-test-` brands, and refuses while a load-test run
+is still open or when anything else refers to those users. The users go with their sessions, passwords and
+second factors. The brands are kept as `closed`: their runs, model calls and cost rows are the test's evidence.
+Running it twice is harmless. It ends by printing how many platform owners are left (the real owner only).
+
 ## What it does
 
 | Part              | How                                                                                                                                                                                                                                                                                                                                        |
@@ -92,7 +107,7 @@ The exit code is 0 when no criterion failed, 1 when one did, and 2 when the run 
 | Queue, production: claimed within 5 s of a free slot      | Production-class jobs only. The brand's occupancy of the class is rebuilt from every job read (first claim to last end). The wait runs from the later of the job's creation and the start of the last stretch before its claim in which fewer than `--slot-cap` (default 3, spec 9.2) production jobs of the brand were running. Full slots up to the claim give 0. The plain wait from creation is shown too. |
 | All production jobs finish inside the test                | The run succeeded, and its end time is no later than the end of the window. The count by the end of the grace period is shown too.                                                                                                                                                                                                                                                                             |
 | No job in the dead-letter list                            | `GET /api/v1/brands/:id/jobs/dead` is empty for both brands.                                                                                                                                                                                                                                                                                                                                                   |
-| n8n canary no more than 20 % slower                       | Every canary run in the window is judged: the longest one, against the mean of the successful runs over the hour before, must be at most 120 %. The mean during the window is shown for context.                                                                                                                                                                                                               |
+| n8n canary no more than 20 % slower                       | The mean of the canary's successful runs in the window, against their mean over the hour before, must be at most 120 % (owner ruling R27, 2026-11-19: single runs vary by up to about 2.5 times with no load, so one slow run proves nothing). The slowest run in the window is shown for context.                                                                                                             |
 | No n8n execution fails                                    | No execution of any workflow, started in the window, has the state `error`, `crashed` or `failed`.                                                                                                                                                                                                                                                                                                             |
 
 ## Notes
