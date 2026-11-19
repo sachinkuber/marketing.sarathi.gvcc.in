@@ -10,7 +10,16 @@ export type RoleName = 'app' | 'queue' | 'audit_writer' | 'owner_view' | 'readon
 export const RUNTIME_ROLES: RoleName[] = ['app', 'queue', 'audit_writer', 'owner_view', 'readonly']
 
 // Tables seedProbeBrand fills. The catalog probes prove the same policy exists on all the others.
-export const SEEDED = ['membership', 'invite', 'content_item', 'content_version', 'kill_switch'] as const
+export const SEEDED = [
+  'membership',
+  'invite',
+  'content_item',
+  'content_version',
+  'kill_switch',
+  'suggestion',
+  'verified_fact',
+  'safety_rule',
+] as const
 
 // Runs `fn` as the run-time role `role`, with the session's brand set (or none), and undoes whatever it did.
 // The tests connect as the role itself; the restore drill switches to it inside one transaction it rolls back.
@@ -65,6 +74,22 @@ export async function seedProbeBrand(client: Queryable, id: string, slug: string
   await client.query(
     "insert into app.kill_switch (brand_id, scope, active, set_by) values ($1, 'brand', false, gen_random_uuid())",
     [id],
+  )
+  await client.query(
+    "insert into app.suggestion (brand_id, step, key, proposed, why, confidence) values ($1, 'profile', 'tagline', '\"x\"'::jsonb, 'seeded', 'found')",
+    [id],
+  )
+  const source = await client.query(
+    "insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', 'seeded') returning id",
+    [id],
+  )
+  await client.query(
+    "insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date) values ($1, 'seeded', 'sha256:seed', $2, $3, current_date + 365)",
+    [id, [source.rows[0].id as string], userId],
+  )
+  await client.query(
+    "insert into app.safety_rule (brand_id, kind, text, why, confirmed_by) values ($1, 'forbidden_word', 'seeded', 'seeded', $2)",
+    [id, userId],
   )
 }
 
