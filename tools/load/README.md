@@ -5,10 +5,10 @@ the container figures it also needs the Docker CLI. It prints figures, statuses 
 prints a credential or a test user's address.
 
 ```sh
-LOAD_USERS_FILE=/root/load-users.json \
+LOAD_USERS_FILE=/root/load-users.json ADMIN_DATABASE_URL=postgres://postgres:...@postgres:5432/mkt \
 N8N_API_URL=https://n8n.example N8N_API_KEY=... \
 node tools/load/run.mjs --origin https://marketing.sarathi.gvcc.in --connect http://127.0.0.1:4100 \
-  --minutes 30 --jobs 300 --users 10 --probe-every 10 --project mkt \
+  --minutes 30 --jobs 300 --users 10 --probe-every 10 --project mkt --slot-cap 3 \
   --results docs/acceptance/<date>-test-41.md
 ```
 
@@ -29,15 +29,32 @@ The exit code is 0 when no criterion failed, 1 when one did, and 2 when the run 
   ```json
   {
     "users": [
-      { "email": "...", "password": "...", "totpSecret": "BASE32...", "brand": "aztek-global" },
-      { "email": "...", "password": "...", "totpSecret": "BASE32...", "brand": "test-brand" }
+      { "email": "...", "password": "...", "totpSecret": "BASE32...", "brand": "load-test-a" },
+      { "email": "...", "password": "...", "totpSecret": "BASE32...", "brand": "load-test-b" }
     ]
   }
   ```
 
   The file is named by `LOAD_USERS_FILE`. It must be mode 0600 and belong to the user running the tool.
   Instead of the file, the tool also reads `LOAD_USER_1_EMAIL`, `_PASSWORD`, `_TOTP` and `_BRAND`, and the
-  same for `LOAD_USER_2_`. Credentials are never taken from the command line. `brand` is a slug or an id.
+  same for `LOAD_USER_2_`. Credentials are never taken from the command line. `brand` must be a load-test
+  brand slug (`load-test-...`). The platform owner sees every brand, so no membership is needed.
+
+- **The production jobs are injected (controller ruling R22).** No HTTP route makes a production-class job, so
+  the tool runs the load-test injector, `apps/core/src/load-inject.ts`, in this project's core container with
+  `docker exec -e ADMIN_DATABASE_URL`. The injector makes summary runs through the product's own path
+  (`startSummaryRun`: the run, the job input, its control row, the queue send and the audit entry, in one
+  transaction), with a production-class first job, started by the system. It refuses unless it is given
+  `--load-test` and every brand's slug starts with `load-test-`. It creates those brands when they are missing,
+  before the users sign in. `ADMIN_DATABASE_URL` is the superuser's address as the core container reaches it
+  (`postgres.env`). It is passed by name, never on a command line. The same command by hand:
+
+  ```sh
+  docker exec -i -e ADMIN_DATABASE_URL <core container> node apps/core/src/load-inject.ts \
+    --load-test --brands load-test-a,load-test-b --jobs 300 --minutes 30
+  ```
+
+  After the test, the two load-test brands and their runs stay in the database. Remove them with the test users.
 
 - **n8n (optional).** Set `N8N_API_URL` (the n8n origin) and `N8N_API_KEY`, and `N8N_CANARY_WORKFLOW_ID`
   if you have it. Without the id, the tool looks up `Marketing — canary` by name. The tool only lists
@@ -47,40 +64,39 @@ The exit code is 0 when no criterion failed, 1 when one did, and 2 when the run 
 
 ## What it does
 
-| Part              | How                                                                                                                                                                                                                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-in           | Email and password, then the authenticator code (`/api/auth/two-factor/verify-totp`). The code is computed with `packages/test-support`'s `totp`. A session that ends mid-run is signed in again.                                                                            |
-| Jobs              | `--jobs` summary runs (`POST /api/v1/brands/:id/agents/summary/runs`), sent evenly over the window, alternating the two brands. The first is sent at the start of the window.                                                                                                |
-| Probes            | One summary run every `--probe-every` seconds, alternating brands. The first is sent half a gap after the start.                                                                                                                                                             |
-| Dashboard users   | `--users` users. Each sends one GET a second on a fixed beat, cycling through the brand's home, status and runs, the brand list and the session.                                                                                                                             |
-| Container figures | Every 5 s, `docker stats --no-stream` on this project's running containers, chosen by the `com.docker.compose.project` label (no other project is sampled). Restart counts, states and the out-of-memory flag are read before and after, and `docker events` for the window. |
-| Server figures    | `/proc/stat` (processor) and `/proc/vmstat` (`pswpin`, `pswpout`) at the start and the end of the window. These files show the whole host, even from inside a container.                                                                                                     |
-| After the window  | It waits up to `--grace` seconds for the last runs to end, using the brands' run lists. Then it reads each run's detail and the dead-letter list of each brand. Each run-detail read writes an owner-read audit entry. That is expected.                                     |
-| n8n               | It waits 65 s, so that the last canary run is recorded. Then it lists the executions back to an hour before the window.                                                                                                                                                      |
+| Part              | How                                                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sign-in           | Email and password, then the authenticator code (`/api/auth/two-factor/verify-totp`). The code is computed with `packages/test-support`'s `totp`. A session that ends mid-run is signed in again.                                                                                                                                          |
+| Production jobs   | `--jobs` production-class summary runs from the injector, sent evenly over the window less its last 60 s (ruling R23), alternating the two brands. The first is sent at the start of the window, the last 60 s before its end, so every job can finish inside the test. Each summary leads to an interactive check job, as in the product. |
+| Probes            | One summary run over HTTP (`POST /api/v1/brands/:id/agents/summary/runs`, interactive class) every `--probe-every` seconds, alternating brands. The first is sent half a gap after the start.                                                                                                                                              |
+| Dashboard users   | `--users` users. Each sends one GET a second on a fixed beat, cycling through the brand's home, status and runs, the brand list and the session. The beat does not wait for the answer, so a slow answer does not hold back later requests (no coordinated omission).                                                                      |
+| Container figures | Every 5 s, `docker stats --no-stream` on this project's running containers, chosen by the `com.docker.compose.project` label (no other project is sampled). Restart counts, states and the out-of-memory flag are read before and after, and `docker events` for the window.                                                               |
+| Server figures    | `/proc/stat` (processor) and `/proc/vmstat` (`pswpin`, `pswpout`) at the start and the end of the window. These files show the whole host, even from inside a container.                                                                                                                                                                   |
+| After the window  | It waits up to `--grace` seconds for the last runs to end, using the brands' run lists. Then it reads each run's detail and the dead-letter list of each brand. Each run-detail read writes an owner-read audit entry. That is expected.                                                                                                   |
+| n8n               | It waits 65 s, so that the last canary run is recorded. Then it lists the executions back to an hour before the window.                                                                                                                                                                                                                    |
 
 ## How each criterion is judged
 
-| Criterion (spec 17)                                       | Measured as                                                                                                                                                                                                          |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workload: 2 brands, 300 jobs, 10 users, a probe each 10 s | The arguments and the jobs actually sent. The stand-in's 2 s answer is checked as the median model-call time in the run details (1.9 s to 3 s).                                                                      |
-| Duration 30 minutes                                       | The window length.                                                                                                                                                                                                   |
-| Product limits: 2 cores, 4 GB                             | The peak, across samples, of the summed `docker stats` processor figure (100 % = one core) and memory figure. The limit is 4 GiB, the sum of the compose limits.                                                     |
-| No restart or stop for lack of memory                     | No container replaced, no change in restart count, every container still running, no out-of-memory flag, and no `oom`, `die`, `kill`, `stop` or `restart` event in the window.                                       |
-| Server: average processor below 80 %, no swapping         | The busy share of `/proc/stat` over the window, and zero pages swapped in or out. The load generator's own processor use is included when it runs on the same host.                                                  |
-| Core API: p95 < 500 ms, p99 < 1.5 s                       | Every request the tool sent in the window (dashboard GETs and run starts), timed by the client, nearest-rank percentiles. Any failed request (not 200 or 201, a timeout of 10 s, or a network error) fails the row.  |
-| Queue, interactive: 95 % of probes claimed within 1 s     | For each probe's summary job, the time from the job's creation (same transaction as the queue send) to its first attempt (the claim). Both times come from the server's clock.                                       |
-| Queue, production: claimed within 5 s of a free slot      | The tool cannot see the slots. So a job's wait is counted from the later of two moments: its creation, or the last end of another job of the same brand before its claim. The plain wait from creation is shown too. |
-| All jobs finish inside the test                           | The run succeeded, and its end time is no later than the end of the window. The count by the end of the grace period is shown too.                                                                                   |
-| No job in the dead-letter list                            | `GET /api/v1/brands/:id/jobs/dead` is empty for both brands.                                                                                                                                                         |
-| n8n canary no more than 20 % slower                       | The mean duration of successful canary runs in the window, against their mean over the hour before. The longest run is shown too.                                                                                    |
-| No n8n execution fails                                    | No execution of any workflow, started in the window, has the state `error`, `crashed` or `failed`.                                                                                                                   |
+| Criterion (spec 17)                                       | Measured as                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workload: 2 brands, 300 jobs, 10 users, a probe each 10 s | The arguments and the jobs actually sent. The stand-in's 2 s answer is checked as the median model-call time in the run details (1.9 s to 3 s).                                                                                                                                                                                                                                                                |
+| Duration 30 minutes                                       | The window length.                                                                                                                                                                                                                                                                                                                                                                                             |
+| Product limits: 2 cores, 4 GB                             | The peak, across samples, of the summed `docker stats` processor figure (100 % = one core) and memory figure. The limit is 4 GiB, the sum of the compose limits.                                                                                                                                                                                                                                               |
+| No restart or stop for lack of memory                     | No container replaced, no change in restart count, every container still running, no out-of-memory flag, and no `oom`, `die`, `kill`, `stop` or `restart` event in the window.                                                                                                                                                                                                                                 |
+| Server: average processor below 80 %, no swapping         | The busy share of `/proc/stat` over the window, and zero pages swapped in or out. The load generator's own processor use is included when it runs on the same host.                                                                                                                                                                                                                                            |
+| Core API: p95 < 500 ms, p99 < 1.5 s                       | Every request the tool sent in the window (dashboard GETs and probe starts), timed by the client to the end of the body, nearest-rank percentiles. Any failed request (not 200 or 201, a timeout of 10 s, or a network error) fails the row. Requests go out on a fixed schedule, so latency is not hidden by coordinated omission.                                                                            |
+| Queue, interactive: 95 % of probes claimed within 1 s     | For each probe's summary job, the time from the job's creation (same transaction as the queue send) to its first attempt (the claim). Both times come from the server's clock. The time from the tool to the core (network and request handling) is not included; it is in the API rows.                                                                                                                       |
+| Queue, production: claimed within 5 s of a free slot      | Production-class jobs only. The brand's occupancy of the class is rebuilt from every job read (first claim to last end). The wait runs from the later of the job's creation and the start of the last stretch before its claim in which fewer than `--slot-cap` (default 3, spec 9.2) production jobs of the brand were running. Full slots up to the claim give 0. The plain wait from creation is shown too. |
+| All production jobs finish inside the test                | The run succeeded, and its end time is no later than the end of the window. The count by the end of the grace period is shown too.                                                                                                                                                                                                                                                                             |
+| No job in the dead-letter list                            | `GET /api/v1/brands/:id/jobs/dead` is empty for both brands.                                                                                                                                                                                                                                                                                                                                                   |
+| n8n canary no more than 20 % slower                       | Every canary run in the window is judged: the longest one, against the mean of the successful runs over the hour before, must be at most 120 %. The mean during the window is shown for context.                                                                                                                                                                                                               |
+| No n8n execution fails                                    | No execution of any workflow, started in the window, has the state `error`, `crashed` or `failed`.                                                                                                                                                                                                                                                                                                             |
 
-## Deviations from the letter of spec 17
+## Notes
 
-- **Job class.** Spec 17 says "production jobs". The only way to start the trivial agent over HTTP is a
-  summary run, and a summary run is an interactive-class job (its check job is interactive too). The 300 jobs
-  and the probes therefore share the interactive class. The tool keeps them apart by run.
-- **Slot wait.** The "free slot" moment is an estimate, described above.
+- **Slot occupancy.** The occupancy counts the jobs the tool read: the injected runs and the probes in the two
+  load-test brands, which have no other work. A retried job holds its slot from its first claim to its last end.
+- **Results file.** The origin and the `--connect` address are written as "(set)".
 
 ## Results
 

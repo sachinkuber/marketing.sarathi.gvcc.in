@@ -2,23 +2,32 @@
 // Node 24 and, for the container figures, the Docker CLI; no dependency.
 //
 //   node tools/load/run.mjs --origin <url> [--connect <url>] [--minutes 30] [--jobs 300] [--users 10]
-//                           [--probe-every 10] [--project mkt] [--grace 120] [--results <file.md>]
+//                           [--probe-every 10] [--project mkt] [--grace 120] [--slot-cap 3] [--results <file.md>]
 //
 //   --origin        The product's public origin (its PUBLIC_ORIGIN). Sent as the Origin header, which the core
 //                   requires on every write, and where requests go unless --connect is given.
 //   --connect       Send the requests here instead, e.g. http://127.0.0.1:4100 on the host itself.
 //   --minutes       Length of the test window (spec: 30).
-//   --jobs          Summary jobs submitted evenly over the window, alternating the two brands (spec: 300).
+//   --jobs          Production-class summary jobs injected evenly over the window less its last 60 s (ruling
+//                   R23), alternating the two brands
+//                   (spec: 300), by the load-test injector (apps/core/src/load-inject.ts) run in this project's
+//                   core container with `docker exec`. The probes and the users go over HTTP.
 //   --users         Simulated dashboard users, each making one GET a second (spec: 10).
 //   --probe-every   Seconds between interactive probe jobs (spec: 10).
 //   --project       Compose project whose containers `docker stats` samples (label com.docker.compose.project).
 //   --grace         Seconds after the window to wait for the last runs to end before reading the figures.
+//   --slot-cap      The production cap of a brand (spec 9.2: 3 with one worker process for the class).
 //   --results       Also write the results table to this Markdown file (e.g. docs/acceptance/<date>-test-41.md).
+//                   The origin and --connect are written as "(set)".
 //
 // Credentials never come from the command line and are never printed (not even the addresses):
 //   LOAD_USERS_FILE  A JSON file, mode 0600, {"users": [{"email", "password", "totpSecret", "brand"}, {...}]}:
 //                    two users, one per brand ("brand" is the brand's slug or id). Or, without the file:
 //   LOAD_USER_1_EMAIL, LOAD_USER_1_PASSWORD, LOAD_USER_1_TOTP, LOAD_USER_1_BRAND, and the same with _2_.
+// ADMIN_DATABASE_URL  The database superuser's address as the core container reaches it (postgres.env), handed to
+//                     the injector by name (`docker exec -e ADMIN_DATABASE_URL`), never on a command line.
+// The two brands must be load-test brands (slug `load-test-...`): the injector refuses any other, and creates
+// them when missing, before the users sign in.
 // Starting a summary run is the platform owner's alone (see_other_brands, plan M5 decision 5), and every
 // platform owner has a second factor (SEC-1), so each user needs its authenticator secret ("totpSecret").
 //
@@ -31,7 +40,7 @@
 // STANDIN_DELAY_MS=2000 (the worker refuses the stand-in outside NODE_ENV=test). Set it back afterwards.
 //
 // What it measures, and how, is in tools/load/README.md. It prints figures, statuses and error names only.
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { totp } from '../../packages/test-support/src/totp.ts'
 
@@ -97,6 +106,7 @@ export function parseArgs(argv) {
     probeEvery: SPEC.probeEvery,
     project: 'mkt',
     grace: 120,
+    slotCap: BRAND_CAPS.production,
     results: null,
   }
   for (let i = 0; i < argv.length; i += 1) {
@@ -130,6 +140,9 @@ export function parseArgs(argv) {
         options.project = project
         break
       }
+      case '--slot-cap':
+        options.slotCap = whole(value(), '--slot-cap', 1, 100)
+        break
       case '--grace':
         options.grace = whole(value(), '--grace', 0, 3600)
         break
@@ -146,6 +159,20 @@ export function parseArgs(argv) {
   }
   if (!options.origin) throw new Error('--origin is missing')
   return options
+}
+
+// The arguments as written into the results: the addresses are not (the connect address may be a private one).
+export function maskArgs(argv) {
+  const out = []
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    const name = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg
+    if (name === '--origin' || name === '--connect') {
+      out.push(name, '(set)')
+      if (!arg.includes('=')) i += 1
+    } else out.push(arg)
+  }
+  return out.join(' ')
 }
 
 // --- credentials ---------------------------------------------------------------------------------------------
@@ -209,6 +236,9 @@ export function loadUsers(
     throw new Error('two test users are needed (LOAD_USERS_FILE or LOAD_USER_1_* and LOAD_USER_2_*)')
   }
   const users = raw.map((user, i) => checkUser(user, i + 1))
+  if (!users.every((u) => /^load-test-[a-z0-9][a-z0-9-]*$/.test(u.brand))) {
+    throw new Error("each test user's brand must be a load-test brand slug (load-test-...)")
+  }
   if (users[0].brand === users[1].brand)
     throw new Error('the two test users must be for two different brands')
   return users
@@ -316,39 +346,55 @@ export function swapPages(before, after) {
 // check job each summary leads to. Times in ms since the epoch.
 export function jobsOf(detail, brand, kind) {
   return (detail.jobs ?? []).map((job) => {
-    const first = job.attempts?.[0]
+    const attempts = job.attempts ?? []
     return {
       brand,
       kind,
+      class: job.jobClass,
       runId: detail.run?.id,
       summary: job.expectedResultType === 'summary.v1',
       createdAt: Date.parse(job.createdAt),
-      claimedAt: first ? Date.parse(first.startedAt) : null,
-      endedAt: job.attempts?.length
-        ? Math.max(...job.attempts.map((a) => (a.endedAt ? Date.parse(a.endedAt) : -Infinity)))
+      claimedAt: attempts.length ? Date.parse(attempts[0].startedAt) : null,
+      // Still running (an attempt with no end) holds its slot to the end of the reading.
+      endedAt: attempts.length
+        ? attempts.some((a) => !a.endedAt)
+          ? Infinity
+          : Math.max(...attempts.map((a) => Date.parse(a.endedAt)))
         : null,
     }
   })
 }
 
-// "Claimed within 5 s of a slot being free for its brand." The test sees no slot directly, so a job's wait is
-// counted from the later of its creation and the most recent end of another job of the same brand before its
-// claim: when the brand's slots were full, that end is when the slot it took became free. Never longer than
-// the plain wait from creation; jobs never claimed count as an infinite wait.
-export function slotWaits(jobs) {
-  const ends = new Map()
-  for (const j of jobs) {
-    if (j.endedAt != null && Number.isFinite(j.endedAt)) {
-      if (!ends.has(j.brand)) ends.set(j.brand, [])
-      ends.get(j.brand).push({ at: j.endedAt, job: j })
-    }
-  }
+// The per-brand caps of spec 9.2 (packages/queue CLASS_SETTINGS brandCap), for one worker process per class.
+export const BRAND_CAPS = { interactive: 2, publishing: 2, production: 3, bulk: 1 }
+
+// "Claimed within 5 s of a slot being free for its brand." The brand's occupancy of the job's class is rebuilt
+// from every job read (claim to last end). A job's wait runs from the later of its creation and the start of
+// the last stretch before its claim in which fewer than the cap of its brand and class were running. If the
+// slots were full right up to the claim, the wait is 0. Never claimed: an infinite wait.
+export function slotWaits(jobs, caps = BRAND_CAPS) {
   return jobs.map((j) => {
     if (j.claimedAt == null) return Infinity
-    const freed = (ends.get(j.brand) ?? [])
-      .filter((e) => e.job !== j && e.at <= j.claimedAt)
-      .reduce((latest, e) => Math.max(latest, e.at), -Infinity)
-    return j.claimedAt - Math.max(j.createdAt, freed)
+    const cap = caps[j.class] ?? Infinity
+    const others = jobs.filter(
+      (k) => k !== j && k.brand === j.brand && k.class === j.class && k.claimedAt != null,
+    )
+    const end = (k) => k.endedAt ?? Infinity
+    const running = (t) => others.filter((k) => k.claimedAt <= t && end(k) > t).length
+    const points = [
+      ...new Set(
+        [j.createdAt, ...others.flatMap((k) => [k.claimedAt, end(k)])].filter(
+          (t) => t >= j.createdAt && t < j.claimedAt,
+        ),
+      ),
+    ].sort((x, y) => x - y)
+    // Walk the stretches between the change points back from the claim while a slot was free.
+    let freeFrom = j.claimedAt
+    for (let i = points.length - 1; i >= 0; i -= 1) {
+      if (running(points[i]) >= cap) break
+      freeFrom = points[i]
+    }
+    return j.claimedAt - freeFrom
   })
 }
 
@@ -397,7 +443,7 @@ export function evaluate(m) {
     m.options.jobs === SPEC.jobs && m.options.users === SPEC.users && m.options.probeEvery === SPEC.probeEvery
   row(
     'Workload',
-    'Two brands, 300 summary jobs evenly, 10 users at 1 request a second, a probe every 10 s',
+    'Two brands, 300 production-class jobs evenly, 10 users at 1 request a second, a probe every 10 s',
     `${m.brands} brands, ${m.submitted.jobs} of ${m.options.jobs} jobs sent, ${m.options.users} users, ` +
       `a probe every ${m.options.probeEvery} s (${m.submitted.probes} sent)`,
     '2 brands, 300 jobs, 10 users, 10 s',
@@ -496,16 +542,16 @@ export function evaluate(m) {
   const queue = m.production
   row(
     'Queue, production',
-    'Every job claimed within 5 s of a slot being free for its brand',
+    'Every production job claimed within 5 s of a slot being free for its brand',
     queue.count
-      ? `max ${ms(queue.maxSlotWait)} after a slot was free (plain wait from creation: p95 ${ms(queue.p95Wait)}, max ${ms(queue.maxWait)})`
-      : 'no job read',
+      ? `max ${ms(queue.maxSlotWait)} after a slot was free, over ${queue.count} production-class jobs (cap ${m.options.slotCap} a brand; plain wait from creation: p95 ${ms(queue.p95Wait)}, max ${ms(queue.maxWait)})`
+      : 'no production job read',
     '<= 5000 ms, every job',
     queue.count ? verdict(queue.maxSlotWait <= SPEC.slotClaimMs) : NOT,
   )
   row(
     'Queue, production',
-    'All jobs finish inside the test',
+    'All production jobs finish inside the test',
     `${queue.finishedInWindow} of ${m.options.jobs} finished inside the window (${queue.finishedByGrace} by its end + ${m.options.grace} s)`,
     `${m.options.jobs} of ${m.options.jobs}`,
     verdict(queue.finishedInWindow === m.options.jobs),
@@ -530,14 +576,14 @@ export function evaluate(m) {
     )
     row('Impact on n8n', 'No n8n execution fails during the test', why, '0', NOT)
   } else {
-    const ratio =
-      n8n.baselineMeanMs && n8n.windowMeanMs != null ? n8n.windowMeanMs / n8n.baselineMeanMs : null
+    // Each run in the window is judged: its longest against the mean of the hour before.
+    const ratio = n8n.baselineMeanMs && n8n.windowMaxMs != null ? n8n.windowMaxMs / n8n.baselineMeanMs : null
     row(
       'Impact on n8n',
       'The canary takes no more than 20 percent longer than its average over the hour before',
       ratio == null
         ? `canary runs: ${n8n.baselineRuns} before, ${n8n.windowRuns} during`
-        : `mean ${ms(n8n.windowMeanMs)} during (max ${ms(n8n.windowMaxMs)}, ${n8n.windowRuns} runs) against ${ms(n8n.baselineMeanMs)} before (${n8n.baselineRuns} runs): ${(ratio * 100).toFixed(0)} %`,
+        : `slowest run ${ms(n8n.windowMaxMs)} = ${(ratio * 100).toFixed(0)} % of the mean before, ${ms(n8n.baselineMeanMs)} (${n8n.baselineRuns} runs); mean ${ms(n8n.windowMeanMs)} during (${n8n.windowRuns} runs)`,
       '<= 120 %',
       ratio == null ? NOT : verdict(ratio <= SPEC.canaryFactor),
     )
@@ -811,11 +857,25 @@ async function dockerSample(project) {
   if (ids.length === 0) return null
   const stats = await sh('docker', ['stats', '--no-stream', '--format', '{{json .}}', ...ids])
   if (!stats.ok) return null
-  return stats.out
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .map((s) => ({ name: s.Name, cpu: parseCpu(s.CPUPerc), mem: parseMem(s.MemUsage) }))
+  return parseStatsLines(stats.out)
+}
+
+// `docker stats --format '{{json .}}'` output -> one reading per container. A line that is not JSON, or whose
+// figures are unreadable (a container stopping during the reading shows "--"), is skipped.
+export function parseStatsLines(text) {
+  const out = []
+  for (const line of String(text).split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const s = JSON.parse(line)
+      const cpu = parseCpu(s.CPUPerc)
+      const mem = parseMem(s.MemUsage)
+      if (typeof s.Name === 'string' && cpu != null && mem != null) out.push({ name: s.Name, cpu, mem })
+    } catch {
+      // skipped
+    }
+  }
+  return out
 }
 
 function readProc(file) {
@@ -868,6 +928,74 @@ async function readN8n(settings, window) {
   }
 }
 
+// --- the production jobs: the load-test injector in the core container ------------------------------------
+
+async function coreContainer(project) {
+  const r = await sh('docker', [
+    'ps',
+    '-q',
+    '--no-trunc',
+    '--filter',
+    `label=com.docker.compose.project=${project}`,
+    '--filter',
+    'label=com.docker.compose.service=core',
+    '--filter',
+    'status=running',
+  ])
+  return r.ok ? (r.out.split('\n').find(Boolean) ?? null) : null
+}
+
+// The injector's arguments name brands and counts only; the superuser's address goes by name in the environment.
+function injectorArgs(container, brands, jobs, minutes) {
+  return [
+    'exec',
+    '-i',
+    '-e',
+    'ADMIN_DATABASE_URL',
+    container,
+    'node',
+    'apps/core/src/load-inject.ts',
+    '--load-test',
+    '--brands',
+    brands.join(','),
+    '--jobs',
+    String(jobs),
+    '--minutes',
+    String(minutes),
+  ]
+}
+
+// Runs the injector; each JSON line it prints goes to `onEvent`. Resolves with its exit code.
+function runInjector(args, adminUrl, onEvent) {
+  return new Promise((resolve) => {
+    const child = spawn('docker', args, {
+      env: { ...process.env, ADMIN_DATABASE_URL: adminUrl },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let buffered = ''
+    child.stdout.on('data', (chunk) => {
+      buffered += chunk
+      let at
+      while ((at = buffered.indexOf('\n')) >= 0) {
+        const line = buffered.slice(0, at)
+        buffered = buffered.slice(at + 1)
+        try {
+          onEvent(JSON.parse(line))
+        } catch {
+          // not an event line
+        }
+      }
+    })
+    // The injector prints error names only; its last line is kept for the log.
+    let lastError = ''
+    child.stderr.on('data', (chunk) => {
+      lastError = String(chunk).trim().split('\n').pop() ?? ''
+    })
+    child.on('error', (error) => resolve({ code: -1, error: errorName(error) }))
+    child.on('close', (code) => resolve({ code, error: lastError.slice(0, 200) }))
+  })
+}
+
 // --- the run -------------------------------------------------------------------------------------------------
 
 function log(text) {
@@ -878,8 +1006,21 @@ export async function main(argv, env) {
   const options = parseArgs(argv)
   const users = loadUsers(env)
   const n8n = n8nSettings(env)
+  const adminUrl = env.ADMIN_DATABASE_URL
+  if (!adminUrl) {
+    throw new Error(
+      'ADMIN_DATABASE_URL is missing: the production jobs are injected with the superuser address',
+    )
+  }
   const base = options.connect ?? options.origin
   if (!n8n) log('n8n API not configured: the two n8n criteria will be reported "not measured"')
+
+  // The load-test brands exist before the users look for them (the injector makes them when missing).
+  const core = await coreContainer(options.project)
+  if (!core) throw new Error(`the core container of project ${options.project} is not running`)
+  const slugs = users.map((u) => u.brand)
+  const prepared = await runInjector(injectorArgs(core, slugs, 0, 0), adminUrl, () => undefined)
+  if (prepared.code !== 0) throw new Error(`the injector could not prepare the brands: ${prepared.error}`)
 
   const actors = []
   for (const [i, user] of users.entries()) {
@@ -940,16 +1081,20 @@ export async function main(argv, env) {
   }
 
   const timers = []
-  // Jobs: evenly over the window, the first at its start.
-  const jobGap = windowMs / options.jobs
-  for (let n = 0; n < options.jobs; n += 1) {
-    timers.push(
-      setTimeout(() => {
+  // Production jobs: the injector sends them evenly over the window less its last 60 s, the first at its start.
+  const bySlug = new Map(actors.map((a) => [a.brand.slug, a]))
+  const injector = runInjector(
+    injectorArgs(core, slugs, options.jobs, options.minutes),
+    adminUrl,
+    (event) => {
+      if (event.event === 'load_job' && bySlug.has(event.brand)) {
         submitted.jobs += 1
-        submit('job', n)
-      }, n * jobGap),
-    )
-  }
+        tracked.push({ kind: 'job', actor: bySlug.get(event.brand), runId: event.runId })
+      } else if (event.event === 'load_job_failed') {
+        log(`production job ${event.n} not made: ${event.error}`)
+      }
+    },
+  )
   // Probes: one every probe-every seconds, the first half a gap in, so they do not coincide with the jobs.
   for (
     let n = 0, at = (options.probeEvery * 1000) / 2;
@@ -1017,6 +1162,8 @@ export async function main(argv, env) {
     clearInterval(t)
   }
   await Promise.allSettled([...inFlight])
+  const injected = await injector
+  if (injected.code !== 0) log(`the injector ended with ${injected.code}: ${injected.error}`)
   const windowEnd = Date.now()
   const procStatAfter = readProc('/proc/stat')
   const vmAfter = readProc('/proc/vmstat')
@@ -1101,11 +1248,13 @@ export async function main(argv, env) {
   const latencies = api.map((a) => a.ms)
   const probeJobs = jobs.filter((j) => j.kind === 'probe' && j.summary)
   const probeWaits = probeJobs.map((j) => (j.claimedAt == null ? Infinity : j.claimedAt - j.createdAt))
-  const loadJobs = jobs.filter((j) => j.kind === 'job' && j.summary)
-  const allWaits = slotWaits(jobs)
+  // The injected runs' first jobs, production class; the occupancy counts every job read, by brand and class.
+  const isProduction = (j) => j.kind === 'job' && j.summary && j.class === 'production'
+  const loadJobs = jobs.filter(isProduction)
+  const allWaits = slotWaits(jobs, { ...BRAND_CAPS, production: options.slotCap })
   const loadSlotWaits = jobs
     .map((j, i) => ({ j, w: allWaits[i] }))
-    .filter(({ j }) => j.kind === 'job' && j.summary)
+    .filter(({ j }) => isProduction(j))
     .map(({ w }) => w)
   const loadWaits = loadJobs.map((j) => (j.claimedAt == null ? Infinity : j.claimedAt - j.createdAt))
   const loadRuns = tracked.filter((t) => t.kind === 'job')
@@ -1156,9 +1305,9 @@ export async function main(argv, env) {
     date: new Date(start).toISOString().slice(0, 10),
     start: new Date(start).toISOString().slice(0, 19).replace('T', ' '),
     end: new Date(windowEnd).toISOString().slice(0, 19).replace('T', ' '),
-    origin: options.origin,
+    origin: '(set)',
     project: options.project,
-    args: argv.join(' '),
+    args: maskArgs(argv),
     fullWorkload:
       options.minutes === SPEC.minutes &&
       options.jobs === SPEC.jobs &&
@@ -1184,9 +1333,10 @@ if (import.meta.main) {
     (error) => {
       const message = error instanceof Error ? error.message : ''
       // Our own messages name an argument, a variable or a status; anything else is reported by name only.
-      const ours = /^(--|LOAD_|N8N_|two test users|test user|the |a test user|sign-in|unknown argument)/.test(
-        message,
-      )
+      const ours =
+        /^(--|LOAD_|N8N_|ADMIN_DATABASE_URL|two test users|test user|each test user|the |a test user|sign-in|unknown argument)/.test(
+          message,
+        )
       process.stderr.write(
         `load test failed: ${ours ? message : errorName(error)}\n${ours && message.startsWith('--') ? `${USAGE}\n` : ''}`,
       )

@@ -13,6 +13,8 @@ import {
   percentile,
   renderResults,
   slotWaits,
+  parseStatsLines,
+  maskArgs,
   summarizeDocker,
   swapPages,
 } from './run.mjs'
@@ -89,23 +91,26 @@ describe('the test users', () => {
   })
 
   it('reads two users from a 0600 file', () => {
-    const users = loadUsers({ LOAD_USERS_FILE: '/x' }, file(0o600, [user(1, 'a'), user(2, 'b')]))
-    expect(users.map((u) => u.brand)).toEqual(['a', 'b'])
+    const users = loadUsers(
+      { LOAD_USERS_FILE: '/x' },
+      file(0o600, [user(1, 'load-test-a'), user(2, 'load-test-b')]),
+    )
+    expect(users.map((u) => u.brand)).toEqual(['load-test-a', 'load-test-b'])
   })
 
   it('refuses a file others can read, or one owned by someone else', () => {
-    expect(() => loadUsers({ LOAD_USERS_FILE: '/x' }, file(0o644, [user(1, 'a'), user(2, 'b')]))).toThrow(
-      '0600',
-    )
-    expect(() => loadUsers({ LOAD_USERS_FILE: '/x' }, file(0o600, [user(1, 'a'), user(2, 'b')], 0))).toThrow(
-      'belong',
-    )
+    expect(() =>
+      loadUsers({ LOAD_USERS_FILE: '/x' }, file(0o644, [user(1, 'load-test-a'), user(2, 'load-test-b')])),
+    ).toThrow('0600')
+    expect(() =>
+      loadUsers({ LOAD_USERS_FILE: '/x' }, file(0o600, [user(1, 'load-test-a'), user(2, 'load-test-b')], 0)),
+    ).toThrow('belong')
   })
 
   it('reads them from LOAD_USER_1_* and LOAD_USER_2_* without the file', () => {
     const env = {}
     for (const n of [1, 2]) {
-      const u = user(n, n === 1 ? 'aztek-global' : 'test-brand')
+      const u = user(n, n === 1 ? 'load-test-a' : 'load-test-b')
       Object.assign(env, {
         [`LOAD_USER_${n}_EMAIL`]: u.email,
         [`LOAD_USER_${n}_PASSWORD`]: u.password,
@@ -113,18 +118,25 @@ describe('the test users', () => {
         [`LOAD_USER_${n}_BRAND`]: u.brand,
       })
     }
-    expect(loadUsers(env).map((u) => u.brand)).toEqual(['aztek-global', 'test-brand'])
+    expect(loadUsers(env).map((u) => u.brand)).toEqual(['load-test-a', 'load-test-b'])
+    // Only load-test brands: the production jobs are injected, and the injector refuses any other brand.
+    expect(() => loadUsers({ ...env, LOAD_USER_2_BRAND: 'test-brand' })).toThrow('load-test brand')
   })
 
   it('needs exactly two users for two brands, each with an authenticator secret, and names no value', () => {
     const opts = (users) => file(0o600, users)
-    expect(() => loadUsers({ LOAD_USERS_FILE: '/x' }, opts([user(1, 'a')]))).toThrow('two test users')
-    expect(() => loadUsers({ LOAD_USERS_FILE: '/x' }, opts([user(1, 'a'), user(2, 'a')]))).toThrow(
-      'different brands',
+    expect(() => loadUsers({ LOAD_USERS_FILE: '/x' }, opts([user(1, 'load-test-a')]))).toThrow(
+      'two test users',
     )
+    expect(() =>
+      loadUsers({ LOAD_USERS_FILE: '/x' }, opts([user(1, 'load-test-a'), user(2, 'load-test-a')])),
+    ).toThrow('different brands')
     let message = ''
     try {
-      loadUsers({ LOAD_USERS_FILE: '/x' }, opts([user(1, 'a'), { ...user(2, 'b'), totpSecret: undefined }]))
+      loadUsers(
+        { LOAD_USERS_FILE: '/x' },
+        opts([user(1, 'load-test-a'), { ...user(2, 'load-test-b'), totpSecret: undefined }]),
+      )
     } catch (e) {
       message = e.message
     }
@@ -221,16 +233,71 @@ describe('the figures', () => {
     expect(jobs[1]).toMatchObject({ summary: false, claimedAt: null, endedAt: null })
   })
 
-  it('counts a waiting job from the moment a slot of its brand became free', () => {
-    const waits = slotWaits([
-      { brand: 'a', createdAt: 0, claimedAt: 100, endedAt: 2000 },
-      // Waited 2.9 s in all, but only 900 ms after the first job's slot became free.
-      { brand: 'a', createdAt: 0, claimedAt: 2900, endedAt: 5000 },
-      // Another brand's end does not count.
-      { brand: 'b', createdAt: 1000, claimedAt: 7000, endedAt: 8000 },
-      { brand: 'b', createdAt: 0, claimedAt: null, endedAt: null },
+  const CAPS = { production: 3, interactive: 2 }
+  const job = (brand, cls, createdAt, claimedAt, endedAt) => ({
+    brand,
+    class: cls,
+    createdAt,
+    claimedAt,
+    endedAt,
+  })
+
+  it('counts a waiting job from the start of the last period before its claim when its brand had a free slot', () => {
+    const waits = slotWaits(
+      [
+        // Three production jobs of brand a fill its cap of 3 until 2000; the fourth waits for the first end.
+        job('a', 'production', 0, 10, 2000),
+        job('a', 'production', 0, 20, 2500),
+        job('a', 'production', 0, 30, 3000),
+        job('a', 'production', 0, 2900, 5000),
+        // An interactive job of the same brand does not hold a production slot.
+        job('a', 'interactive', 0, 0, 9000),
+        // Brand b: nothing else runs, so its wait counts from creation.
+        job('b', 'production', 1000, 7000, 8000),
+        job('b', 'production', 0, null, null),
+      ],
+      CAPS,
+    )
+    expect(waits).toEqual([10, 20, 30, 900, 0, 6000, Infinity])
+  })
+
+  it('does not excuse a job whose brand had free slots just because another job ended just before its claim', () => {
+    // Only one other production job ran, so 2 of 3 slots were free throughout: the wait is the full 8 s.
+    const waits = slotWaits([job('a', 'production', 0, 0, 7900), job('a', 'production', 0, 8000, 9000)], CAPS)
+    expect(waits[1]).toBe(8000)
+    const rows = evaluate({
+      ...passingFigures(),
+      production: { ...passingFigures().production, maxSlotWait: Math.max(...waits) },
+    })
+    expect(rows.find((r) => r.criterion.startsWith('Every production job')).result).toBe('FAIL')
+  })
+
+  it('follows the cap given for the class', () => {
+    const jobs = [job('a', 'production', 0, 0, 5000), job('a', 'production', 0, 4000, 6000)]
+    // Cap 3: a slot was free from creation, so the 4 s count in full.
+    expect(slotWaits(jobs, { production: 3 })[1]).toBe(4000)
+    // Cap 1: the only slot was busy until 5000, and the second job was claimed 600 ms after it was freed.
+    const queued = [job('a', 'production', 0, 0, 5000), job('a', 'production', 0, 5600, 6000)]
+    expect(slotWaits(queued, { production: 1 })[1]).toBe(600)
+  })
+
+  it('reads docker stats output line by line and skips a line it cannot read', () => {
+    const text = [
+      '{"Name":"mkt-core-1","CPUPerc":"10.00%","MemUsage":"100MiB / 1GiB"}',
+      'not json',
+      '{"Name":"mkt-worker-1","CPUPerc":"--","MemUsage":"--"}',
+      '{"Name":"mkt-postgres-1","CPUPerc":"5.00%","MemUsage":"200MiB / 1.5GiB"}',
+    ].join('\n')
+    expect(parseStatsLines(text)).toEqual([
+      { name: 'mkt-core-1', cpu: 0.1, mem: 100 * 1024 ** 2 },
+      { name: 'mkt-postgres-1', cpu: 0.05, mem: 200 * 1024 ** 2 },
     ])
-    expect(waits).toEqual([100, 900, 6000, Infinity])
+  })
+
+  it('never writes the --connect address, or the origin, into the results', () => {
+    expect(
+      maskArgs(['--origin', 'https://a.example.test', '--connect=http://10.0.0.5:4100', '--minutes', '2']),
+    ).toBe('--origin (set) --connect (set) --minutes 2')
   })
 
   it('compares the canary with the hour before and counts failed executions in the window', () => {
@@ -294,43 +361,45 @@ describe('the figures', () => {
   })
 })
 
+const passingFigures = () => ({
+  options: { minutes: 30, jobs: 300, users: 10, probeEvery: 10, grace: 120, slotCap: 3 },
+  brands: 2,
+  submitted: { jobs: 300, probes: 180 },
+  windowMs: 30 * 60_000,
+  modelMedianMs: 2004,
+  docker: {
+    samples: 360,
+    maxCpu: 1.1,
+    meanCpu: 0.6,
+    maxMem: 2.5 * 1024 ** 3,
+    containers: ['a', 'b', 'c', 'd'],
+  },
+  containers: { ok: true, text: 'none' },
+  serverCpu: 0.42,
+  swapPages: 0,
+  api: { count: 18000, failed: 0, p95: 120, p99: 400, max: 900 },
+  probes: { count: 180, withinShare: 0.99, p95: 300, max: 1200 },
+  production: {
+    count: 300,
+    maxSlotWait: 800,
+    p95Wait: 500,
+    maxWait: 900,
+    finishedInWindow: 300,
+    finishedByGrace: 300,
+  },
+  dead: 0,
+  n8n: {
+    baselineRuns: 60,
+    baselineMeanMs: 100,
+    windowRuns: 30,
+    windowMeanMs: 110,
+    windowMaxMs: 115,
+    failed: 0,
+  },
+})
+
 describe('the results table', () => {
-  const passing = {
-    options: { minutes: 30, jobs: 300, users: 10, probeEvery: 10, grace: 120 },
-    brands: 2,
-    submitted: { jobs: 300, probes: 180 },
-    windowMs: 30 * 60_000,
-    modelMedianMs: 2004,
-    docker: {
-      samples: 360,
-      maxCpu: 1.1,
-      meanCpu: 0.6,
-      maxMem: 2.5 * 1024 ** 3,
-      containers: ['a', 'b', 'c', 'd'],
-    },
-    containers: { ok: true, text: 'none' },
-    serverCpu: 0.42,
-    swapPages: 0,
-    api: { count: 18000, failed: 0, p95: 120, p99: 400, max: 900 },
-    probes: { count: 180, withinShare: 0.99, p95: 300, max: 1200 },
-    production: {
-      count: 300,
-      maxSlotWait: 800,
-      p95Wait: 500,
-      maxWait: 900,
-      finishedInWindow: 300,
-      finishedByGrace: 300,
-    },
-    dead: 0,
-    n8n: {
-      baselineRuns: 60,
-      baselineMeanMs: 100,
-      windowRuns: 30,
-      windowMeanMs: 110,
-      windowMaxMs: 160,
-      failed: 0,
-    },
-  }
+  const passing = passingFigures()
 
   it('has one row per criterion of spec 17 and passes a run inside every limit', () => {
     const rows = evaluate(passing)
@@ -371,6 +440,14 @@ describe('the results table', () => {
     expect(md).not.toContain('it is not test 41')
   })
 
+  it('fails the canary when one run in the window is more than 20 percent over the mean before, even if the mean is not', () => {
+    const rows = evaluate({ ...passing, n8n: { ...passing.n8n, windowMeanMs: 105, windowMaxMs: 130 } })
+    const row = rows.find((r) => r.criterion.startsWith('The canary'))
+    expect(row.result).toBe('FAIL')
+    expect(row.measured).toMatch(/130 %/)
+    expect(row.measured).toMatch(/mean 105 ms/)
+  })
+
   it('marks the n8n rows "not measured" without the n8n API, and the run incomplete', () => {
     const rows = evaluate({ ...passing, n8n: null })
     const n8n = rows.filter((r) => r.aspect === 'Impact on n8n')
@@ -403,7 +480,7 @@ describe('the results table', () => {
         finishedByGrace: 20,
       },
       dead: 1,
-      n8n: { ...passing.n8n, windowMeanMs: 130, failed: 2 },
+      n8n: { ...passing.n8n, windowMeanMs: 130, windowMaxMs: 140, failed: 2 },
     })
     expect(rows.filter((r) => r.result === 'PASS').map((r) => r.criterion)).toEqual([
       'The model is a stand-in that answers in 2 seconds',
