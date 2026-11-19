@@ -1,12 +1,11 @@
-import { readFileSync } from 'node:fs'
-import { briefSchema, summaryResultSchema, wrapBrief } from '@mkt/shared'
+import { fileURLToPath } from 'node:url'
+import { briefSchema, loadAgentDefinition, summaryResultSchema, wrapBrief } from '@mkt/shared'
 import { ModelStopped } from '../model.ts'
 import type { JobHandler } from '../runner.ts'
 
 // The agent's files are read when this module loads (the worker starting), not written into the code, so
 // the prompt, the model and the schema are the ones in agents/summary/.
-const dir = new URL('../../../../agents/summary/', import.meta.url)
-const read = (name: string) => readFileSync(new URL(name, dir), 'utf8')
+const loaded = loadAgentDefinition(fileURLToPath(new URL('../../../../agents/summary/', import.meta.url)))
 
 // The provider's structured output does not take length, count or range limits. The stored schema keeps them
 // (and the core re-validates every result with summaryResultSchema); what is sent drops them. Names of
@@ -41,17 +40,12 @@ export function providerSchema(schema: Record<string, unknown>): Record<string, 
   return reduce(schema) as Record<string, unknown>
 }
 
-const definition = JSON.parse(read('definition.json')) as {
-  model: string
-  effort: 'low' | 'medium' | 'high'
-  maxTokens: number
-}
 export const SUMMARY_AGENT = {
-  model: definition.model,
-  effort: definition.effort,
-  maxTokens: definition.maxTokens,
-  system: read('system.md'),
-  outputSchema: JSON.parse(read('output.schema.json')) as Record<string, unknown>,
+  model: loaded.definition.model,
+  effort: loaded.definition.effort,
+  maxTokens: loaded.definition.maxTokens,
+  system: loaded.system,
+  outputSchema: loaded.outputSchema as Record<string, unknown>,
 }
 const SENT_SCHEMA = providerSchema(SUMMARY_AGENT.outputSchema)
 
