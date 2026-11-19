@@ -13,6 +13,7 @@ import { registerOverdueRoutes } from './routes/overdue.ts'
 import type { NotifyDeps } from './notify/ports.ts'
 import { registerApprovalRoutes } from './routes/approvals.ts'
 import { registerApprovalSettingsRoutes } from './routes/approval-settings.ts'
+import { registerOnboardingRoutes } from './routes/onboarding.ts'
 import { registerKillSwitchRoutes } from './routes/killswitch.ts'
 import { releaseHeldJobs } from './killswitch/release.ts'
 import { registerContentRoutes } from './routes/content.ts'
@@ -106,6 +107,7 @@ export function createApi(
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerOnboardingRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerKillSwitchRoutes(table, {
     auth: deps.auth,
     pool: deps.pool,
