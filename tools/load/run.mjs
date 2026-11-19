@@ -576,14 +576,17 @@ export function evaluate(m) {
     )
     row('Impact on n8n', 'No n8n execution fails during the test', why, '0', NOT)
   } else {
-    // Each run in the window is judged: its longest against the mean of the hour before.
-    const ratio = n8n.baselineMeanMs && n8n.windowMaxMs != null ? n8n.windowMaxMs / n8n.baselineMeanMs : null
+    // The canary's mean in the window against its mean over the hour before (owner ruling R27, 2026-11-19: a
+    // single run varies too much to be judged alone; the hour before a test failed the per-run rule by itself).
+    // The slowest run is shown for context, not judged.
+    const ratio =
+      n8n.baselineMeanMs && n8n.windowMeanMs != null ? n8n.windowMeanMs / n8n.baselineMeanMs : null
     row(
       'Impact on n8n',
       'The canary takes no more than 20 percent longer than its average over the hour before',
       ratio == null
         ? `canary runs: ${n8n.baselineRuns} before, ${n8n.windowRuns} during`
-        : `slowest run ${ms(n8n.windowMaxMs)} = ${(ratio * 100).toFixed(0)} % of the mean before, ${ms(n8n.baselineMeanMs)} (${n8n.baselineRuns} runs); mean ${ms(n8n.windowMeanMs)} during (${n8n.windowRuns} runs)`,
+        : `mean ${ms(n8n.windowMeanMs)} during (${n8n.windowRuns} runs) = ${(ratio * 100).toFixed(0)} % of the mean before, ${ms(n8n.baselineMeanMs)} (${n8n.baselineRuns} runs); slowest run ${ms(n8n.windowMaxMs)}`,
       '<= 120 %',
       ratio == null ? NOT : verdict(ratio <= SPEC.canaryFactor),
     )

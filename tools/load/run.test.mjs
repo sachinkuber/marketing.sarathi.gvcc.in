@@ -440,12 +440,21 @@ describe('the results table', () => {
     expect(md).not.toContain('it is not test 41')
   })
 
-  it('fails the canary when one run in the window is more than 20 percent over the mean before, even if the mean is not', () => {
-    const rows = evaluate({ ...passing, n8n: { ...passing.n8n, windowMeanMs: 105, windowMaxMs: 130 } })
+  // Ruling R27: the window's mean is judged against the mean before; a single slow run is shown, not judged.
+  it('passes the canary when one run is slow but the mean in the window stays within 20 percent', () => {
+    const rows = evaluate({ ...passing, n8n: { ...passing.n8n, windowMeanMs: 105, windowMaxMs: 170 } })
+    const row = rows.find((r) => r.criterion.startsWith('The canary'))
+    expect(row.result).toBe('PASS')
+    expect(row.measured).toMatch(/mean 105 ms during/)
+    expect(row.measured).toMatch(/105 % of the mean before/)
+    expect(row.measured).toMatch(/slowest run 170 ms/)
+  })
+
+  it('fails the canary when the mean in the window is more than 20 percent over the mean before', () => {
+    const rows = evaluate({ ...passing, n8n: { ...passing.n8n, windowMeanMs: 121, windowMaxMs: 130 } })
     const row = rows.find((r) => r.criterion.startsWith('The canary'))
     expect(row.result).toBe('FAIL')
-    expect(row.measured).toMatch(/130 %/)
-    expect(row.measured).toMatch(/mean 105 ms/)
+    expect(row.measured).toMatch(/121 % of the mean before/)
   })
 
   it('marks the n8n rows "not measured" without the n8n API, and the run incomplete', () => {

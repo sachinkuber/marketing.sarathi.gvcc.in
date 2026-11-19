@@ -449,3 +449,76 @@ Run on the development server on 2026-10-25 from the tree at commit 20b68ba plus
 - `npm ci && npm run verify` (pins, lint, format, typecheck, tests, secret scan): 133 test files passed, 2 skipped; 1162 tests passed, 2 skipped (the live model checks, which need an API key); 744 s; gitleaks found no leaks in 96 commits.
 - `npm ci && npm run e2e` in the browser image: 6 passed in 1.9 minutes (2 min 44 s wall clock including `npm ci`).
 - Afterwards no `mkt_t_%` database remained and the only containers were `mkt-dev-postgres-1` and the host's other projects. Two idle test databases that predated Task 14 were dropped at the owner's request.
+
+## Phase 1, milestone 7: Ship
+
+Built 2026-11-17 to 2026-11-19. Plan: `docs/plans/2026-11-17-m7-ship.md`. Tasks 1 to 6 merged in pull request #11, tasks 7 to 11 in #13 (rulings R11 to R25 are in its description), the production relay in #14, and task 12 (this section) in the pull request that adds it. The product runs on the owner's production server PROD-C at `https://marketing.sarathi.gvcc.in` since 2026-11-19; `docs/operations.md` records the server, the proxy, the relay and every procedure used.
+
+| Package | State | Evidence |
+|---|---|---|
+| 16 Containers, proxy, secrets, backups | Done | `infra/prod/` (compose stack with its own Postgres, egress firewall, encrypted daily backup with the off-server copy, restore and drill); deployed on PROD-C by `docs/operations.md` "First deployment"; smoke check through Cloudflare 7 passed, 2 skipped (the two forged-address checks need the origin's own name and passed directly against the origin before the relay); first backup set copied to R2 |
+| 17 Monitoring | Done | Sentry (A10); three uptime checks for the product in Gatus at status.gvcc.in on another server (ready with certificate expiry, worker, dashboard), all passing; the backup failure alert (`mkt-backup-alert.service`). Alert delivery stays open: test 38 |
+| 18 Acceptance run | Done except test 38 | The table below |
+
+| # | Test (short) | State | Evidence |
+|---|---|---|---|
+| 1 | Brand A session cannot reach brand B records through any API operation | Proven for routes built so far | Milestone 2c: `apps/core/test/cross-brand.test.ts` reads the route table and covers every `/brands/:brandId` route generically, so later brand routes are picked up automatically. It runs in every full test run (`npm run verify`). |
+| 2 | Each database role cannot read other brands' rows; no brand set returns nothing | Proven | Milestone 2a: `packages/db/test/isolation-behaviour.test.ts` and `isolation-catalog.test.ts` (forced row-level security, `brand_isolation` policy, no brand set returns nothing). |
+| 3 | Insert or update carrying another brand's ID is refused | Proven | Milestone 2a: `packages/db/test/isolation-catalog.test.ts` and `isolation-behaviour.test.ts` (an insert for another brand and a move to another brand are refused). |
+| 4 | No foreign key can link a row to a parent in another brand | Proven | Milestone 2a: `packages/db/test/isolation-catalog.test.ts` (brand-carrying foreign keys on every brand-scoped table). |
+| 5 | Queue role cannot read business tables; queue row holds only IDs | Proven | Milestone 2a (roles) and milestone 4 (queue row contents): `packages/queue/test/roles.test.ts`, `packages/queue/test/queue.test.ts`. |
+| 6 | Attempt token for job A cannot fetch job B's input | Proven (narrower than its title) | Milestone 4: `apps/core/test/worker-attempts.test.ts`, `apps/core/test/attempt-token.test.ts`. The shared worker credential plus the queue showing the job `active` is the trust root. |
+| 7 | Business query outside `withBrand` fails the build | Proven | Milestone 2a: `packages/db/test/lint-rule.test.ts` (rejects `pg`, `kysely`, `pg-boss` in application code); `withBrand` tested on a pool of one connection. |
+| 8 | Non-Viewer blocked until second factor enrolled; Viewer read-only | Proven | API half in milestone 2b (`apps/core/test/enrolment-gate.test.ts`); screen half in milestone 6 (`apps/dashboard/e2e/sign-in.spec.ts`); deployed browser check `apps/dashboard/e2e/deployed.spec.ts` passed 3 of 3 against production on 2026-11-19 (drill user signs in with second factor, sees only its brand). |
+| 9 | Backup code works once; use audited and notified | Proven | Milestone 2b: `apps/core/test/second-factor.test.ts`. |
+| 10 | Password recovery link single-use, 30 minutes, ends sessions, needs second factor | Proven | Milestone 2b: `apps/core/test/recovery.test.ts`. |
+| 11 | Invite refused after 72 hours and after first use | Proven | Milestone 2b: `apps/core/test/invites.test.ts`. |
+| 12 | Wrong origin, missing session token or cross-site request refused | Proven | Milestone 2b: `apps/core/test/guard.test.ts` and `enrolment-gate.test.ts` (origin, session token, cross-site). |
+| 13 | Every route declares a permission; roles match PRD 16.1 | Proven (routes under `/api/v1`) | Milestone 2c: `apps/core/test/route-declarations.test.ts`, `route-table.test.ts`, `permissions.test.ts` (50 cells) and `role-matrix.test.ts`. Better Auth's `/api/auth` routes and `/health` are outside the table. |
+| 14 | Test vectors give expected canonical text and hash, app and database | Proven | Milestone 3: `packages/canonical/test/vectors.test.ts`, `packages/db/test/content-vectors.test.ts`, `packages/canonical/test/hash-fields.test.ts`. |
+| 15 | `content_version` update or delete refused for every role | Proven | Milestone 3: `packages/db/test/content-integrity.test.ts`. |
+| 16 | Row whose hash mismatches its payload refused by database | Proven | Milestone 3: `packages/db/test/content-integrity.test.ts`. |
+| 17 | Hashed field change alters hash; state, checks, provenance do not | Proven | Milestone 3: `packages/shared/test/content-payload.test.ts`, `packages/canonical/test/vectors.test.ts`. |
+| 18 | Stale-hash approval fails; edit voids old approval | Proven | Milestone 5: `apps/core/test/approvals.test.ts`, `apps/core/test/content-versions.test.ts`. |
+| 19 | Approval, state change, outbox action written together or not at all | Proven | Milestone 5: `apps/core/test/approvals.test.ts` (failure injection). |
+| 20 | Reminders at 24, 48, 72 hours, then overdue and escalated | Proven | Milestone 5: `apps/core/test/approval-requests.test.ts`. |
+| 21 | Overdue item stays awaiting approval; silence never approves | Proven | Milestone 5: `apps/core/test/approval-requests.test.ts`. |
+| 22 | Overdue pop-up and banner behaviour | Proven | Milestone 5 (API): `apps/core/test/overdue.test.ts`; milestone 6 (screens): `apps/dashboard/e2e/overdue.spec.ts`. |
+| 23 | Reminder settings change next reminders; only owner or brand admin | Proven | Milestone 5: `apps/core/test/approval-requests.test.ts`. |
+| 24 | Worker killed mid-job: reclaimed, checkpointed steps skipped | Proven | Milestone 4: `apps/worker/test/crash.test.ts`, `apps/core/test/model-calls.test.ts`. |
+| 25 | Killed after reply before checkpoint: duplicate flagged, one result applied | Proven (stand-in model) | Milestone 4: `apps/worker/test/crash.test.ts`, `apps/core/test/model-calls.test.ts`. Real provider not called. |
+| 26 | Lost-lease attempt's late result refused and recorded | Proven (narrower than its title) | Milestone 4: `apps/core/test/worker-attempts.test.ts`. Lease loss simulated by a second start; real heartbeat loss exercised by tests 24, 25, 28. |
+| 27 | Same result twice changes nothing; different result refused | Proven | Milestone 4: `apps/core/test/job-results.test.ts`. |
+| 28 | Repeatedly failing job reaches dead-letter list, can be requeued | Proven | Milestone 4: `apps/worker/test/dead-letter.test.ts`, `packages/queue/test/queue-dead.test.ts`, `apps/core/test/jobs-dead.test.ts`. |
+| 29 | Brand A's 500-job backlog does not starve brand B | Proven | Milestone 4: `packages/queue/test/fairness.test.ts`. A pg-boss upgrade must re-run it. |
+| 30 | Kill switch holds waiting jobs; release re-sends | Proven | Milestone 5: `apps/core/test/killswitch-jobs.test.ts`. |
+| 31 | Kill switch during a running job holds result; nothing created | Proven | Milestone 5: `apps/core/test/killswitch-jobs.test.ts`. |
+| 32 | Expired, wrong-job or tampered token refused | Proven | Milestone 4: `apps/core/test/attempt-token.test.ts`, `apps/core/test/worker-attempts.test.ts`. |
+| 33 | n8n request refused for each signature, timing, nonce and query fault | Proven | Milestone 6: `apps/core/test/triggers.test.ts`, `apps/core/test/trigger-signature.test.ts`. |
+| 34 | Old nonce removed; reuse still refused by timestamp check | Proven | Milestone 6: `apps/core/test/triggers.test.ts`, `apps/core/test/daily-duties.test.ts`. |
+| 35 | Audit log update and delete refused; altered entry detected | Proven | Milestone 3: `packages/db/test/audit-log.test.ts`, `packages/db/test/audit-verify.test.ts`, `apps/core/test/audit-export-verify.test.ts`. |
+| 36 | Fifty concurrent audit writes give one unbroken chain | Proven | Milestone 3: `packages/db/test/audit-log.test.ts` (fifty concurrent writers to one brand chain, labelled test 36 in the test). |
+| 37 | Trivial agent end to end; ledger and audit entries complete | Proven (stand-in); real provider run pending | Milestone 6: `apps/worker/test/summary-e2e.test.ts` and `apps/dashboard/e2e/agent-flow.spec.ts` with the stand-in model; no real-provider run on production yet. |
+| 38 | Notification and alert arrive in a real inbox and second channel | Not proven — blocks Gate 0 | Real email delivery works (SMTP configured), but the second alert channel (owner item A11) is not configured and `UnconfiguredAlertChannel` always throws, so every alert ends `delivery_stalled` (follow-up I4). Not proven in milestones 5 and 6. |
+| 39 | No secret in repo history, image layers or test-run logs | Proven | Task 12, 2026-11-19: gitleaks 8.30.1 found no leaks in git history (220 commits); all six production images scanned, 14 findings ruled false positives by the owner (ruling R26: 11 base-image header/library identifiers, 3 Next.js per-build keys for unused preview mode/Server Actions); test-run logs (verify 1291 tests passed, e2e 6 passed) no leaks and 9 test secret values 0 hits; production container logs 0 leaks and 12 real secret values 0 hits. |
+| 40 | Backup restores cleanly; sign-in, jobs, audit chain, tests 1 to 6 pass | Proven | 2026-11-19 on the production host: backup set mkt-20261119T092920Z restored into a throw-away database (32 app tables); four PASS lines (sign-in with password and second factor; waiting job finishes after a worker starts; audit chains verify; isolation tests 1 to 6). Tool `apps/ops/src/restore-check.ts`, runbook `docs/operations.md` "Restore drill". |
+| 41 | Load test and impact on n8n | Proven | 2026-11-19, 16 of 16 with owner ruling R27 (n8n canary judged on its mean during the window vs the hour before, 95 %). Evidence `docs/acceptance/2026-11-19-test-41.md`, tool `tools/load/run.mjs`. |
+
+The full run for test 39 on the development server, 2026-11-19 (the tree of this pull request without its documents): `npm ci && npm run verify` passed, 145 test files and 1291 tests, 2 of each skipped (the live model checks); `npm ci && npm run e2e` passed 6 of 6. The deployed browser check (`apps/dashboard/e2e/deployed.spec.ts`, run with `E2E_BASE_URL` and the drill user from the environment) passed 3 of 3 against production.
+
+## Findings
+
+- Rulings in task 12 (each with its cost if wrong):
+  - R26 (owner): the 14 image findings of test 39 are false positives: 11 identifiers in the base image's system headers and libraries, and 3 per-build keys Next.js writes for preview mode and Server Actions, which the dashboard does not use; the images never leave PROD-C. Cost: a forged preview cookie on a dashboard that has no prerendered draft content.
+  - R27 (owner): test 41's canary criterion compares the canary's mean in the window with its mean over the hour before (the spec's "no more than 20 percent longer than its average"); the slowest run is shown, not judged. A single canary run varies up to about 2.5 times with no load: the hour before the test failed the earlier per-run rule by itself. Cost: a short n8n stall during load could hide in the mean; failed n8n executions are still counted by the second row.
+  - (Owner, 2026-11-19) The product keeps its own Postgres on PROD-C; moving it into the owner's shared, replicated cluster is part of the owner's separate high-availability project. Cost: no automatic failover for the product's database until then; recovery is the restore procedure.
+  - (Owner, 2026-11-19) No paid certificate service for now: the two-level public name is served through a Cloudflare Worker relay with a free certificate (`infra/prod/proxy/marketing-relay.js`). The visitor's address survives the relay (checked with the sign-in limiter). Cost: one more moving part in front of the product.
+- After test 41, `tools/load/cleanup.sql` removed the two temporary load-test platform owners and closed the brands `load-test-a` and `load-test-b`, which are kept as the test's evidence. The restore drill's user (`restore-drill@drill.invalid`, brand admin of `restore-drill-a` only) stays for later drills, as `docs/operations.md` says.
+- Gate 0: 40 of 41 tests are proven (six with a qualifier, listed in the table). Test 38 is not: it needs the second alert channel (owner item A11), and until a channel adapter replaces `UnconfiguredAlertChannel`, every alert also ends `delivery_stalled` although its email was sent (follow-up I4 of the final review of #13). Gate 0 is signed off by the owner only when test 38 is proven or the owner rules on it.
+- Follow-ups before customers use the product, one line each:
+  - Test 38: choose the second channel (A11), build its adapter, prove delivery on both channels.
+  - A second platform owner, so that alerts reach two people.
+  - A real-provider summary run on production (test 37's last qualifier), with the first real cost row checked against the provider's figures.
+  - Object lock for the audit bucket `mkt-audit-prod` (A5), if the owner wants write-once storage.
+  - The minors parked in task 11 and the final review (R25): an orphaned partial monthly backup set, a key left in `/dev/shm` after an aborted restore, and the load README's prompt-less `read -rs`.
+  - A lifecycle rule for the R2 prefix `staging/` used by the staging rehearsal.
