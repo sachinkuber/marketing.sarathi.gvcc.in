@@ -2,7 +2,7 @@
 
 | Document control | |
 |---|---|
-| Status | **Proposed — awaiting owner approval** |
+| Status | **Approved by the owner on 2026-11-19** ("approved"); applied to the PRD as v4 |
 | Date | 2026-11-19 |
 | Requested by | Sachin Tripathi (platform owner), 2026-11-19: "is content agent going to create video using AI avatars and other video editing tools to make it more attractive for customers?" |
 | Prepared by | Claude Code |
