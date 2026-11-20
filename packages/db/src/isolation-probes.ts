@@ -19,6 +19,9 @@ export const SEEDED = [
   'suggestion',
   'verified_fact',
   'safety_rule',
+  'brand_document',
+  'research_source',
+  'profile_item',
 ] as const
 
 // Runs `fn` as the run-time role `role`, with the session's brand set (or none), and undoes whatever it did.
@@ -82,6 +85,14 @@ export async function seedProbeBrand(client: Queryable, id: string, slug: string
   const source = await client.query(
     "insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', 'seeded') returning id",
     [id],
+  )
+  await client.query(
+    "insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by) values ($1, 'seeded.pdf', 'application/pdf', '\\x01020304', 4, 'sha256:seed', $2)",
+    [id, userId],
+  )
+  await client.query(
+    "insert into app.profile_item (brand_id, key, value, status, source_ids) values ($1, 'tagline', '\"x\"'::jsonb, 'found', $2)",
+    [id, [source.rows[0].id as string]],
   )
   await client.query(
     "insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date) values ($1, 'seeded', 'sha256:seed', $2, $3, current_date + 365)",

@@ -64,7 +64,7 @@ describe('brand knowledge tables', () => {
     const insert = (c: pg.Client, uid: string, size: number, type: string) =>
       c.query(
         `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
-         values ($1, 'f', $2, '\\x00', $3, 'h', $4)`,
+         values ($1, 'f', $2, decode(repeat('00', $3::int), 'hex'), $3, 'h', $4)`,
         [A, type, size, uid],
       )
     await asApp(async (c) => {

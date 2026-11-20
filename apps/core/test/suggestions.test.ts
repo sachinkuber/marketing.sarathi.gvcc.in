@@ -19,7 +19,7 @@ const base = () => `/api/v1/brands/${brandId}/onboarding/suggestions`
 
 async function source(kind: string, extract = 'text'): Promise<string> {
   const made = await stack.db.admin.query(
-    `insert into app.research_source (brand_id, kind, result, extract) values ($1, $2, 'ok', $3) returning id`,
+    `insert into app.research_source (brand_id, kind, result, extract) values ($1, $2, 'read', $3) returning id`,
     [brandId, kind, extract],
   )
   return made.rows[0].id as string
@@ -427,7 +427,7 @@ describe('suggest then decide', () => {
     const other = await addBrand(stack, `onboarding-other-${(seq += 1)}`)
     const foreign = (
       await stack.db.admin.query(
-        `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'site', 'ok', 'x') returning id`,
+        `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'site', 'read', 'x') returning id`,
         [other],
       )
     ).rows[0].id as string
