@@ -128,7 +128,10 @@ COPY --from=ops-deps /app/node_modules node_modules
 COPY package.json ./
 COPY packages/db packages/db
 COPY packages/queue packages/queue
+COPY packages/shared packages/shared
 COPY packages/test-support packages/test-support
+# `release` reads the agent folders (definition, prompt, schema, evaluation cases) from here.
+COPY agents agents
 COPY apps/ops apps/ops
 # The backup and restore scripts (Task 8), run by the `backup` service of compose.yaml.
 COPY --chmod=0755 infra/prod/backup/backup.sh /usr/local/bin/mkt-backup
