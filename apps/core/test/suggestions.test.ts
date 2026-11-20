@@ -154,6 +154,29 @@ describe('suggest then decide', () => {
     expect(reply.json.error.code).toBe('fact_needs_source')
   })
 
+  it('refuses an impossible review date with the 422, not a 500', async () => {
+    const s = await source('site')
+    const [id] = await add([
+      {
+        step: 'fact',
+        key: 'bad-date',
+        proposed: { statement: 'Open daily', reviewDate: '2026-02-30' },
+        sourceIds: [s],
+      },
+    ])
+    await expect(
+      decideSuggestion(stack.appPool, deps(), {
+        brandId,
+        suggestionId: id!,
+        decision: 'accepted',
+        actor: actor(),
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'review_date_needed' })
+    const reply = await owner.request('POST', `${base()}/${id}/decision`, { body: { decision: 'accepted' } })
+    expect(reply.status).toBe(422)
+    expect(reply.json.error.code).toBe('review_date_needed')
+  })
+
   it('accepts a fact that has a site source', async () => {
     const s = await source('site')
     const [id] = await add([

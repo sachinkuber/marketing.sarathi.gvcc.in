@@ -20,9 +20,9 @@ export const agentDefinitionSchema = z.strictObject({
     .optional(),
   caps: z
     .strictObject({
-      searchesPerJob: z.number().int().optional(),
-      fetchesPerJob: z.number().int().optional(),
-      searchesPerBrandStep: z.number().int().optional(),
+      searchesPerJob: z.number().int().min(0).optional(),
+      fetchesPerJob: z.number().int().min(0).optional(),
+      searchesPerBrandStep: z.number().int().min(0).optional(),
     })
     .optional(),
 })

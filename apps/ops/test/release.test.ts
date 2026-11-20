@@ -147,7 +147,7 @@ describe('releaseAgent', () => {
       {
         actor_kind: 'system',
         actor_id: ownerId,
-        detail: { agent: 'summary', version: 3, evaluationRunId: runId },
+        detail: { agent: 'summary', version: 3, evaluationRunId: runId, evaluationRunIds: [runId] },
       },
     ])
   })
@@ -228,12 +228,18 @@ describe('releaseAgent', () => {
     const dir = agentDir()
     addBrandFolder(dir, 'brand-a')
     addBrandFolder(dir, 'brand-b')
-    await recordRun(dir, true, 'brand-a')
+    const a = await recordRun(dir, true, 'brand-a')
     const b = await recordRun(dir, true, 'brand-b')
     const out = await release(dir)
     expect(out.version).toBe(3)
-    expect([(await liveRows())[0]?.version]).toEqual([3])
-    expect(b).toBeTruthy()
+    expect(out.evaluationRunId).toBe(a)
+    expect(await liveRows()).toMatchObject([{ version: 3, evaluation_run_id: a }])
+    const audit = await db.admin.query<{ detail: { evaluationRunId: string; evaluationRunIds: string[] } }>(
+      `select detail from audit.log where action = 'agent.released' and detail->>'evaluationRunId' = $1`,
+      [a],
+    )
+    expect(audit.rows[0]?.detail.evaluationRunId).toBe(a)
+    expect(audit.rows[0]?.detail.evaluationRunIds).toEqual([a, b])
   })
 
   it('a run for one brand does not stand in for the no-brand case', async () => {
@@ -252,19 +258,54 @@ describe('releaseAgent', () => {
     expect(await liveRows()).toHaveLength(1)
   })
 
-  it('updates an existing version row that is not live', async () => {
+  it('re-activates a version row that is not live, keeping its files_hash', async () => {
     const dir = agentDir()
     await db.admin.query(
       `insert into app.agent_definition_version (agent, version, model, effort, files_hash)
-       values ('summary', 3, 'old', 'low', 'x')`,
+       values ('summary', 3, 'old', 'low', $1)`,
+      [agentFilesHash(dir)],
     )
     const runId = await recordRun(dir, true)
     await release(dir)
     const rows = await db.admin.query(
-      `select evaluation_run_id, live from app.agent_definition_version where agent = 'summary' and version = 3`,
+      `select evaluation_run_id, live, files_hash from app.agent_definition_version where agent = 'summary' and version = 3`,
     )
-    expect(rows.rows).toEqual([{ evaluation_run_id: runId, live: true }])
+    expect(rows.rows).toEqual([{ evaluation_run_id: runId, live: true, files_hash: agentFilesHash(dir) }])
     expect(await liveRows()).toHaveLength(1)
+  })
+
+  it('refuses a version row recorded with other files, and leaves it untouched', async () => {
+    const dir = agentDir()
+    await db.admin.query(
+      `insert into app.agent_definition_version (agent, version, model, effort, files_hash)
+       values ('summary', 3, 'old', 'low', 'other-files')`,
+    )
+    await recordRun(dir, true)
+    await expect(release(dir)).rejects.toThrow(
+      /summary v3 was recorded with other files; raise "version" in definition\.json and run the evaluation again/,
+    )
+    const rows = await db.admin.query(
+      `select live, files_hash, model from app.agent_definition_version where agent = 'summary' and version = 3`,
+    )
+    expect(rows.rows).toEqual([{ live: false, files_hash: 'other-files', model: 'old' }])
+    expect(await liveRows()).toMatchObject([{ version: 2 }])
+  })
+
+  it('refuses a live version row recorded with other files, with the same message', async () => {
+    const dir = agentDir()
+    await db.admin.query(
+      `update app.agent_definition_version set live = false where agent = 'summary' and live`,
+    )
+    await db.admin.query(
+      `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+       values ('summary', 3, 'old', 'low', 'other-files', true)`,
+    )
+    await recordRun(dir, true)
+    await expect(release(dir)).rejects.toThrow(/was recorded with other files/)
+    const rows = await db.admin.query(
+      `select files_hash from app.agent_definition_version where agent = 'summary' and version = 3`,
+    )
+    expect(rows.rows).toEqual([{ files_hash: 'other-files' }])
   })
 })
 

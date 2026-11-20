@@ -88,6 +88,29 @@ describe('brand knowledge tables', () => {
     })
   })
 
+  it('lets mkt_app decide a suggestion but not change what was proposed', async () => {
+    await asApp(async (c) => {
+      await c.query(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, confidence)
+         values ($1, 'profile', 'tone', '"warm"', 'seen on the site', 'found')`,
+        [A],
+      )
+      await c.query('savepoint s1')
+      expect(
+        await code(() => c.query(`update app.suggestion set proposed = '"cold"' where key = 'tone'`)),
+      ).toBe('42501')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => c.query(`update app.suggestion set why = 'x' where key = 'tone'`))).toBe(
+        '42501',
+      )
+      await c.query('rollback to savepoint s1')
+      const r = await c.query(
+        `update app.suggestion set decision = 'rejected', decided_at = now() where key = 'tone'`,
+      )
+      expect(r.rowCount).toBe(1)
+    })
+  })
+
   it('keeps one onboarding row per brand', async () => {
     await asApp(async (c) => {
       await c.query('insert into app.onboarding (brand_id) values ($1)', [A])

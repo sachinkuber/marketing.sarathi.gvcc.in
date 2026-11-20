@@ -2,7 +2,7 @@ import { agentFilesHash, setsHash, type Pool } from '@mkt/db'
 import { loadAgentDefinition, type LoadedAgent } from '@mkt/shared'
 import { inrMicros, usdMicros, type Price } from '../../core/src/jobs/money.ts'
 import type { ModelClient, ModelUsage } from '../../worker/src/model.ts'
-import { EvalRefused, loadCases, type EvalCase } from '../../worker/src/eval/cases.ts'
+import { EvalRefused, loadCases, type LoadedCase } from '../../worker/src/eval/cases.ts'
 import { JUDGE_MODEL, judge, runChecks, type CheckResult } from '../../worker/src/eval/checks.ts'
 import { EVAL_RUNNERS, type EvalRunner } from '../../worker/src/eval/run.ts'
 
@@ -28,11 +28,22 @@ export function passMark(hostile: [number, number], other: [number, number]): bo
 }
 
 export async function runEvaluation(input: EvaluationInput): Promise<EvaluationOutcome> {
-  const runner = EVAL_RUNNERS[input.agent]
-  if (!runner) throw new EvalRefused(`no evaluation runner for ${input.agent}`)
+  const entry = EVAL_RUNNERS[input.agent]
+  if (!entry) throw new EvalRefused(`no evaluation runner for ${input.agent}`)
   const cases = loadCases(input.agentDir, input.brandSlug)
   if (cases.length === 0) throw new EvalRefused(`no evaluation cases found in ${input.agentDir}/eval`)
   if (!cases.some((c) => c.hostile)) throw new EvalRefused('no hostile evaluation cases found')
+  // Every input is checked before the run row is inserted and before any paid model call.
+  for (const c of cases) {
+    const checked = entry.inputSchema.safeParse(c.input)
+    if (!checked.success) {
+      const problems = checked.error.issues.map(
+        (i) => `input${i.path.length ? `.${i.path.join('.')}` : ''}: ${i.message}`,
+      )
+      throw new EvalRefused(`${c.file}: ${problems.join('; ')}`)
+    }
+  }
+  const runner = entry.run
   const def = loadAgentDefinition(input.agentDir)
   const pool = input.adminPool
 
@@ -105,6 +116,8 @@ export async function runEvaluation(input: EvaluationInput): Promise<EvaluationO
     const agentPrice = await priceOf(def.definition.model)
     const usd = agentPrice ? usdMicros(agentPrice, graded.usage) : null
     totalUsd = usd === null || totalUsd === null ? null : totalUsd + usd
+    // A judge call that threw may still have been billed: the total is unknown, not zero (ruling R5).
+    if (graded.judgeFailed) totalUsd = null
     if (graded.judgeUsage) {
       const judgePrice = await priceOf(JUDGE_MODEL)
       totalUsd =
@@ -155,7 +168,7 @@ export async function runEvaluation(input: EvaluationInput): Promise<EvaluationO
 
 const NO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
-async function gradeCase(c: EvalCase, input: EvaluationInput, def: LoadedAgent, runner: EvalRunner) {
+async function gradeCase(c: LoadedCase, input: EvaluationInput, def: LoadedAgent, runner: EvalRunner) {
   let output: unknown
   let usage = NO_USAGE
   try {
@@ -168,12 +181,21 @@ async function gradeCase(c: EvalCase, input: EvaluationInput, def: LoadedAgent, 
     const checks: CheckResult[] = [
       { kind: 'model_call', passed: false, detail: `the agent call failed (${name})` },
     ]
-    return { passed: false, checks, judgeReason: null, usage, judgeUsage: null, detail: checks[0]!.detail! }
+    return {
+      passed: false,
+      checks,
+      judgeReason: null,
+      usage,
+      judgeUsage: null,
+      judgeFailed: false,
+      detail: checks[0]!.detail!,
+    }
   }
   const machine = runChecks(c, output, input.agent)
   let passed = machine.passed
   let judgeReason: string | null = null
   let judgeUsage: ModelUsage | null = null
+  let judgeFailed = false
   if (c.rubric !== undefined) {
     try {
       const verdict = await judge(input.model, c, output)
@@ -183,6 +205,7 @@ async function gradeCase(c: EvalCase, input: EvaluationInput, def: LoadedAgent, 
     } catch (error) {
       judgeReason = `the judge call failed (${error instanceof Error ? error.name : 'error'})`
       passed = false
+      judgeFailed = true
     }
   }
   const failed = machine.results
@@ -191,5 +214,5 @@ async function gradeCase(c: EvalCase, input: EvaluationInput, def: LoadedAgent, 
   // The judge's reason can quote case input: it goes to the result row only, never into this detail.
   if (!passed && machine.passed) failed.push('judge: the rubric was not met')
   const detail = passed ? 'ok' : failed.join('; ')
-  return { passed, checks: machine.results, judgeReason, usage, judgeUsage, detail }
+  return { passed, checks: machine.results, judgeReason, usage, judgeUsage, judgeFailed, detail }
 }

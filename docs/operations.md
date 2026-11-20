@@ -508,7 +508,7 @@ Each case prints one `PASS` or `FAIL` line with its id, then a final JSON line (
 |---|---|
 | 0 | The run passed |
 | 1 | The run finished and failed (a case failed); the run is recorded as failed |
-| 2 | Refused: bad arguments, unknown agent, no cases, or a variable not set. Nothing was recorded |
+| 2 | Refused: bad arguments, unknown agent, an invalid brand slug or a brand that does not exist, no cases, no hostile case, a malformed case file, a case `input` the agent does not accept (the message names the file and `input.<field>`), or a variable not set. Nothing was recorded, and no model call was made for a refused input |
 | 3 | Unexpected error (for example the database is down) |
 
 The command runs from the release's checkout with its locked dependencies, in the pinned Node image, like the restore drill (`NODE` and the `mkt-drill-work` volume are made in "Restore drill"; recreate them the same way for a new release). It needs the database on `mkt_data` and the provider through the firewalled `worker_egress` network, which `mkt_data` alone cannot reach. This command has not yet been rehearsed on a host:
@@ -537,8 +537,9 @@ docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --prof
 
 `docker compose run --rm ops release --agent <name> --by <owner email>` is the whole command; the file and profile options above are those of every other ops command in this runbook. `--by` is the platform owner's sign-in email (any letter case). There is no version flag: the version released is the `version` in `agents/<name>/definition.json`. The image holds the same `agents/` as the checkout it was built from, so build the ops image from the release being released.
 
-It makes that version live (turning the earlier live version off), records the passing run on it, and writes an `agent.released` audit entry. Exit 0 prints one `agent_released` line. Exit 2 is a refusal, and the message says what to do; exit 3 is an unexpected error. It refuses when:
+It makes that version live (turning the earlier live version off), records the passing run on it, and writes an `agent.released` audit entry (its detail lists every evaluation run that stood for a brand folder as `evaluationRunIds`). Exit 0 prints one `agent_released` line. Exit 2 is a refusal, and the message says what to do; exit 3 is an unexpected error. It refuses when:
 
+- the arguments are bad (`--agent` or `--by` missing or malformed), the agent has no folder under `agents/`, or `ADMIN_DATABASE_URL` is not set (these exit 2 before any database work);
 - the email is not a platform owner's;
 - `definition.json` cannot be read, or names another agent than the folder;
 - there is no passing run for the current files and the current evaluation set: a file or a case changed after the run. If the newest such run failed, the message names its failed case ids (never their content);
@@ -546,4 +547,5 @@ It makes that version live (turning the earlier live version off), records the p
 - an `eval/<slug>/` folder names no brand with that slug;
 - the agent has no evaluation cases;
 - that version is already live;
+- that version number was recorded earlier with other files (`<agent> v<N> was recorded with other files; raise "version" in definition.json and run the evaluation again`): a version number names one set of files, so raise `version` and run the evaluation again;
 - another release of the same agent is running or has just changed the live version (try again after checking).

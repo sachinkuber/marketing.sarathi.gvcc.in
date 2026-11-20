@@ -33,8 +33,10 @@ export const evalCaseSchema = z
     path: ['checks'],
   })
 export type EvalCase = z.infer<typeof evalCaseSchema>
+// A case as loaded, with the file it came from, so a later refusal can name it.
+export type LoadedCase = EvalCase & { file: string }
 
-function readFolder(folder: string): EvalCase[] {
+function readFolder(folder: string): LoadedCase[] {
   let names: string[]
   try {
     names = readdirSync(folder)
@@ -56,12 +58,12 @@ function readFolder(folder: string): EvalCase[] {
       const problems = parsed.error.issues.map((i) => `${i.path.join('.') || 'case'}: ${i.message}`)
       throw new EvalRefused(`${file}: ${problems.join('; ')}`)
     }
-    return parsed.data
+    return { ...parsed.data, file }
   })
 }
 
 // The shared cases plus, when a brand is named, that brand's folder under eval/.
-export function loadCases(agentDir: string, brandSlug?: string): EvalCase[] {
+export function loadCases(agentDir: string, brandSlug?: string): LoadedCase[] {
   if (brandSlug !== undefined && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(brandSlug)) {
     throw new EvalRefused('the brand slug is not a valid slug')
   }

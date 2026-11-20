@@ -53,6 +53,11 @@ describe('loadAgentDefinition', () => {
     )
   })
 
+  it('refuses a negative cap, naming the field', () => {
+    const dir = agentDir({ ...GOOD, caps: { fetchesPerJob: -1 } })
+    expect(() => loadAgentDefinition(dir)).toThrow(/definition\.json: caps\.fetchesPerJob: /)
+  })
+
   it('refuses an old tool type, naming the field', () => {
     const dir = agentDir({ ...GOOD, tools: [{ type: 'web_search_20250305', maxUses: 1 }] })
     expect(() => loadAgentDefinition(dir)).toThrow(/definition\.json: tools\.0\.type: /)

@@ -201,8 +201,12 @@ begin
 end $$;
 
 grant select, insert, update on
-  app.brand_document, app.suggestion, app.questionnaire, app.question, app.answer, app.agent_question
+  app.brand_document, app.questionnaire, app.question, app.answer, app.agent_question
   to mkt_app;
+-- A suggestion's content is written once; only the decision and the superseded_by link are ever updated.
+grant select, insert on app.suggestion to mkt_app;
+grant update (decision, decided_value, decided_reason, decided_by, decided_at, superseded_by)
+  on app.suggestion to mkt_app;
 grant select, insert, update, delete on app.onboarding to mkt_app;
 -- Written once; a fact or rule that changes is superseded, so only these columns are ever updated.
 grant select, insert on app.research_source, app.profile_item, app.verified_fact, app.safety_rule to mkt_app;

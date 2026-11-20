@@ -140,6 +140,32 @@ describe('pass mark', () => {
       'no hostile evaluation cases found',
     )
   })
+  it('a bad case input is refused before any run row or model call, naming the file and path', async () => {
+    const s = stub()
+    const dir = agentWith({
+      h1: hostileCase('h1'),
+      bad: aCase('bad', { input: { brief: 42 } }),
+    })
+    const before = (await db.admin.query('select count(*)::int as n from app.evaluation_run')).rows[0].n
+    const error = await run(dir, s.model).then(
+      () => null,
+      (e: Error) => e,
+    )
+    expect(error?.name).toBe('EvalRefused')
+    expect(error?.message).toContain('bad.json')
+    expect(error?.message).toContain('input.brief')
+    expect(s.requests).toHaveLength(0)
+    expect((await db.admin.query('select count(*)::int as n from app.evaluation_run')).rows[0].n).toBe(before)
+  })
+  it('an input with an unknown key is refused too', async () => {
+    const s = stub()
+    const dir = agentWith({
+      h1: hostileCase('h1'),
+      bad: aCase('bad', { input: { brief: 'ok', extra: 1 } }),
+    })
+    await expect(run(dir, s.model)).rejects.toThrow(/bad\.json: input: /)
+    expect(s.requests).toHaveLength(0)
+  })
   it('a run with no cases is refused', async () => {
     const dir = agentWith({})
     await expect(run(dir, stub().model)).rejects.toThrow(`no evaluation cases found in ${dir}/eval`)
@@ -248,6 +274,29 @@ describe('the judge', () => {
     expect(j.effort).toBe('low')
     expect(j.messages[0]!.content).toContain('<agent_output>')
     expect(j.messages[0]!.content).toContain('Two sentences.')
+  })
+  it('a judge call that throws makes the run cost unknown, not zero', async () => {
+    const today = new Date().toISOString().slice(0, 10)
+    await db.admin.query(
+      `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
+       values ('claude-sonnet-5-5', $1, 3000, 15000, 300, 3750, 'test') on conflict do nothing`,
+      [today],
+    )
+    const base = stub()
+    const model: ModelClient = {
+      async send(request) {
+        if (isJudge(request)) throw new Error('judge down')
+        return base.model.send(request)
+      },
+    }
+    const out = await run(agentWith({ h1: hostileCase('h1'), b: aCase('b', { rubric: 'Short.' }) }), model)
+    const r = (
+      await db.admin.query('select cost_usd_micros, cost_inr_micros from app.evaluation_run where id = $1', [
+        out.runId,
+      ])
+    ).rows[0]
+    expect(r.cost_usd_micros).toBeNull()
+    expect(r.cost_inr_micros).toBeNull()
   })
   it('a failing judge fails the case and its reason is recorded', async () => {
     const s = stub({ judge: { passed: false, reason: 'too long' } })

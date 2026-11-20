@@ -85,7 +85,7 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
     const subjectMatches = `(($5::uuid is null and r.subject_brand_id is null) or r.subject_brand_id = $5::uuid)`
 
     const missing: (string | null)[] = []
-    let runId: string | undefined
+    const runIds: string[] = []
     let failedCases: string[] = []
     for (const { slug, brandId } of targets) {
       const run = await client.query<{ id: string }>(
@@ -96,7 +96,7 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
         [agent, version, filesHash, sets, brandId],
       )
       if (run.rows[0]) {
-        runId ??= run.rows[0].id
+        runIds.push(run.rows[0].id)
         continue
       }
       missing.push(slug)
@@ -115,6 +115,7 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
         failedCases = failed.rows.map((r) => r.case_id)
       }
     }
+    const runId = runIds[0]
     if (missing.length > 0 || !runId) {
       const fixes = missing
         .map((slug) => `npm run eval -- --agent ${agent}${slug ? ` --brand ${slug}` : ''}`)
@@ -128,35 +129,45 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
       )
     }
 
-    const existing = await client.query<{ live: boolean }>(
-      'select live from app.agent_definition_version where agent = $1 and version = $2 for update',
+    const existing = await client.query<{ live: boolean; files_hash: string }>(
+      'select live, files_hash from app.agent_definition_version where agent = $1 and version = $2 for update',
       [agent, version],
     )
-    if (existing.rows[0]?.live) throw new Refused(`${agent} v${version} is already live; nothing to do`)
+    const row = existing.rows[0]
+    // A version number names one set of files: past runs point at this row, so its hash is never rewritten.
+    if (row && row.files_hash !== filesHash) {
+      throw new Refused(
+        `${agent} v${version} was recorded with other files; raise "version" in definition.json and run the evaluation again`,
+      )
+    }
+    if (row?.live) throw new Refused(`${agent} v${version} is already live; nothing to do`)
 
     await client.query('update app.agent_definition_version set live = false where agent = $1 and live', [
       agent,
     ])
-    const columns = [agent, version, model, effort, filesHash, ownerId, runId]
-    if (existing.rowCount) {
+    if (row) {
       await client.query(
         `update app.agent_definition_version
-            set model = $3, effort = $4, files_hash = $5, live = true, released_by = $6, released_at = now(),
-                evaluation_run_id = $7
+            set model = $3, effort = $4, live = true, released_by = $5, released_at = now(),
+                evaluation_run_id = $6
           where agent = $1 and version = $2`,
-        columns,
+        [agent, version, model, effort, ownerId, runId],
       )
     } else {
       await client.query(
         `insert into app.agent_definition_version
            (agent, version, model, effort, files_hash, live, released_by, released_at, evaluation_run_id)
          values ($1, $2, $3, $4, $5, true, $6, now(), $7)`,
-        columns,
+        [agent, version, model, effort, filesHash, ownerId, runId],
       )
     }
     await client.query(
       `select audit.append(null, 'system'::app.actor_kind, $1::uuid, 'agent.released', 'success', $2, $3::jsonb)`,
-      [ownerId, `${agent}@${version}`, JSON.stringify({ agent, version, evaluationRunId: runId })],
+      [
+        ownerId,
+        `${agent}@${version}`,
+        JSON.stringify({ agent, version, evaluationRunId: runId, evaluationRunIds: runIds }),
+      ],
     )
     await client.query('commit')
     return { agent, version, evaluationRunId: runId }

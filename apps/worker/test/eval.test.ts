@@ -129,7 +129,7 @@ describe('the summary runner', () => {
   it('sends exactly the request the job handler builds', async () => {
     const s = stub()
     const def = loadAgentDefinition(SUMMARY_DIR)
-    await EVAL_RUNNERS['summary']!(s.model, def, { brief: 'Hello <b>' })
+    await EVAL_RUNNERS['summary']!.run(s.model, def, { brief: 'Hello <b>' })
     expect(s.requests).toHaveLength(1)
     expect(s.requests[0]).toEqual(buildSummaryRequest(SUMMARY_AGENT, 'Hello <b>'))
   })
