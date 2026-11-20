@@ -394,11 +394,7 @@ describe('large PDFs are split into parts for the AI', () => {
     peak = Math.max(peak, process.memoryUsage().rss)
     expect(made.status).toBe(201)
     expect(made.json.parts).toBeGreaterThan(10)
-    const mb = (n: number) => Math.round(n / MB)
-    console.log(
-      `MEMORY upload ${mb(bytes.length)} MB, ${made.json.parts} parts: rss baseline ${mb(baseline)} MB, peak ${mb(peak)} MB, growth ${mb(peak - baseline)} MB`,
-    )
-    expect(peak - baseline).toBeLessThan(1024 * MB)
+    expect(peak - baseline).toBeLessThan(600 * MB)
   }, 300_000)
 })
 
