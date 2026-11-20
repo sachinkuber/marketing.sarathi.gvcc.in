@@ -191,6 +191,18 @@ async function queueRows(jobId: string): Promise<string[]> {
   return rows.map((r) => r.state)
 }
 
+// A job's queue rows once none is waiting or running. The core marks a job finished inside the worker's result
+// post; the library completes the queue row only after the worker's handler returns, a few milliseconds later.
+// So a row read as soon as the job is finished can still be active.
+async function settledQueueRows(jobId: string): Promise<string[]> {
+  let states: string[] = []
+  await until(async () => {
+    states = await queueRows(jobId)
+    return states.every((s) => s === 'completed' || s === 'cancelled' || s === 'failed')
+  })
+  return states
+}
+
 async function finished(ids: string[]): Promise<number> {
   const { rows } = await stack.db.admin.query<{ n: number }>(
     'select count(*)::int as n from app.job_input where job_id = any($1) and finished_at is not null',
@@ -401,7 +413,7 @@ describe('test 31: the kill switch set while a job is running', () => {
     expect(applied.filter((id) => id === jobId)).toHaveLength(1)
     // The step was checkpointed by the held attempt, so the new attempt makes no second model call.
     expect(modelCalls.get(jobId)).toBe(1)
-    expect(await queueRows(jobId)).toEqual(['completed', 'completed'])
+    expect(await settledQueueRows(jobId)).toEqual(['completed', 'completed'])
   }, 240_000)
 })
 
