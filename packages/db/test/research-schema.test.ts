@@ -86,6 +86,23 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
     })
   })
 
+  it('the database refuses a 6 MB image and accepts a 50 MB PDF', async () => {
+    await asApp(async (c) => {
+      const uid = await userId(c)
+      const insert = (type: string, size: number) =>
+        c.query(
+          `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+           values ($1, 'f', $2, decode(repeat('00', $3::int), 'hex'), $3, 'h', $4)`,
+          [A, type, size, uid],
+        )
+      const MB = 1048576
+      await c.query('savepoint s1')
+      expect(await code(() => insert('image/jpeg', 6 * MB))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      await insert('application/pdf', 50 * MB)
+    })
+  })
+
   it('lets mkt_app delete an unreferenced document but not a referenced one', async () => {
     await asApp(async (c) => {
       const uid = await userId(c)
@@ -159,8 +176,8 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // Take 0025 off, price two models, apply it again: only the sonnet rows gain a search price.
-      await runner({ ...base, direction: 'down', count: 1 })
+      // Take 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
+      await runner({ ...base, direction: 'down', count: 2 })
       for (const [model, from] of [
         ['claude-sonnet-5-5', '2026-01-01'],
         ['claude-sonnet-5-5', '2026-06-01'],

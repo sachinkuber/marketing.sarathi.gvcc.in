@@ -46,6 +46,9 @@ function fakeCore(
     async endAttempt(jobId, _t, reason) {
       ended.push(`${jobId}:${reason}`)
     },
+    async document() {
+      throw new Error('no document in this test')
+    },
     async jobDead() {},
     async unmarkedDead() {
       return []

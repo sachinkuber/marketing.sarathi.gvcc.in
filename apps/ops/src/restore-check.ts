@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
@@ -68,7 +68,8 @@ import { StandInFxSource } from '../../core/src/triggers/fx.ts'
 //   1. the drill user signs in with the password and the second factor, over HTTP, through that core;
 //   2. the drill job, waiting in the queue when the backup was taken, is claimed and its run succeeds;
 //   3. verifyAudit passes for every chain;
-//   4. tenant-isolation tests 1 to 6 hold: the database probes (packages/db/src/isolation-probes.ts) on the
+//   4. the drill's brand document is back byte for byte, with its checksum (test 51);
+//   5. tenant-isolation tests 1 to 6 hold: the database probes (packages/db/src/isolation-probes.ts) on the
 //      restored brands and on two probe brands written in a transaction that is rolled back, the route walk
 //      and the attempt-token probe (apps/core/src/access/isolation-probes.ts) against the core.
 // The copy is throw-away and is changed by the drill (sign-ins, the job run, test 6's jobs). Nothing printed
@@ -79,7 +80,7 @@ import { StandInFxSource } from '../../core/src/triggers/fx.ts'
 //   RESTORE_DRILL_FILE=<new file> npm run restore-drill-seed --workspace @mkt/ops -- --target <admin address>
 // It creates the brands restore-drill-a and restore-drill-b, the drill user (brand admin in restore-drill-a
 // only, address restore-drill@drill.invalid) enrolled in the second factor through the sign-in library with
-// the core's AUTH_SECRET, a content item in each brand, and one waiting summary job in restore-drill-a; then
+// the core's AUTH_SECRET, a content item in each brand, one small PDF document and one waiting summary job in restore-drill-a; then
 // writes the drill file (mode 0600, refused if it exists). The secret is the drill user's own, made here. The
 // file also names the live database (cluster system identifier and database name): restore-check refuses that
 // database, and any target host named `postgres` (the live service), before it starts anything.
@@ -95,6 +96,11 @@ import { StandInFxSource } from '../../core/src/triggers/fx.ts'
 export const DRILL_EMAIL = 'restore-drill@drill.invalid'
 export const DRILL_BRANDS = { own: 'restore-drill-a', other: 'restore-drill-b' } as const
 const DRILL_BRIEF = 'Restore drill: a two-line summary of a restored database, plain tone.'
+// The brand document the seed stores (spec 13, test 51): small, and the same bytes every time, so the check needs
+// no record of it beyond these constants.
+const DRILL_DOCUMENT_NAME = 'restore-drill.pdf'
+const DRILL_DOCUMENT = Buffer.from('%PDF-1.4\n% restore drill document\n%%EOF\n', 'latin1')
+const sha256Hex = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 // A well-formed id that names no row, for route parameters with nothing real to point at.
 const NO_ROW = '3f2b8c1e-5a4d-4e6f-8a7b-9c0d1e2f3a4b'
 const CORE_MAIN = fileURLToPath(new URL('../../core/src/main.ts', import.meta.url))
@@ -528,7 +534,33 @@ export async function restoreCheck(target: string, env: Env): Promise<CheckResul
       }),
     )
 
-    // 4. Tenant isolation, tests 1 to 6.
+    // 4. The brand document the seed stored is back, byte for byte (spec test 51).
+    results.push(
+      await check('brand document restored with its checksum', async () => {
+        const own = await brandId(admin, DRILL_BRANDS.own)
+        if (!own) return 'the drill brand is not in the restored database'
+        const found = await admin.query<{
+          bytes: Buffer
+          sha256: string
+          size_bytes: number
+          media_type: string
+        }>(
+          `select bytes, sha256, size_bytes, media_type from app.brand_document where brand_id = $1 and file_name = $2`,
+          [own, DRILL_DOCUMENT_NAME],
+        )
+        const row = found.rows[0]
+        if (!row) return 'the drill document is not in the restored database'
+        const expected = sha256Hex(DRILL_DOCUMENT)
+        if (row.media_type !== 'application/pdf') return 'the drill document changed its type'
+        if (row.size_bytes !== DRILL_DOCUMENT.length || row.bytes.length !== DRILL_DOCUMENT.length)
+          return 'the drill document changed its size'
+        if (sha256Hex(row.bytes) !== expected) return 'the restored bytes do not match the drill document'
+        if (row.sha256 !== expected) return 'the stored checksum does not match the drill document'
+        return undefined
+      }),
+    )
+
+    // 5. Tenant isolation, tests 1 to 6.
     results.push(
       await check('isolation tests 1 to 6', async () => {
         const findings = (await databaseIsolation(admin)).map((f) => `tests 2-5 ${f}`)
@@ -700,6 +732,23 @@ export function parseDrillFile(text: string): Record<string, string> {
   )
 }
 
+// One small PDF in the drill's own brand, once: a later seed on the same database leaves it as it is.
+async function seedDrillDocument(pool: Pool, brand: string, uploadedBy: string): Promise<void> {
+  await pool.query(
+    `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+     select $1, $2, 'application/pdf', $3, $4, $5, $6
+      where not exists (select 1 from app.brand_document where brand_id = $1 and file_name = $2)`,
+    [
+      brand,
+      DRILL_DOCUMENT_NAME,
+      DRILL_DOCUMENT,
+      DRILL_DOCUMENT.length,
+      sha256Hex(DRILL_DOCUMENT),
+      uploadedBy,
+    ],
+  )
+}
+
 export async function seedDrill(target: string, env: Env): Promise<{ jobId: string }> {
   const {
     AUTH_SECRET: secret,
@@ -727,6 +776,7 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
       if (!DRILL_ACCOUNT.every((name) => lines[name])) throw new Refused('the drill file is incomplete')
       const own = await brandId(pool, DRILL_BRANDS.own)
       if (!own) throw new Refused('the drill user exists without its brand')
+      await seedDrillDocument(pool, own, drillUser)
       const { jobId } = await startSummaryRun(pool, jobsDeps(pool, queue, new DbAudit(pool), '', ''), {
         brandId: own,
         brief: DRILL_BRIEF,
@@ -795,6 +845,7 @@ export async function seedDrill(target: string, env: Env): Promise<{ jobId: stri
     for (const slug of Object.values(DRILL_BRANDS)) {
       await pool.query(`insert into app.content_item (brand_id, kind) values ($1, 'article')`, [brands[slug]])
     }
+    await seedDrillDocument(pool, brands[DRILL_BRANDS.own] as string, userId)
     const { jobId } = await startSummaryRun(pool, jobsDeps(pool, queue, audit, '', ''), {
       brandId: brands[DRILL_BRANDS.own] as string,
       brief: DRILL_BRIEF,
@@ -880,7 +931,8 @@ export async function cancelLiveDrill(target: string, env: Env): Promise<{ cance
 }
 
 // When the drill file is lost: the drill's open jobs are cancelled and the drill user removed (its sessions,
-// password and second factor go with it), so a new seed can start over. The drill brands and their rows stay.
+// password and second factor go with it, and so does the document it uploaded), so a new seed can start over. The
+// drill brands and their other rows stay.
 export async function unseedDrill(
   target: string,
   env: Env,
@@ -893,6 +945,11 @@ export async function unseedDrill(
       await client.query('begin')
       await client.query(
         `delete from app.membership where user_id in (select id from auth."user" where email = $1)`,
+        [DRILL_EMAIL],
+      )
+      // The seed's document names the drill user as its uploader, so it goes first; the next seed stores it again.
+      await client.query(
+        `delete from app.brand_document where uploaded_by in (select id from auth."user" where email = $1)`,
         [DRILL_EMAIL],
       )
       const removed = await client.query('delete from auth."user" where email = $1', [DRILL_EMAIL])

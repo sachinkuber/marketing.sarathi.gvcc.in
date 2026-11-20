@@ -141,4 +141,26 @@ describe('the HTTP core client', () => {
       },
     ])
   })
+
+  it('reads a document as its stored type and bytes, and raises the core error when there is none', async () => {
+    const seen: { url: string; token?: string }[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({ url, token: (init.headers as Record<string, string>)['x-attempt-token'] })
+      return url.endsWith('/missing')
+        ? new Response(JSON.stringify({ error: { code: 'not_found', message: 'nothing' } }), { status: 404 })
+        : new Response(Buffer.from('%PDF-1.7 body'), {
+            status: 200,
+            headers: { 'content-type': 'application/pdf' },
+          })
+    })
+    const client = httpCoreClient('http://core.test', 'secret')
+    const got = await client.document('j1', 'tok', 'd1')
+    expect(got.mediaType).toBe('application/pdf')
+    expect(got.bytes.toString()).toBe('%PDF-1.7 body')
+    expect(seen[0]).toEqual({ url: 'http://core.test/api/v1/worker/jobs/j1/documents/d1', token: 'tok' })
+    await expect(client.document('j1', 'tok', 'missing')).rejects.toMatchObject({
+      status: 404,
+      code: 'not_found',
+    })
+  })
 })

@@ -254,6 +254,8 @@ export class TestClient {
       origin?: string | null
       csrf?: boolean
       headers?: Record<string, string>
+      // Sent as it is, with the content type the headers name (an upload); `body` is JSON.
+      raw?: Buffer
     } = {},
   ): Promise<Reply> {
     const headers: Record<string, string> = { ...options.headers }
@@ -267,7 +269,10 @@ export class TestClient {
     const res = await fetch(this.base + path, {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        // A Buffer is a valid body for fetch at run time; its type does not say so.
+        (options.raw as unknown as BodyInit | undefined) ??
+        (options.body === undefined ? undefined : JSON.stringify(options.body)),
       redirect: 'manual',
     })
     const setCookies = res.headers.getSetCookie()

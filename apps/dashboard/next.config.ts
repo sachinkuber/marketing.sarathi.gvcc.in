@@ -23,6 +23,9 @@ export default function config(phase: string): NextConfig {
     output: 'standalone',
     poweredByHeader: false,
     reactStrictMode: true,
+    // A brand document upload (up to 100 MB, plus a little) passes through the /api rewrite. Next buffers a
+    // proxied request's body and refuses more than 10 MB by default (proxyClientMaxBodySize, Next 16.3.8).
+    experimental: { proxyClientMaxBodySize: 101 * 1024 * 1024 },
     async rewrites() {
       return core ? [{ source: '/api/:path*', destination: `${core}/api/:path*` }] : []
     },

@@ -28,6 +28,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   const runs = new Map<string, string>()
   // And a real suggestion in each brand, for the decision route.
   const suggestions = new Map<string, string>()
+  // And a real document in each brand, for the delete route.
+  const documents = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -65,6 +67,13 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         [brand],
       )
       suggestions.set(brand, suggestion.rows[0].id as string)
+      const document = await stack.db.admin.query(
+        `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+         values ($1, 'f.pdf', 'application/pdf', '\\x255044462d', 5, 'h', (select id from auth."user" limit 1))
+         returning id`,
+        [brand],
+      )
+      documents.set(brand, document.rows[0].id as string)
     }
   })
   afterAll(async () => stack?.close())
@@ -76,6 +85,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       .replace(':alertId', alerts.get(brand) ?? SOME_USER)
       .replace(':runId', runs.get(brand) ?? SOME_USER)
       .replace(':suggestionId', suggestions.get(brand) ?? SOME_USER)
+      .replace(':documentId', documents.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {

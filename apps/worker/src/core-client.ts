@@ -73,6 +73,8 @@ export interface CoreClient {
   reconcile(): Promise<{ marked: number }>
   // Of these failed job IDs, the ones the core has not yet marked dead.
   unmarkedDead(jobIds: string[]): Promise<string[]>
+  // A brand document listed in the job's input: its stored media type and bytes (task 5).
+  document(jobId: string, token: string, documentId: string): Promise<{ mediaType: string; bytes: Buffer }>
   // The approvals timer: the core sends due reminders and marks and escalates overdue requests.
   approvalsTick(
     workerId: string,
@@ -127,6 +129,7 @@ function parseReply<T>(schema: z.ZodType, reply: unknown, what: string): T {
 
 // Every call to the core is bounded: a hung connection must not hold a job slot until the queue expires it.
 const REQUEST_TIMEOUT_MS = 60_000
+const DOCUMENT_TIMEOUT_MS = 300_000
 
 export class CoreError extends Error {
   readonly status: number
@@ -164,6 +167,26 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     return json as T
   }
   return {
+    // The one call whose answer is bytes, not JSON. A longer bound than a JSON call: a document can be 100 MB.
+    async document(jobId, token, documentId) {
+      const response = await fetch(`${baseUrl}/api/v1/worker/jobs/${jobId}/documents/${documentId}`, {
+        headers: { authorization: `Worker ${workerSecret}`, 'x-attempt-token': token },
+        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        const json = (await response.json().catch(() => ({}))) as {
+          error?: { code?: string; message?: string }
+        }
+        throw new CoreError(
+          response.status,
+          json.error?.code ?? 'error',
+          json.error?.message ?? response.statusText,
+        )
+      }
+      const mediaType = response.headers.get('content-type')
+      if (!mediaType) throw new Error('The core answered a document with no content type.')
+      return { mediaType, bytes: Buffer.from(await response.arrayBuffer()) }
+    },
     async startAttempt(jobId, workerId, queueId) {
       const reply = await call('POST', `/worker/jobs/${jobId}/attempts`, null, {
         workerId,

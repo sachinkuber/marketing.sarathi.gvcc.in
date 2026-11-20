@@ -148,6 +148,7 @@ describe('the restore drill (acceptance test 40)', () => {
       'PASS sign-in with password and second factor',
       'PASS a job waiting in the backup finishes after a worker starts',
       'PASS audit chains verify',
+      'PASS brand document restored with its checksum',
       'PASS isolation tests 1 to 6',
     ])
     expect(passed.code).toBe(0)

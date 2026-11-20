@@ -15,6 +15,7 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
+import { readJobDocument } from '../onboarding/documents.ts'
 import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
@@ -67,6 +68,7 @@ const tickBody = z.strictObject({ workerId: z.string().min(1).max(200) })
 const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
 const endBody = z.strictObject({ reason: z.enum(['held', 'agent_files_mismatch']) })
 const failureBody = z.strictObject({ error: text(2000) })
+const documentParams = z.strictObject({ jobId: z.uuid(), documentId: z.uuid() })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
 export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?: NotifyDeps): void {
@@ -102,6 +104,34 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
             return readControl(client, claims.jobId)
           }),
         )
+      },
+    ],
+  })
+
+  // The bytes of a brand document the job's input lists, for the job's own brand only.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents/:documentId',
+    access: { kind: 'attempt' },
+    summary: "A worker reads the bytes of a brand document listed in its job's input",
+    handlers: [
+      validate({ params: documentParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const { params } = inputOf<{ params: z.infer<typeof documentParams> }>(res)
+        const document = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return readJobDocument(client, {
+            jobId: claims.jobId,
+            brandId: claims.brandId,
+            documentId: params.documentId,
+          })
+        })
+        res
+          .status(200)
+          .set('content-type', document.mediaType)
+          .set('cache-control', 'no-store')
+          .send(document.bytes)
       },
     ],
   })
