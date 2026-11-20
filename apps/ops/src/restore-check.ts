@@ -385,6 +385,7 @@ function jobsDeps(
     backlogLimit: 2000,
     now: () => new Date(),
     results: new Map(),
+    settled: new Map(),
   }
 }
 

@@ -105,7 +105,7 @@ async function clearHeld(client: PoolClient, jobId: string): Promise<void> {
 // superseded by a reclaim, marked failed by the dead-letter path, or succeeds), and the job is not cancelled.
 async function consumeHeldResult(
   client: PoolClient,
-  deps: Pick<JobsDeps, 'results'>,
+  deps: Pick<JobsDeps, 'results' | 'settled'>,
   job: Freed,
 ): Promise<{ reason: 'stale' | 'not_applied'; error?: string } | null> {
   const held = job.held_result!

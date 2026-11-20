@@ -63,7 +63,7 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
       'select expected_result_type from app.job_input where job_id = $1',
       [jobId],
     )
-    const settle = deps.settled?.get(type.rows[0]?.expected_result_type ?? '')
+    const settle = deps.settled.get(type.rows[0]?.expected_result_type ?? '')
     // The hook may create the run's next job, which takes the brand row: it is taken first, as a result post
     // takes it (the engine's lock order), so a kill switch holding it is never waited on with the job held.
     if (settle) await client.query('select 1 from app.brand where id = $1 for share', [brandId])

@@ -16,42 +16,66 @@ export interface GradedSource {
   address: string | null
   result: string
 }
-export type GradeNote = 'one source' | 'sources disagree'
+export type GradeNote = 'one source' | 'sources disagree' | 'to confirm'
 type Confidence = 'found' | 'assumed' | 'unknown'
 
-// The host of a web address, without case and a leading "www."; null for anything that is not a web address
-// (a document, a file name), which therefore never counts as a second host.
-function hostOf(address: string | null): string | null {
+// Ruling R34: second-level labels under a two-letter country code that are part of the public suffix, so that
+// "aztek.co.in", "shop.com.au" and "brand.co.uk" are compared whole. No public-suffix list (no dependency).
+const SECOND_LEVEL = new Set(['co', 'com', 'net', 'org', 'gov', 'ac', 'edu', 'gen', 'firm', 'ind'])
+
+// The registrable domain of a web address: lower case, without a leading "www.", its last two labels, or its
+// last three when it ends in a two-letter country code under one of SECOND_LEVEL. Null for anything that is not
+// a web address (a document, a file name), which therefore never counts as a host.
+export function registrableDomain(address: string | null): string | null {
   if (address === null) return null
+  let host: string
   try {
-    const host = new URL(address).hostname.toLowerCase().replace(/^www\./, '')
-    return host === '' ? null : host
+    host = new URL(address).hostname.toLowerCase().replace(/^www\./, '')
   } catch {
     return null
   }
+  if (host === '') return null
+  // An IP address is its own host.
+  if (/^[\d.]+$/.test(host) || host.startsWith('[')) return host
+  const labels = host.split('.')
+  const tld = labels[labels.length - 1]!
+  const second = labels[labels.length - 2]
+  const keep =
+    labels.length >= 3 && tld.length === 2 && second !== undefined && SECOND_LEVEL.has(second) ? 3 : 2
+  return labels.slice(-keep).join('.')
 }
 
-// Spec 8.2 and rulings R22, R22a: the confidence a suggestion may keep, given the sources it cites. It only
-// ever lowers what the agent claimed:
-// - `found` stays only when a read source is the brand's own site or document, or the owner's statement, or
-//   two read sources at different hosts agree (the sources a suggestion cites are taken to agree unless told
-//   otherwise). A page that could not be read supports nothing, and a competitor page never counts.
-// - The `competitors` key is never `found` from research: the owner confirms who the competitors are.
+// Spec 8.2 and rulings R22, R22a, R33, R34, R35: the confidence a suggestion may keep, given the sources it
+// cites and the brand's intake website. It only ever lowers what the agent claimed:
+// - `found` stays only when a read source is the brand's own site (a page labelled site whose registrable domain
+//   is the intake website's), an uploaded document or the owner's statement, or when read sources at two
+//   different registrable domains agree (the sources a suggestion cites are taken to agree unless told
+//   otherwise). A page labelled site on another domain is a third-party page: it counts toward the two domains.
+//   A page that could not be read supports nothing, and a competitor page never counts.
+// - The `competitors` key is never `found` from research: it is noted "to confirm" (the owner confirms them).
 // - Sources that disagree make it `assumed`, noted "sources disagree"; any other lowering is noted "one source".
 // - `assumed` stays `assumed`, and `unknown` stays `unknown`.
 export function gradeConfidence(
   sources: readonly GradedSource[],
   claimed: Confidence,
-  context: { key?: string; disagree?: boolean } = {},
+  context: { key?: string; disagree?: boolean; website?: string | null } = {},
 ): { confidence: Confidence; note?: GradeNote } {
   if (claimed === 'unknown') return { confidence: 'unknown' }
   if (context.disagree) return { confidence: 'assumed', note: 'sources disagree' }
   if (claimed === 'assumed') return { confidence: 'assumed' }
+  if (context.key === 'competitors') return { confidence: 'assumed', note: 'to confirm' }
+  const brand = registrableDomain(context.website ?? null)
   const counted = sources.filter(
     (source) => (source.result === 'read' || source.result === 'stated') && source.kind !== 'competitor',
   )
-  const own = counted.some((source) => QUALIFYING.includes(source.kind))
-  const hosts = new Set(counted.map((source) => hostOf(source.address)).filter((host) => host !== null))
-  if (context.key !== 'competitors' && (own || hosts.size >= 2)) return { confidence: 'found' }
+  const own = counted.some((source) =>
+    source.kind === 'site'
+      ? brand !== null && registrableDomain(source.address) === brand
+      : QUALIFYING.includes(source.kind),
+  )
+  const hosts = new Set(
+    counted.map((source) => registrableDomain(source.address)).filter((host) => host !== null),
+  )
+  if (own || hosts.size >= 2) return { confidence: 'found' }
   return { confidence: 'assumed', note: 'one source' }
 }

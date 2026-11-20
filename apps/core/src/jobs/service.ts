@@ -16,8 +16,9 @@ export interface JobsDeps {
   backlogLimit: number
   now: () => Date
   results: ResultHandlers
-  // Result types whose run decides for itself what the end of one of its jobs means (research groups).
-  settled?: SettledHooks
+  // Result types whose run decides for itself what the end of one of its jobs means (research groups). Every
+  // construction passes a map, empty when nothing is registered.
+  settled: SettledHooks
 }
 
 // Called when a job of a result type registered here settles, inside the transaction that ends it, with the
@@ -32,7 +33,7 @@ export type SettledHook = (
 export type SettledHooks = Map<string, SettledHook>
 
 // The result types whose dead jobs settle rather than fail their run.
-export const settledTypes = (deps: Pick<JobsDeps, 'settled'>): string[] => [...(deps.settled?.keys() ?? [])]
+export const settledTypes = (deps: Pick<JobsDeps, 'settled'>): string[] => [...deps.settled.keys()]
 
 export interface NewRun {
   agent: string
@@ -836,7 +837,7 @@ export async function applyResult(
     input.attemptId,
   ])
   // A type whose run settles itself hears of the job's end once it is written (its outcome included).
-  await deps.settled?.get(posted.type)?.(client, {
+  await deps.settled.get(posted.type)?.(client, {
     brandId: input.brandId,
     runId: input.runId,
     jobId: input.jobId,

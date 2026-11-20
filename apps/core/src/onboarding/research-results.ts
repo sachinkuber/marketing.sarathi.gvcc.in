@@ -31,6 +31,10 @@ interface GroupOutcome {
 
 const STORED_EXTRACT_MAX = 600
 const FLAG = /^\[flagged: ([^\]]*)\] ([\s\S]*)$/
+// An unflagged extract that itself begins like the marker (page text is untrusted) is stored behind one more
+// backslash, so it never reads back as flagged; reading drops that backslash again.
+const LOOKS_FLAGGED = /^\\*\[flagged:/
+const ESCAPED = /^\\+\[flagged:/
 
 // Cut to at most `max` UTF-16 units without leaving half of a surrogate pair at the end.
 function cut(text: string, max: number): string {
@@ -41,7 +45,7 @@ function cut(text: string, max: number): string {
 // "[flagged: <reason>] <extract>", at most 600 characters in all. Brackets in the reason are shown as
 // parentheses, so the marker always reads back whole.
 export function storedExtract(extract: string, flagged: { reason: string } | null): string {
-  if (flagged === null) return extract
+  if (flagged === null) return LOOKS_FLAGGED.test(extract) ? `\\${extract}` : extract
   const reason = flagged.reason.replace(/\[/g, '(').replace(/\]/g, ')')
   return cut(`[flagged: ${reason}] ${extract}`, STORED_EXTRACT_MAX)
 }
@@ -49,7 +53,8 @@ export function storedExtract(extract: string, flagged: { reason: string } | nul
 // The extract and the flag apart again, as the merge input takes them.
 export function readStoredExtract(stored: string): { extract: string; flagged: { reason: string } | null } {
   const match = FLAG.exec(stored)
-  const text = cut(match ? match[2]! : stored, EXTRACT_MAX)
+  const plain = ESCAPED.test(stored) ? stored.slice(1) : stored
+  const text = cut(match ? match[2]! : plain, EXTRACT_MAX)
   return {
     // A long reason can leave only blank text of the extract inside the 600 characters.
     extract: text.trim() === '' ? '(the extract was cut)' : text,
@@ -67,14 +72,20 @@ export function researchGroupResultHandler(): ResultHandler {
   return async (client, ctx) => {
     const parsed = researchGroupResultSchema.safeParse(ctx.result)
     if (!parsed.success) throw invalid('research group result')
-    const result = parsed.data
+    // Ids are compared in lower case, as the database writes them (a uuid is valid in either case).
+    const result = {
+      ...parsed.data,
+      sources: parsed.data.sources.map((s) => ({ ...s, documentId: s.documentId?.toLowerCase() ?? null })),
+    }
     const job = await client.query<{ input: { group?: unknown; documentIds?: unknown } | null }>(
       'select input from app.job_input where job_id = $1',
       [ctx.jobId],
     )
     const given = job.rows[0]?.input
     if (result.group !== given?.group) throw invalid('result for this research group')
-    const documents = new Set(Array.isArray(given.documentIds) ? given.documentIds : [])
+    const documents = new Set(
+      (Array.isArray(given.documentIds) ? given.documentIds : []).map((id) => String(id).toLowerCase()),
+    )
     if (result.sources.some((s) => s.documentId !== null && !documents.has(s.documentId))) {
       throw new AppError(
         422,
@@ -134,6 +145,14 @@ export async function maybeStartMerge(
   ])
   // A run someone cancelled, or one held or needing manual work, is not carried on.
   if (!['created', 'running', 'failed'].includes(run.rows[0]?.state ?? '')) return null
+  // Nor is a run the brand's research has moved past (a requeued group of an old run): the caller's finaliseRun
+  // ends it without a merge, so it never overwrites a newer run's suggestions. The row is shared-locked, so a
+  // new start waits for this transaction.
+  const current = await client.query<{ research_run_id: string | null }>(
+    'select research_run_id from app.onboarding where brand_id = $1 for share',
+    [input.brandId],
+  )
+  if (current.rows[0]?.research_run_id !== input.runId) return null
   const { rows } = await client.query<{
     type: string
     group: string
@@ -197,16 +216,31 @@ export async function maybeStartMerge(
 
 // ---- research.v1 ----
 
-// The merge's result, checked again here. Every source it cites must have been read in this run, for this brand.
-// Each suggestion's confidence is graded from its sources (it may only go down); a lowered one says why. The
-// suggestions are added as open profile suggestions (an undecided one of an earlier run with the same key is
-// superseded, a decided one is kept), the onboarding step moves to the profile, and every platform owner is
-// told. The outcome is the count of suggestions and the gaps, which the draft profile shows.
+// The merge's result, checked again here. A result for a run that is no longer the brand's research (a newer run
+// started) stores nothing: its outcome says it is stale. Every source it cites must have been read in this run,
+// for this brand. Each suggestion's confidence is graded from its sources and the intake website (it may only go
+// down); a lowered one says why. The suggestions are added as open profile suggestions (an undecided one of an
+// earlier run with the same key is superseded, a decided one is kept), the onboarding step moves to the profile,
+// and every platform owner is told. The outcome is the count of suggestions and the gaps, which the draft
+// profile shows.
 export function researchResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHandler {
   return async (client, ctx) => {
     const parsed = researchResultSchema.safeParse(ctx.result)
     if (!parsed.success) throw invalid('research result')
-    const result = parsed.data
+    // The onboarding row is locked before anything is written, so a new research start waits for this result.
+    const onboarding = await client.query<{ research_run_id: string | null; website: string | null }>(
+      `select research_run_id, intake->>'website' as website from app.onboarding where brand_id = $1 for update`,
+      [ctx.brandId],
+    )
+    if (onboarding.rows[0]?.research_run_id !== ctx.runId) return { suggestions: 0, gaps: [], stale: true }
+    // Ids are compared in lower case, as the database returns them (a uuid is valid in either case).
+    const result = {
+      ...parsed.data,
+      suggestions: parsed.data.suggestions.map((s) => ({
+        ...s,
+        sourceIds: [...new Set(s.sourceIds.map((id) => id.toLowerCase()))],
+      })),
+    }
     const cited = [...new Set(result.suggestions.flatMap((s) => s.sourceIds))]
     const found = await client.query<GradedSource & { id: string }>(
       `select id, kind, address, result from app.research_source
@@ -232,6 +266,13 @@ export function researchResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHand
         g.findings.filter((f) => f.conflict).map((f) => f.key),
       ),
     )
+    // The website the run researched (its group jobs' intake), else the intake saved now (ruling R33).
+    const researched = await client.query<{ website: string | null }>(
+      `select input->'intake'->>'website' as website from app.job_input
+        where run_id = $1 and expected_result_type = $2 and input->'intake'->>'website' is not null limit 1`,
+      [ctx.runId, GROUP_RESULT_TYPE],
+    )
+    const website = researched.rows[0]?.website ?? onboarding.rows[0]?.website ?? null
 
     const items = result.suggestions.map((suggestion) => {
       const grade = gradeConfidence(
@@ -240,6 +281,7 @@ export function researchResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHand
         {
           key: suggestion.key,
           disagree: conflicts.has(suggestion.key) || /sources disagree/i.test(suggestion.why),
+          website,
         },
       )
       const note = grade.note === undefined ? '' : ` (${grade.note})`

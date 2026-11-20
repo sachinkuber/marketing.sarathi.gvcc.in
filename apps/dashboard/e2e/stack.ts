@@ -169,6 +169,8 @@ export async function startStack(env: Record<string, string | undefined> = proce
     // Job tokens and timeouts run on real time; only the approvals' reminders follow the harness clock.
     now: () => new Date(),
     results,
+    // Empty: this stack registers no research handlers, so no result type settles its own run.
+    settled: new Map(),
   }
   registerSummaryHandlers(results, jobs)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).

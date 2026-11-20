@@ -153,7 +153,7 @@ beforeAll(async () => {
   if (!stack.jobs) throw new Error('the stack has no queue')
   jobs = stack.jobs
   // The stack's job table starts empty; production fills it in startServer with these same handlers.
-  registerResearchHandlers(jobs.results, jobs.settled!, jobs)
+  registerResearchHandlers(jobs.results, jobs.settled, jobs)
   // Prices and a rate dated from the service's own clock; a search costs 10,000 micro-USD.
   const today = jobs.now().toISOString().slice(0, 10)
   await stack.db.admin.query(
