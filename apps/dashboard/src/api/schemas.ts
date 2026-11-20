@@ -495,6 +495,7 @@ export const onboardingReply = z.strictObject({
       state: z.string(),
       groups: z.array(researchGroup),
       merge: groupState,
+      gaps: z.array(z.strictObject({ key: z.string(), why: z.string() })),
     })
     .nullable(),
   openSuggestions: z.number().int().nonnegative(),
@@ -515,3 +516,32 @@ export const documentSummary = z.strictObject({
 })
 export const documentsReply = z.strictObject({ documents: z.array(documentSummary) })
 export const deletedReply = z.null()
+
+// A source as the draft profile shows it: where it was read, when, and what it said. The core has already taken
+// the stored flag marker off the extract, so `flagged` is the only place a flag shows.
+export const suggestionSource = z.strictObject({
+  id: z.string(),
+  kind: z.string(),
+  address: z.string().nullable(),
+  readAt: z.string(),
+  extract: z.string(),
+  flagged: z.strictObject({ reason: z.string() }).nullable(),
+})
+
+export const suggestionItem = z.strictObject({
+  id: z.string(),
+  step: z.string(),
+  key: z.string(),
+  proposed: z.unknown(),
+  why: z.string(),
+  confidence: z.enum(['found', 'assumed', 'unknown']),
+  options: z.unknown(),
+  decision: z.enum(['accepted', 'edited', 'rejected']).nullable(),
+  decidedValue: z.unknown(),
+  decidedReason: z.string().nullable(),
+  decidedAt: z.string().nullable(),
+  createdAt: z.string(),
+  sources: z.array(suggestionSource),
+})
+export const suggestionsReply = z.strictObject({ suggestions: z.array(suggestionItem) })
+export const suggestionDecisionReply = z.strictObject({ createdId: z.string().nullable() })

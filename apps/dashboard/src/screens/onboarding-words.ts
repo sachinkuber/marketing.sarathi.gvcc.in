@@ -110,3 +110,39 @@ export const OWNER_ONLY = 'Only the platform owner can use onboarding.'
 export function isForbidden(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403
 }
+
+// The draft profile's four topics, a fixed mapping of the profile keys (R38), and the plain name of each key.
+export const TOPICS: { heading: string; keys: string[] }[] = [
+  {
+    heading: 'The business',
+    keys: [
+      'business_name',
+      'what_they_sell',
+      'main_products',
+      'places_served',
+      'price_position',
+      'certifications',
+      'contact_points',
+    ],
+  },
+  { heading: 'Customers and voice', keys: ['audiences', 'tone_of_voice', 'differentiators'] },
+  { heading: 'Online presence', keys: ['social_presence', 'search_visibility', 'ai_answer_visibility'] },
+  { heading: 'Competitors', keys: ['competitors'] },
+]
+
+export const KEY_LABEL: Record<string, string> = {
+  business_name: 'Business name',
+  what_they_sell: 'What they sell',
+  main_products: 'Main products',
+  places_served: 'Places served',
+  price_position: 'Price position',
+  certifications: 'Certifications',
+  contact_points: 'Contact points',
+  audiences: 'Audiences',
+  tone_of_voice: 'Tone of voice',
+  differentiators: 'What sets them apart',
+  social_presence: 'Social presence',
+  search_visibility: 'Search visibility',
+  ai_answer_visibility: 'AI answer visibility',
+  competitors: 'Competitors',
+}

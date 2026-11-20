@@ -559,6 +559,15 @@ function withoutRefs(f: Finding) {
   return rest
 }
 
+describe('the overview gaps (R38)', () => {
+  it('are empty until the merge is done', async () => {
+    const brandId = await newBrand()
+    await begin(brandId)
+    const overview = await readOverview(stack.appPool, brandId)
+    expect(overview.research!.gaps).toEqual([])
+  })
+})
+
 describe('dead groups', () => {
   it('a dead group still lets the merge start', async () => {
     const brandId = await newBrand()
@@ -889,6 +898,8 @@ describe('the merge result', () => {
     const overview = await readOverview(stack.appPool, brandId)
     expect(overview).toMatchObject({ step: 'profile', openSuggestions: 5 })
     expect(overview.research).toMatchObject({ state: 'succeeded', merge: 'done' })
+    // R38: the draft profile reads the merge's gaps from the overview.
+    expect(overview.research!.gaps).toEqual([{ key: 'price_position', why: 'No prices were found.' }])
     // The suggestions are audited with ids and counts only.
     const audit = await q(
       `select detail from audit.log where action = 'onboarding.suggestions_added' and brand_id = $1`,

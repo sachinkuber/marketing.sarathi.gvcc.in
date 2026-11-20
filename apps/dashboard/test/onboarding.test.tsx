@@ -212,7 +212,11 @@ describe('onboarding screens, driven', () => {
     ...extra,
   })
   const running = (groups: unknown[], merge = 'waiting') =>
-    overview({ step: 'research', intake, research: { runId: 'r1', state: 'running', groups, merge } })
+    overview({
+      step: 'research',
+      intake,
+      research: { runId: 'r1', state: 'running', groups, merge, gaps: [] },
+    })
 
   it('progress shows a failed group as Could not be read', async () => {
     dom.replies.push({
@@ -426,7 +430,7 @@ describe('onboarding screens, driven', () => {
       body: overview({
         step: 'research',
         intake,
-        research: { runId: 'r1', state: 'running', groups: [groupOf(state)], merge },
+        research: { runId: 'r1', state: 'running', groups: [groupOf(state)], merge, gaps: [] },
       }),
     })
     const gets = () => dom.calls.filter((c) => c.method === 'GET').length

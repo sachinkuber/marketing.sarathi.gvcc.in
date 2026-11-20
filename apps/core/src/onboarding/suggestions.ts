@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
+import { readStoredExtract } from './research-results.ts'
 import { qualifiesAsFactSource, type SourceKind } from './sources.ts'
 
 export type SuggestionStep = 'profile' | 'question' | 'fact' | 'rule' | 'choice'
@@ -351,7 +352,15 @@ export interface SuggestionView {
   decidedReason: string | null
   decidedAt: string | null
   createdAt: string
-  sources: { id: string; kind: SourceKind; address: string | null; extract: string }[]
+  // The extract as the owner reads it: the stored flag marker and escape are taken off, the flag kept apart.
+  sources: {
+    id: string
+    kind: SourceKind
+    address: string | null
+    readAt: string
+    extract: string
+    flagged: { reason: string } | null
+  }[]
 }
 
 export async function listSuggestions(
@@ -364,7 +373,8 @@ export async function listSuggestions(
       `select s.id, s.step, s.key, s.proposed, s.why, s.confidence, s.options, s.decision, s.decided_value,
               s.decided_reason, s.decided_at, s.created_at,
               coalesce((select json_agg(json_build_object('id', r.id, 'kind', r.kind, 'address', r.address,
-                                                         'extract', r.extract) order by r.read_at, r.id)
+                                                         'readAt', r.read_at, 'extract', r.extract)
+                                  order by r.read_at, r.id)
                           from app.research_source r
                          where r.brand_id = s.brand_id and r.id = any(s.source_ids)), '[]'::json) as sources
          from app.suggestion s
@@ -385,7 +395,19 @@ export async function listSuggestions(
       decidedReason: r.decided_reason,
       decidedAt: r.decided_at ? new Date(r.decided_at).toISOString() : null,
       createdAt: new Date(r.created_at).toISOString(),
-      sources: r.sources,
+      sources: (
+        r.sources as {
+          id: string
+          kind: SourceKind
+          address: string | null
+          readAt: string
+          extract: string
+        }[]
+      ).map((source) => ({
+        ...source,
+        readAt: new Date(source.readAt).toISOString(),
+        ...readStoredExtract(source.extract),
+      })),
     }))
   })
 }

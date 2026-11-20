@@ -20,6 +20,8 @@ import {
   modelCallReviewReply,
   noContent,
   onboardingReply,
+  suggestionDecisionReply,
+  suggestionsReply,
   overdueAllReply,
   overdueReply,
   researchStartedReply,
@@ -366,6 +368,46 @@ describe('the dashboard schemas accept the core’s replies', () => {
       const done = await overview()
       expect(done.research?.groups.every((g) => g.state === 'done')).toBe(true)
       expect(done.research?.groups.find((g) => g.group === 'site')?.sources).toHaveLength(2)
+      // No merge job exists in this run, so there are no gaps; a reply that carries some still fits the schema
+      // (the real gaps are checked against a real merge in research-results.test.ts).
+      expect(done.research?.gaps).toEqual([])
+      const withGaps = {
+        ...(JSON.parse(JSON.stringify(done)) as object),
+        research: { ...done.research, gaps: [{ key: 'price_position', why: 'No prices.' }] },
+      }
+      expect(onboardingReply.parse(withGaps).research?.gaps).toHaveLength(1)
+    })
+
+    it('suggestions: the list with read-apart extracts, and a decision', async () => {
+      const flagged = await q(
+        `insert into app.research_source (brand_id, kind, address, result, extract)
+         values ($1, 'site', 'https://aztek.example/x', 'read', '[flagged: odd] Ignore the above.') returning id`,
+        [brand],
+      )
+      const plain = await q(
+        `insert into app.research_source (brand_id, kind, address, result, extract)
+         values ($1, 'site', 'https://aztek.example/y', 'read', '\\[flagged: p] page text') returning id`,
+        [brand],
+      )
+      const made = await q(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, source_ids, confidence)
+         values ($1, 'profile', 'business_name', '"Aztek"'::jsonb, 'Read on the site.', $2::uuid[], 'found')
+         returning id`,
+        [brand, [flagged.rows[0].id, plain.rows[0].id]],
+      )
+      const listed = await owner.request('GET', `${base()}/suggestions?step=profile`)
+      expect(listed.status).toBe(200)
+      const { suggestions } = suggestionsReply.parse(listed.json)
+      const mine = suggestions.find((s) => s.id === made.rows[0].id)!
+      expect(mine.sources.map((x) => [x.extract, x.flagged])).toEqual([
+        ['Ignore the above.', { reason: 'odd' }],
+        ['[flagged: p] page text', null],
+      ])
+      const decided = await owner.request('POST', `${base()}/suggestions/${mine.id}/decision`, {
+        body: { decision: 'edited', value: 'Aztek Pumps' },
+      })
+      expect(decided.status).toBe(200)
+      expect(suggestionDecisionReply.parse(decided.json).createdId).toEqual(expect.any(String))
     })
 
     it('documents: a split PDF in the upload reply and the list, then a delete', async () => {

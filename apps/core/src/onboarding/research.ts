@@ -198,7 +198,14 @@ export interface Overview {
   step: string
   intake: Intake | null
   documents: number
-  research: null | { runId: string; state: string; groups: GroupView[]; merge: State }
+  research: null | {
+    runId: string
+    state: string
+    groups: GroupView[]
+    merge: State
+    // What the merge could not settle (R38): the draft profile shows these as questions still to ask.
+    gaps: { key: string; why: string }[]
+  }
   openSuggestions: number
   cost: Money
 }
@@ -242,7 +249,7 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       type: string
       group: string | null
       finished: boolean
-      outcome: { sources?: { id: string }[] } | null
+      outcome: { sources?: { id: string }[]; gaps?: { key: string; why: string }[] } | null
       dead: boolean
       cancelled: boolean
       attempts: number
@@ -321,6 +328,7 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       state: run.rows[0]?.state ?? 'failed',
       groups,
       merge: merge ? stateOf(merge) : 'waiting',
+      gaps: merge?.finished && Array.isArray(merge.outcome?.gaps) ? merge.outcome.gaps : [],
     }
     return overview
   })
