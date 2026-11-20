@@ -2,12 +2,15 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { createPool } from '@mkt/db'
-import { anthropicModel } from '../anthropic.ts'
-import { EvalRefused } from './cases.ts'
-import { EVAL_RUNNERS, runEvaluation } from './run.ts'
+import { anthropicModel } from '../../worker/src/anthropic.ts'
+import { EvalRefused } from '../../worker/src/eval/cases.ts'
+import { EVAL_RUNNERS } from '../../worker/src/eval/run.ts'
+import { runEvaluation } from './eval.ts'
 
-// npm run eval -- --agent <name> [--brand <slug>]. Exit 0 passed, 1 failed, 2 refused. Nothing printed names
-// the key, the database address or a case input: a line is the case id and a short verdict.
+// npm run eval -- --agent <name> [--brand <slug>]. Exit 0 passed, 1 failed, 2 refused (bad input or
+// environment, unknown agent, no cases), 3 unexpected error (the database is down). The judge's reason is
+// stored in the result row only, never printed: it can quote case input. Nothing printed names the key, the
+// database address or a case input: a line is the case id and a short verdict.
 async function main(): Promise<number> {
   let values: { agent?: string; brand?: string }
   try {
@@ -24,7 +27,7 @@ async function main(): Promise<number> {
     console.error('unknown agent: name one with an evaluation runner')
     return 2
   }
-  const agentDir = fileURLToPath(new URL(`../../../../agents/${agent}/`, import.meta.url))
+  const agentDir = fileURLToPath(new URL(`../../../agents/${agent}/`, import.meta.url))
   if (!existsSync(agentDir)) {
     console.error('unknown agent: no folder under agents/')
     return 2
@@ -61,10 +64,10 @@ async function main(): Promise<number> {
       return 2
     }
     console.error(`evaluation failed (${error instanceof Error ? error.name : 'error'})`)
-    return 2
+    return 3
   } finally {
     await pool.end()
   }
 }
 
-if (import.meta.main) process.exit(await main())
+if (process.argv[1] === fileURLToPath(import.meta.url)) process.exit(await main())

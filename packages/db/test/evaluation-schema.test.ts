@@ -76,6 +76,7 @@ describe('evaluation tables', () => {
        values ('a', 1, 'h', 's', 'm') returning id, hostile_total, cost_usd_micros`,
     )
     expect(run.rows[0].hostile_total).toBe(0)
+    expect(run.rows[0].cost_usd_micros).toBeNull()
     await db.admin.query(
       `insert into app.evaluation_result (run_id, case_id, hostile, passed, checks, input_tokens, output_tokens)
        values ($1, 'c1', true, true, '{}', 1, 1)`,

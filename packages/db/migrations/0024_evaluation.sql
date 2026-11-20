@@ -18,8 +18,9 @@ create table app.evaluation_run (
   hostile_passed integer not null default 0,
   other_total integer not null default 0,
   other_passed integer not null default 0,
-  cost_usd_micros bigint not null default 0,
-  cost_inr_micros bigint not null default 0,
+  -- Null when a price or the exchange rate was missing: an unknown cost is not zero.
+  cost_usd_micros bigint,
+  cost_inr_micros bigint,
   fx_rate_id uuid references app.fx_rate (id)
 );
 
