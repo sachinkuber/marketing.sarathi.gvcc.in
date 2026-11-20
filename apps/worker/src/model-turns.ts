@@ -7,6 +7,16 @@ export const DEADLINE_MARGIN_MS = 60_000
 // A request given less time than this is not started.
 export const MIN_REQUEST_MS = 30_000
 
+// The time one request may take: its own bound (default the job class's), cut so it ends before the attempt's
+// token does, less the margin kept for checkpointing and posting. A request with too little time is not
+// started: ModelStopped('time_budget'). Every handler's model call takes its timeout from here.
+export function attemptTimeoutMs(ctx: JobContext, requestedMs?: number): number {
+  const classTimeout = requestedMs ?? TIMEOUT_MS_BY_CLASS[ctx.jobClass] ?? 240_000
+  const timeoutMs = Math.min(classTimeout, ctx.deadline.getTime() - Date.now() - DEADLINE_MARGIN_MS)
+  if (timeoutMs < MIN_REQUEST_MS) throw new ModelStopped('time_budget')
+  return timeoutMs
+}
+
 export interface TurnCaps {
   searches: number
   fetches: number
@@ -43,9 +53,7 @@ export async function modelTurns(
 
   for (let turn = 0; ; turn += 1) {
     // Each request ends before the attempt's token does (less the margin), or is not started.
-    const classTimeout = request.timeoutMs ?? TIMEOUT_MS_BY_CLASS[ctx.jobClass] ?? 240_000
-    const timeoutMs = Math.min(classTimeout, ctx.deadline.getTime() - Date.now() - DEADLINE_MARGIN_MS)
-    if (timeoutMs < MIN_REQUEST_MS) throw new ModelStopped('time_budget')
+    const timeoutMs = attemptTimeoutMs(ctx, request.timeoutMs)
 
     const used = (tool: ModelTool): number => (tool.type === 'web_search_20260209' ? searches : fetches)
     const cap = (tool: ModelTool): number =>
