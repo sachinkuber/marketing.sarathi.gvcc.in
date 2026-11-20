@@ -49,6 +49,12 @@ function fakeCore(
     async document() {
       throw new Error('no document in this test')
     },
+    async documents() {
+      return []
+    },
+    async documentPart() {
+      throw new Error('no document in this test')
+    },
     async jobDead() {},
     async unmarkedDead() {
       return []

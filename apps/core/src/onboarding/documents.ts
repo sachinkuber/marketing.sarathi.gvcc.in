@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
+import { splitPdfOneAtATime, type PdfPart } from './pdf-parts.ts'
 
 // Brand documents (spec 13, test 51). The size limits are the owner's decision (a PDF up to 100 MB, which
 // supersedes the spec's 10 MB) and match migration 0026's check.
@@ -14,6 +15,8 @@ export const IMAGE_LIMIT = 5 * MB
 export const MAX_DOCUMENTS = 20
 export const BRAND_STORAGE_LIMIT = 500 * MB
 export const MAX_FILE_NAME = 200
+// What the AI reads in one piece: a PDF over either limit is stored with parts that are within both.
+export const PART_LIMITS = { maxBytes: 8 * MB, maxPages: 100 } as const
 
 export const isDocumentType = (value: string): value is DocumentType =>
   (MEDIA_TYPES as readonly string[]).includes(value)
@@ -62,7 +65,7 @@ export interface DocumentSummary {
   mediaType: string
   sizeBytes: number
   sha256: string
-  // Until the document is prepared for the AI (task 5b).
+  // The parts the AI reads (0 when the document is read whole).
   parts: number
   uploadedAt?: string
 }
@@ -83,6 +86,9 @@ export async function uploadDocument(
   const limit = limitFor(mediaType)
   if (bytes.length > limit) throw new AppError(413, 'too_large', tooLargeMessage(mediaType, bytes.length))
   const sha256 = createHash('sha256').update(bytes).digest('hex')
+  // Every PDF is opened here, so an unreadable one is refused whatever its size. This runs before the transaction:
+  // the brand's onboarding row is not held while a large PDF is split, and a refused split has stored nothing.
+  const parts = mediaType === 'application/pdf' ? await splitPdfOneAtATime(bytes, PART_LIMITS) : []
 
   return withBrand(pool, input.brandId, async (client) => {
     // Two uploads at once must not pass the limits together: the brand's onboarding row is locked while the
@@ -118,6 +124,7 @@ export async function uploadDocument(
       [input.brandId, input.fileName, mediaType, bytes, bytes.length, sha256, input.actorId],
     )
     const id = made.rows[0]!.id
+    await storeParts(client, input.brandId, id, parts)
     await deps.audit.record(
       {
         action: 'onboarding.document_uploaded',
@@ -125,12 +132,36 @@ export async function uploadDocument(
         brandId: input.brandId,
         subject: id,
         outcome: 'success',
-        detail: { documentId: id, sizeBytes: bytes.length, mediaType },
+        detail: { documentId: id, sizeBytes: bytes.length, mediaType, parts: parts.length },
       },
       client,
     )
-    return { id, fileName: input.fileName, mediaType, sizeBytes: bytes.length, sha256, parts: 0 }
+    return { id, fileName: input.fileName, mediaType, sizeBytes: bytes.length, sha256, parts: parts.length }
   })
+}
+
+async function storeParts(
+  client: PoolClient,
+  brandId: string,
+  documentId: string,
+  parts: PdfPart[],
+): Promise<void> {
+  for (const [i, part] of parts.entries()) {
+    await client.query(
+      `insert into app.brand_document_part (brand_id, document_id, part_no, first_page, last_page, bytes, size_bytes, sha256)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        brandId,
+        documentId,
+        i + 1,
+        part.firstPage,
+        part.lastPage,
+        part.bytes,
+        part.bytes.length,
+        createHash('sha256').update(part.bytes).digest('hex'),
+      ],
+    )
+  }
 }
 
 export async function listDocuments(pool: Pool, brandId: string): Promise<DocumentSummary[]> {
@@ -142,9 +173,11 @@ export async function listDocuments(pool: Pool, brandId: string): Promise<Docume
       size_bytes: number
       sha256: string
       uploaded_at: Date
+      parts: number
     }>(
-      `select id, file_name, media_type, size_bytes, sha256, uploaded_at
-         from app.brand_document where brand_id = $1 order by uploaded_at desc, id`,
+      `select d.id, d.file_name, d.media_type, d.size_bytes, d.sha256, d.uploaded_at,
+              (select count(*)::int from app.brand_document_part p where p.brand_id = d.brand_id and p.document_id = d.id) as parts
+         from app.brand_document d where d.brand_id = $1 order by d.uploaded_at desc, d.id`,
       [brandId],
     )
     return rows.map((r) => ({
@@ -153,7 +186,7 @@ export async function listDocuments(pool: Pool, brandId: string): Promise<Docume
       mediaType: r.media_type,
       sizeBytes: r.size_bytes,
       sha256: r.sha256,
-      parts: 0,
+      parts: r.parts,
       uploadedAt: r.uploaded_at.toISOString(),
     }))
   })
@@ -186,7 +219,11 @@ export async function deleteDocument(
   } catch (error) {
     // A research source still points at it (the foreign key from research_source).
     if ((error as { code?: string }).code === '23503') {
-      throw new AppError(409, 'document_in_use', 'Research has used this document, so it cannot be deleted.')
+      throw new AppError(
+        409,
+        'document_in_use',
+        'Research has used this document, so it is kept with the research. Upload a new version instead of deleting this one.',
+      )
     }
     throw error
   }
@@ -209,4 +246,65 @@ export async function readJobDocument(
   const row = found.rows[0]
   if (!row) throw new AppError(404, 'not_found', 'There is nothing at this address.')
   return { mediaType: row.media_type, bytes: row.bytes }
+}
+
+// A document the job's input lists, in the job's own brand, with the parts the AI reads.
+export interface JobDocument {
+  id: string
+  fileName: string
+  mediaType: string
+  sizeBytes: number
+  parts: { partNo: number; firstPage: number; lastPage: number; sizeBytes: number }[]
+}
+
+export async function listJobDocuments(
+  client: PoolClient,
+  input: { jobId: string; brandId: string },
+): Promise<JobDocument[]> {
+  const found = await client.query<{
+    id: string
+    file_name: string
+    media_type: string
+    size_bytes: number
+    parts: JobDocument['parts']
+  }>(
+    `select d.id, d.file_name, d.media_type, d.size_bytes,
+            coalesce((select jsonb_agg(jsonb_build_object('partNo', p.part_no, 'firstPage', p.first_page,
+                        'lastPage', p.last_page, 'sizeBytes', p.size_bytes) order by p.part_no)
+                        from app.brand_document_part p where p.brand_id = d.brand_id and p.document_id = d.id),
+                     '[]'::jsonb) as parts
+       from app.job_input j
+       join app.brand_document d on d.brand_id = j.brand_id
+      where j.job_id = $1 and j.brand_id = $2
+        and jsonb_typeof(j.input -> 'documentIds') = 'array'
+        and j.input -> 'documentIds' ? d.id::text
+      order by d.uploaded_at, d.id`,
+    [input.jobId, input.brandId],
+  )
+  return found.rows.map((r) => ({
+    id: r.id,
+    fileName: r.file_name,
+    mediaType: r.media_type,
+    sizeBytes: r.size_bytes,
+    parts: r.parts,
+  }))
+}
+
+// One part of a listed document.
+export async function readJobDocumentPart(
+  client: PoolClient,
+  input: { jobId: string; brandId: string; documentId: string; partNo: number },
+): Promise<{ firstPage: number; lastPage: number; bytes: Buffer }> {
+  const found = await client.query<{ first_page: number; last_page: number; bytes: Buffer }>(
+    `select p.first_page, p.last_page, p.bytes
+       from app.job_input j
+       join app.brand_document_part p on p.brand_id = j.brand_id
+      where j.job_id = $1 and j.brand_id = $2 and p.document_id = $3 and p.part_no = $4
+        and jsonb_typeof(j.input -> 'documentIds') = 'array'
+        and j.input -> 'documentIds' ? $3::text`,
+    [input.jobId, input.brandId, input.documentId, input.partNo],
+  )
+  const row = found.rows[0]
+  if (!row) throw new AppError(404, 'not_found', 'There is nothing at this address.')
+  return { firstPage: row.first_page, lastPage: row.last_page, bytes: row.bytes }
 }

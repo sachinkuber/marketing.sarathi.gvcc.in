@@ -7,8 +7,8 @@ alter table app.brand_document
   check (size_bytes <= case when media_type = 'application/pdf' then 104857600 else 5242880 end);
 
 -- Down Migration
--- Documents already stored above 10 MB would violate the old limit, so they go first.
-delete from app.brand_document where size_bytes > 10485760;
+-- No stored document is deleted: the old limit comes back as NOT VALID, so a PDF already stored above 10 MB is
+-- kept (the check holds every new or changed row to the old limit and is not run against existing rows).
 alter table app.brand_document drop constraint brand_document_size_bytes_check;
 alter table app.brand_document
-  add constraint brand_document_size_bytes_check check (size_bytes <= 10485760);
+  add constraint brand_document_size_bytes_check check (size_bytes <= 10485760) not valid;

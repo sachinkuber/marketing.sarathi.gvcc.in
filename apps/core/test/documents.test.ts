@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { withBrand } from '@mkt/db'
 import { seedDefinition } from '@mkt/db/testing'
 import { createJob, createRun, startAttempt, type JobsDeps } from '../src/jobs/service.ts'
+import { ENCRYPTED_PDF, pageCountOf, pdfOf } from './pdf-fixtures.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
 const PASSWORD = 'correct horse battery'
@@ -86,14 +87,14 @@ afterAll(async () => stack?.close())
 describe('upload and list', () => {
   it('uploads a PDF and lists it without bytes', async () => {
     const brandId = await newBrand()
-    const bytes = file('application/pdf', 2048)
+    const bytes = await pdfOf(2)
     const made = await upload(brandId, bytes, { name: 'Our brochure é.pdf' })
     expect(made.status).toBe(201)
     expect(made.json).toEqual({
       id: expect.any(String),
       fileName: 'Our brochure é.pdf',
       mediaType: 'application/pdf',
-      sizeBytes: 2048,
+      sizeBytes: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'),
       parts: 0,
     })
@@ -103,8 +104,9 @@ describe('upload and list', () => {
     expect(listed.json.documents).toHaveLength(1)
     expect(listed.json.documents[0]).toMatchObject({
       id: made.json.id,
-      sizeBytes: 2048,
+      sizeBytes: bytes.length,
       fileName: 'Our brochure é.pdf',
+      parts: 0,
     })
     expect(JSON.stringify(listed.json)).not.toContain('bytes')
 
@@ -115,7 +117,12 @@ describe('upload and list', () => {
     const entry = stack.audit.entries.find(
       (e) => e.action === 'onboarding.document_uploaded' && e.brandId === brandId,
     )
-    expect(entry?.detail).toEqual({ documentId: made.json.id, sizeBytes: 2048, mediaType: 'application/pdf' })
+    expect(entry?.detail).toEqual({
+      documentId: made.json.id,
+      sizeBytes: bytes.length,
+      mediaType: 'application/pdf',
+      parts: 0,
+    })
   })
 
   it('accepts a PNG, a JPEG and a WebP with their own magic bytes', async () => {
@@ -151,7 +158,7 @@ describe('upload and list', () => {
       (await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(201) })).json.error.code,
     ).toBe('file_name')
     expect((await upload(brandId, file('application/pdf', 64), { name: ' ' })).status).toBe(400)
-    expect((await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(200) })).status).toBe(201)
+    expect((await upload(brandId, await pdfOf(1), { name: 'a'.repeat(200) })).status).toBe(201)
     expect(await count(brandId)).toBe(1)
   })
 })
@@ -186,17 +193,20 @@ describe('size limits', () => {
 
   it('a 40 MB PDF is accepted', async () => {
     const brandId = await newBrand()
-    const bytes = file('application/pdf', 40 * MB)
+    // Eight pages of 5 MB: well over the AI's 8 MB for one part, but no single page is.
+    const bytes = await pdfOf(Array.from({ length: 8 }, () => 5 * MB))
+    expect(bytes.length).toBeGreaterThan(40 * MB)
     const made = await upload(brandId, bytes)
     expect(made.status).toBe(201)
-    expect(made.json.sizeBytes).toBe(40 * MB)
+    expect(made.json.sizeBytes).toBe(bytes.length)
+    expect(made.json.parts).toBeGreaterThan(1)
     const stored = await stack.db.admin.query(
       'select sha256, size_bytes from app.brand_document where id = $1',
       [made.json.id],
     )
     expect(stored.rows[0]).toEqual({
       sha256: createHash('sha256').update(bytes).digest('hex'),
-      size_bytes: 40 * MB,
+      size_bytes: bytes.length,
     })
   }, 120_000)
 })
@@ -205,7 +215,7 @@ describe('count and storage limits', () => {
   it('the 21st document is refused 409', async () => {
     const brandId = await newBrand()
     for (let i = 0; i < 20; i += 1) await insertDocument(brandId, file('application/pdf', 32))
-    const refused = await upload(brandId, file('application/pdf', 32))
+    const refused = await upload(brandId, await pdfOf(1))
     expect(refused.status).toBe(409)
     expect(refused.json.error.code).toBe('too_many_documents')
     expect(await count(brandId)).toBe(20)
@@ -213,12 +223,16 @@ describe('count and storage limits', () => {
 
   it('a document that would pass 500 MB in total is refused 409 brand_storage_full', async () => {
     const brandId = await newBrand()
+    // A real PDF cannot be made exactly 1 MB, so the held total is set from its size: one fits, a second does not.
+    const small = await pdfOf(1)
     for (let i = 0; i < 4; i += 1) await insertDocument(brandId, file('application/pdf', 100 * MB))
-    await insertDocument(brandId, file('application/pdf', 99 * MB))
-    // 499 MB held: one more MB fits exactly, a second does not.
-    const fits = await upload(brandId, file('application/pdf', 1 * MB))
+    await insertDocument(
+      brandId,
+      file('application/pdf', 100 * MB - small.length - Math.floor(small.length / 2)),
+    )
+    const fits = await upload(brandId, small)
     expect(fits.status).toBe(201)
-    const refused = await upload(brandId, file('application/pdf', 64))
+    const refused = await upload(brandId, small)
     expect(refused.status).toBe(409)
     expect(refused.json.error.code).toBe('brand_storage_full')
     expect(await count(brandId)).toBe(6)
@@ -227,10 +241,7 @@ describe('count and storage limits', () => {
   it('two uploads at once cannot both take the last place', async () => {
     const brandId = await newBrand()
     for (let i = 0; i < 19; i += 1) await insertDocument(brandId, file('application/pdf', 32))
-    const both = await Promise.all([
-      upload(brandId, file('application/pdf', 64)),
-      upload(brandId, file('application/pdf', 65)),
-    ])
+    const both = await Promise.all([upload(brandId, await pdfOf(1)), upload(brandId, await pdfOf(2))])
     expect(both.map((r) => r.status).sort()).toEqual([201, 409])
     expect(await count(brandId)).toBe(20)
   })
@@ -258,7 +269,7 @@ describe('permission', () => {
 describe('delete', () => {
   it('deletes an unreferenced document with 204 and audits it', async () => {
     const brandId = await newBrand()
-    const made = await upload(brandId, file('application/pdf', 64))
+    const made = await upload(brandId, await pdfOf(1))
     const gone = await owner.request('DELETE', `${base(brandId)}/${made.json.id}`)
     expect(gone.status).toBe(204)
     expect(await count(brandId)).toBe(0)
@@ -279,8 +290,116 @@ describe('delete', () => {
     const refused = await owner.request('DELETE', `${base(brandId)}/${id}`)
     expect(refused.status).toBe(409)
     expect(refused.json.error.code).toBe('document_in_use')
+    expect(refused.json.error.message).toBe(
+      'Research has used this document, so it is kept with the research. Upload a new version instead of deleting this one.',
+    )
     expect(await count(brandId)).toBe(1)
   })
+})
+
+describe('large PDFs are split into parts for the AI', () => {
+  const partsOf = async (documentId: string) =>
+    (
+      await stack.db.admin.query(
+        'select part_no, first_page, last_page, size_bytes, sha256, bytes from app.brand_document_part where document_id = $1 order by part_no',
+        [documentId],
+      )
+    ).rows
+
+  it('uploading a large PDF stores the original unchanged and its parts', async () => {
+    const brandId = await newBrand()
+    const bytes = await pdfOf(Array.from({ length: 12 }, () => 3 * MB))
+    const made = await upload(brandId, bytes)
+    expect(made.status).toBe(201)
+    expect(made.json.parts).toBeGreaterThan(1)
+
+    const stored = await stack.db.admin.query('select sha256, bytes from app.brand_document where id = $1', [
+      made.json.id,
+    ])
+    expect(stored.rows[0].sha256).toBe(createHash('sha256').update(bytes).digest('hex'))
+    expect((stored.rows[0].bytes as Buffer).equals(bytes)).toBe(true)
+
+    const parts = await partsOf(made.json.id)
+    expect(parts).toHaveLength(made.json.parts)
+    let next = 1
+    for (const part of parts) {
+      expect(part.first_page).toBe(next)
+      expect(part.size_bytes).toBeLessThanOrEqual(8 * MB)
+      expect(part.sha256).toBe(createHash('sha256').update(part.bytes).digest('hex'))
+      expect(await pageCountOf(part.bytes)).toBe(part.last_page - part.first_page + 1)
+      next = part.last_page + 1
+    }
+    expect(next).toBe(13)
+
+    const listed = await owner.request('GET', base(brandId))
+    expect(listed.json.documents[0].parts).toBe(parts.length)
+    const entry = stack.audit.entries.find(
+      (e) => e.action === 'onboarding.document_uploaded' && e.subject === made.json.id,
+    )
+    expect(entry?.detail).toMatchObject({ parts: parts.length })
+  }, 120_000)
+
+  it('a PDF over 100 pages is split by pages even when it is small', async () => {
+    const brandId = await newBrand()
+    const made = await upload(brandId, await pdfOf(130, { text: true }))
+    expect(made.status).toBe(201)
+    expect(made.json.parts).toBe(2)
+  }, 60_000)
+
+  it('a refused split stores nothing', async () => {
+    const brandId = await newBrand()
+    const heavy = await upload(brandId, await pdfOf([1 * MB, 9 * MB]))
+    expect(heavy.status).toBe(422)
+    expect(heavy.json.error.code).toBe('page_too_large')
+    expect(heavy.json.error.message).toMatch(
+      /^Page 2 is 9\.1 MB on its own; the limit for one page is 8 MB\./,
+    )
+    for (const bytes of [ENCRYPTED_PDF, Buffer.from('%PDF-1.7\nnot a pdf'), file('application/pdf', 4096)]) {
+      const bad = await upload(brandId, bytes)
+      expect(bad.status).toBe(422)
+      expect(bad.json.error.code).toBe('pdf_unreadable')
+    }
+    expect(await count(brandId)).toBe(0)
+    expect(
+      stack.audit.entries.filter((e) => e.action === 'onboarding.document_uploaded' && e.brandId === brandId),
+    ).toHaveLength(0)
+  }, 60_000)
+
+  it('deleting a document deletes its parts', async () => {
+    const brandId = await newBrand()
+    const made = await upload(brandId, await pdfOf(Array.from({ length: 6 }, () => 3 * MB)))
+    expect(made.json.parts).toBeGreaterThan(1)
+    expect((await partsOf(made.json.id)).length).toBe(made.json.parts)
+    expect((await owner.request('DELETE', `${base(brandId)}/${made.json.id}`)).status).toBe(204)
+    expect(await partsOf(made.json.id)).toHaveLength(0)
+  }, 60_000)
+
+  // Measured once: the core's growth in resident memory while a PDF of about 100 MB is received, split and stored.
+  // The test process also holds the uploaded bytes, so the figure is an upper bound for the core alone.
+  it('memory: a PDF of about 100 MB is received and split within the production core limit', async () => {
+    const brandId = await newBrand()
+    const bytes = await pdfOf(Array.from({ length: 33 }, () => 3 * MB))
+    expect(bytes.length).toBeGreaterThan(95 * MB)
+    expect(bytes.length).toBeLessThanOrEqual(100 * MB)
+    global.gc?.()
+    const baseline = process.memoryUsage().rss
+    let peak = baseline
+    const timer = setInterval(() => (peak = Math.max(peak, process.memoryUsage().rss)), 20)
+    let made
+    try {
+      made = await upload(brandId, bytes)
+    } finally {
+      clearInterval(timer)
+    }
+    peak = Math.max(peak, process.memoryUsage().rss)
+    expect(made.status).toBe(201)
+    expect(made.json.parts).toBeGreaterThan(10)
+    const mb = (n: number) => Math.round(n / MB)
+    console.log(
+      `MEMORY upload ${mb(bytes.length)} MB, ${made.json.parts} parts: rss baseline ${mb(baseline)} MB, peak ${mb(peak)} MB, growth ${mb(peak - baseline)} MB`,
+    )
+    expect(peak - baseline).toBeLessThan(1024 * MB)
+  }, 300_000)
 })
 
 describe('the worker reads documents', () => {
@@ -342,5 +461,69 @@ describe('the worker reads documents', () => {
       headers: { authorization: `Worker ${jobs.workerSecret}` },
     })
     expect(none.status).toBe(403)
+  })
+
+  const get = (path: string, token: string) =>
+    fetch(`${stack.server.url}/api/v1/worker/jobs/${path}`, {
+      headers: { authorization: `Worker ${jobs.workerSecret}`, 'x-attempt-token': token },
+    })
+
+  it("the worker lists a job's documents with their parts and reads one part", async () => {
+    const brandId = await newBrand()
+    const other = await newBrand()
+    const big = await pdfOf(Array.from({ length: 6 }, () => 3 * MB))
+    const bigMade = await upload(brandId, big, { name: 'big.pdf' })
+    const small = await upload(brandId, await pdfOf(2), { name: 'small.pdf' })
+    const unlisted = await upload(brandId, await pdfOf(1), { name: 'unlisted.pdf' })
+    const foreign = await insertDocument(other, file('application/pdf', 64))
+    const { jobId, token } = await jobWith(brandId, [bigMade.json.id, small.json.id, foreign])
+
+    const listed = await get(`${jobId}/documents`, token)
+    expect(listed.status).toBe(200)
+    const body = (await listed.json()) as {
+      id: string
+      fileName: string
+      mediaType: string
+      sizeBytes: number
+      parts: { partNo: number; firstPage: number; lastPage: number; sizeBytes: number }[]
+    }[]
+    expect(body.map((d) => d.id).sort()).toEqual([bigMade.json.id, small.json.id].sort())
+    expect(body.map((d) => d.id)).not.toContain(unlisted.json.id)
+    const bigDoc = body.find((d) => d.id === bigMade.json.id)!
+    expect(bigDoc).toMatchObject({ fileName: 'big.pdf', mediaType: 'application/pdf', sizeBytes: big.length })
+    expect(bigDoc.parts).toHaveLength(bigMade.json.parts)
+    expect(bigDoc.parts[0]).toMatchObject({ partNo: 1, firstPage: 1 })
+    expect(bigDoc.parts.at(-1)!.lastPage).toBe(6)
+    expect(body.find((d) => d.id === small.json.id)!.parts).toEqual([])
+
+    const part = await get(`${jobId}/documents/${bigMade.json.id}/parts/2`, token)
+    expect(part.status).toBe(200)
+    expect(part.headers.get('content-type')).toBe('application/pdf')
+    expect(part.headers.get('etag')).toBeNull()
+    expect(part.headers.get('x-first-page')).toBe(String(bigDoc.parts[1]!.firstPage))
+    expect(part.headers.get('x-last-page')).toBe(String(bigDoc.parts[1]!.lastPage))
+    const got = Buffer.from(await part.arrayBuffer())
+    expect(got.length).toBe(bigDoc.parts[1]!.sizeBytes)
+    expect(await pageCountOf(got)).toBe(bigDoc.parts[1]!.lastPage - bigDoc.parts[1]!.firstPage + 1)
+
+    // A part that does not exist, a document not in the job, another brand's document, a missing token.
+    expect((await get(`${jobId}/documents/${bigMade.json.id}/parts/99`, token)).status).toBe(404)
+    expect((await get(`${jobId}/documents/${small.json.id}/parts/1`, token)).status).toBe(404)
+    expect((await get(`${jobId}/documents/${unlisted.json.id}/parts/1`, token)).status).toBe(404)
+    expect((await get(`${jobId}/documents/${foreign}/parts/1`, token)).status).toBe(404)
+    const none = await fetch(`${stack.server.url}/api/v1/worker/jobs/${jobId}/documents`, {
+      headers: { authorization: `Worker ${jobs.workerSecret}` },
+    })
+    expect(none.status).toBe(403)
+  }, 120_000)
+
+  it('the document read sends no ETag', async () => {
+    const brandId = await newBrand()
+    const id = await insertDocument(brandId, file('application/pdf', 64))
+    const { jobId, token } = await jobWith(brandId, [id])
+    const ok = await read(jobId, id, token)
+    expect(ok.status).toBe(200)
+    expect(ok.headers.get('etag')).toBeNull()
+    expect(ok.headers.get('content-length')).toBe('64')
   })
 })

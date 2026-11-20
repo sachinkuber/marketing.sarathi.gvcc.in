@@ -15,7 +15,7 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
-import { readJobDocument } from '../onboarding/documents.ts'
+import { listJobDocuments, readJobDocument, readJobDocumentPart } from '../onboarding/documents.ts'
 import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
@@ -69,6 +69,14 @@ const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
 const endBody = z.strictObject({ reason: z.enum(['held', 'agent_files_mismatch']) })
 const failureBody = z.strictObject({ error: text(2000) })
 const documentParams = z.strictObject({ jobId: z.uuid(), documentId: z.uuid() })
+const partParams = z.strictObject({
+  jobId: z.uuid(),
+  documentId: z.uuid(),
+  partNo: z
+    .string()
+    .regex(/^[0-9]{1,9}$/)
+    .transform(Number),
+})
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
 export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?: NotifyDeps): void {
@@ -127,11 +135,68 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
             documentId: params.documentId,
           })
         })
+        // res.end, not res.send: send would hash the whole body (up to 100 MB) for an ETag nobody uses.
         res
           .status(200)
-          .set('content-type', document.mediaType)
-          .set('cache-control', 'no-store')
-          .send(document.bytes)
+          .set({
+            'content-type': document.mediaType,
+            'content-length': String(document.bytes.length),
+            'cache-control': 'no-store',
+          })
+          .end(document.bytes)
+      },
+    ],
+  })
+
+  // The job's documents with the parts of each, so a worker knows what to read.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents',
+    access: { kind: 'attempt' },
+    summary: "A worker lists the brand documents in its job's input, with the AI-ready parts of each",
+    handlers: [
+      validate({ params: jobParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const documents = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return listJobDocuments(client, { jobId: claims.jobId, brandId: claims.brandId })
+        })
+        res.json(documents)
+      },
+    ],
+  })
+
+  // One part of a listed document: whole pages of the PDF, at most 8 MB, the pages named in the headers.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents/:documentId/parts/:partNo',
+    access: { kind: 'attempt' },
+    summary: "A worker reads one AI-ready part of a brand document listed in its job's input",
+    handlers: [
+      validate({ params: partParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const { params } = inputOf<{ params: z.infer<typeof partParams> }>(res)
+        const part = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return readJobDocumentPart(client, {
+            jobId: claims.jobId,
+            brandId: claims.brandId,
+            documentId: params.documentId,
+            partNo: params.partNo,
+          })
+        })
+        res
+          .status(200)
+          .set({
+            'content-type': 'application/pdf',
+            'content-length': String(part.bytes.length),
+            'cache-control': 'no-store',
+            'x-first-page': String(part.firstPage),
+            'x-last-page': String(part.lastPage),
+          })
+          .end(part.bytes)
       },
     ],
   })

@@ -176,8 +176,8 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // Take 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
-      await runner({ ...base, direction: 'down', count: 2 })
+      // Take 0027, 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
+      await runner({ ...base, direction: 'down', count: 3 })
       for (const [model, from] of [
         ['claude-sonnet-5-5', '2026-01-01'],
         ['claude-sonnet-5-5', '2026-06-01'],
@@ -202,4 +202,111 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
       await own.drop()
     }
   })
+})
+
+describe('migration 0027: document parts', () => {
+  const part = (
+    c: pg.Client,
+    document: string,
+    values: { no?: number; first?: number; last?: number; bytes?: string; size?: number } = {},
+  ) =>
+    c.query(
+      `insert into app.brand_document_part (brand_id, document_id, part_no, first_page, last_page, bytes, size_bytes, sha256)
+       values ($1, $2, $3, $4, $5, $6::bytea, $7, 'h')`,
+      [
+        A,
+        document,
+        values.no ?? 1,
+        values.first ?? 1,
+        values.last ?? 1,
+        values.bytes ?? '\\x0102',
+        values.size ?? 2,
+      ],
+    )
+
+  it('holds whole-page parts of a document, refuses bad rows, and goes with its document', async () => {
+    await asApp(async (c) => {
+      const uid = await userId(c)
+      const doc = (
+        await c.query(
+          `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+           values ($1, 'f', 'application/pdf', '\\x01', 1, 'h', $2) returning id`,
+          [A, uid],
+        )
+      ).rows[0].id as string
+      await part(c, doc)
+      await c.query('savepoint s1')
+      expect(await code(() => part(c, doc))).toBe('23505')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => part(c, doc, { no: 0 }))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => part(c, doc, { no: 2, first: 3, last: 2 }))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => part(c, doc, { no: 2, size: 3 }))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      expect(
+        await code(() =>
+          c.query(
+            `insert into app.brand_document_part (brand_id, document_id, part_no, first_page, last_page, bytes, size_bytes, sha256)
+             values ($1, $2, 2, 1, 1, decode(repeat('00', 8388609), 'hex'), 8388609, 'h')`,
+            [A, doc],
+          ),
+        ),
+      ).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      // A part cannot be rewritten, and cannot point at a document that is not there.
+      expect(await code(() => c.query('update app.brand_document_part set last_page = 2'))).toBe('42501')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => part(c, '3f2b8c1e-5a4d-4e6f-8a7b-9c0d1e2f3a4b'))).toBe('23503')
+      await c.query('rollback to savepoint s1')
+      await c.query('delete from app.brand_document where id = $1', [doc])
+      expect(
+        (await c.query('select 1 from app.brand_document_part where document_id = $1', [doc])).rowCount,
+      ).toBe(0)
+    })
+  })
+
+  it('taking 0027 and 0026 off keeps every stored document, including a PDF above 10 MB', async () => {
+    const own = await createTestDatabase()
+    try {
+      const url = own.urlFor('migration')
+      await seedBrand(own, A, 'brand-a')
+      const big = 11 * 1024 * 1024
+      await own.admin.query(
+        `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+         select $1, 'big.pdf', 'application/pdf', decode(repeat('00', $2::int), 'hex'), $2, 'h', id from auth."user" limit 1`,
+        [A, big],
+      )
+      await own.admin.query(
+        `insert into app.brand_document_part (brand_id, document_id, part_no, first_page, last_page, bytes, size_bytes, sha256)
+         select brand_id, id, 1, 1, 1, '\\x01', 1, 'h' from app.brand_document where file_name = 'big.pdf'`,
+      )
+      await runner({
+        databaseUrl: url,
+        dir: new URL('../migrations', import.meta.url).pathname,
+        migrationsTable: 'pgmigrations',
+        migrationsSchema: 'public',
+        createSchema: false,
+        log: () => undefined,
+        direction: 'down',
+        count: 2,
+      })
+      const kept = await own.admin.query('select size_bytes from app.brand_document order by size_bytes')
+      expect(kept.rows).toEqual([{ size_bytes: 4 }, { size_bytes: big }])
+      expect(
+        await code(() =>
+          own.admin.query(
+            `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+             select $1, 'x.pdf', 'application/pdf', decode(repeat('00', 10485761), 'hex'), 10485761, 'h', id from auth."user" limit 1`,
+            [A],
+          ),
+        ),
+      ).toBe('23514')
+      expect(
+        (await own.admin.query("select to_regclass('app.brand_document_part') as t")).rows[0].t,
+      ).toBeNull()
+    } finally {
+      await own.drop()
+    }
+  }, 60_000)
 })

@@ -11,7 +11,7 @@ import {
   isDocumentType,
   listDocuments,
   MAX_FILE_NAME,
-  PDF_LIMIT,
+  limitFor,
   tooLargeMessage,
   uploadDocument,
   type DocumentType,
@@ -56,13 +56,22 @@ const mediaTypeOf = (req: express.Request): DocumentType => {
   return declared
 }
 
-// The raw parser reads one byte past the PDF limit, so a file over the limit is measured and named by the
-// route; a body past even that is turned away by the parser, and that error is given the same words.
-const readBytes = express.raw({ type: () => true, limit: PDF_LIMIT + 1, inflate: false })
+// The raw parser reads one byte past the type's own limit (known from the header before the body), so a file
+// over the limit is measured and named by the route; a body past even that is turned away by the parser, and that
+// error is given the same words. An image is never read up to the PDF's 100 MB.
+const readers = new Map<DocumentType, RequestHandler>()
+const readerFor = (type: DocumentType): RequestHandler => {
+  let reader = readers.get(type)
+  if (!reader) {
+    reader = express.raw({ type: () => true, limit: limitFor(type) + 1, inflate: false })
+    readers.set(type, reader)
+  }
+  return reader
+}
 const rawBody: RequestHandler = (req, res, next) => {
   const type = mediaTypeOf(req)
   fileNameOf(req)
-  readBytes(req, res, (error?: unknown) => {
+  readerFor(type)(req, res, (error?: unknown) => {
     if ((error as { type?: string } | undefined)?.type === 'entity.too.large') {
       const length = Number(req.headers['content-length'])
       next(new AppError(413, 'too_large', tooLargeMessage(type, Number.isFinite(length) ? length : null)))

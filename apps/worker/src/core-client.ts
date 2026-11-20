@@ -75,10 +75,27 @@ export interface CoreClient {
   unmarkedDead(jobIds: string[]): Promise<string[]>
   // A brand document listed in the job's input: its stored media type and bytes (task 5).
   document(jobId: string, token: string, documentId: string): Promise<{ mediaType: string; bytes: Buffer }>
+  // The documents the job lists, each with the AI-ready parts of a large PDF (task 5b; none when it is read whole).
+  documents(jobId: string, token: string): Promise<JobDocument[]>
+  // One part of such a PDF: whole pages, at most 8 MB.
+  documentPart(
+    jobId: string,
+    token: string,
+    documentId: string,
+    partNo: number,
+  ): Promise<{ firstPage: number; lastPage: number; bytes: Buffer }>
   // The approvals timer: the core sends due reminders and marks and escalates overdue requests.
   approvalsTick(
     workerId: string,
   ): Promise<{ reminded: number; overdue: number; escalated: number; failedBrands: number }>
+}
+
+export interface JobDocument {
+  id: string
+  fileName: string
+  mediaType: string
+  sizeBytes: number
+  parts: { partNo: number; firstPage: number; lastPage: number; sizeBytes: number }[]
 }
 
 // What the core may answer. Extra fields are accepted (the core can grow); a missing or unknown required
@@ -119,6 +136,22 @@ export const replySchemas = {
     failedBrands: z.number().int().min(0),
   }),
   unmarkedDead: z.object({ jobIds: z.array(z.string()) }),
+  documents: z.array(
+    z.object({
+      id: z.string().min(1),
+      fileName: z.string(),
+      mediaType: z.string(),
+      sizeBytes: z.number().int(),
+      parts: z.array(
+        z.object({
+          partNo: z.number().int(),
+          firstPage: z.number().int(),
+          lastPage: z.number().int(),
+          sizeBytes: z.number().int(),
+        }),
+      ),
+    }),
+  ),
 }
 
 function parseReply<T>(schema: z.ZodType, reply: unknown, what: string): T {
@@ -166,26 +199,51 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     }
     return json as T
   }
-  return {
-    // The one call whose answer is bytes, not JSON. A longer bound than a JSON call: a document can be 100 MB.
-    async document(jobId, token, documentId) {
-      const response = await fetch(`${baseUrl}/api/v1/worker/jobs/${jobId}/documents/${documentId}`, {
-        headers: { authorization: `Worker ${workerSecret}`, 'x-attempt-token': token },
-        signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
-      })
-      if (!response.ok) {
-        const json = (await response.json().catch(() => ({}))) as {
-          error?: { code?: string; message?: string }
-        }
-        throw new CoreError(
-          response.status,
-          json.error?.code ?? 'error',
-          json.error?.message ?? response.statusText,
-        )
+  async function fetchBytes(path: string, token: string): Promise<Response> {
+    const response = await fetch(`${baseUrl}/api/v1${path}`, {
+      headers: { authorization: `Worker ${workerSecret}`, 'x-attempt-token': token },
+      signal: AbortSignal.timeout(DOCUMENT_TIMEOUT_MS),
+    })
+    if (!response.ok) {
+      const json = (await response.json().catch(() => ({}))) as {
+        error?: { code?: string; message?: string }
       }
+      throw new CoreError(
+        response.status,
+        json.error?.code ?? 'error',
+        json.error?.message ?? response.statusText,
+      )
+    }
+    return response
+  }
+  return {
+    // The calls whose answer is bytes, not JSON. A longer bound than a JSON call: a document can be 100 MB.
+    async document(jobId, token, documentId) {
+      const response = await fetchBytes(`/worker/jobs/${jobId}/documents/${documentId}`, token)
       const mediaType = response.headers.get('content-type')
       if (!mediaType) throw new Error('The core answered a document with no content type.')
       return { mediaType, bytes: Buffer.from(await response.arrayBuffer()) }
+    },
+    async documents(jobId, token) {
+      const reply = await call('GET', `/worker/jobs/${jobId}/documents`, token)
+      return parseReply<JobDocument[]>(replySchemas.documents, reply, 'a document list')
+    },
+    async documentPart(jobId, token, documentId, partNo) {
+      const response = await fetchBytes(
+        `/worker/jobs/${jobId}/documents/${documentId}/parts/${partNo}`,
+        token,
+      )
+      const firstPage = Number(response.headers.get('x-first-page'))
+      const lastPage = Number(response.headers.get('x-last-page'))
+      if (
+        !Number.isInteger(firstPage) ||
+        !Number.isInteger(lastPage) ||
+        firstPage < 1 ||
+        lastPage < firstPage
+      ) {
+        throw new Error('The core answered a document part with no page range.')
+      }
+      return { firstPage, lastPage, bytes: Buffer.from(await response.arrayBuffer()) }
     },
     async startAttempt(jobId, workerId, queueId) {
       const reply = await call('POST', `/worker/jobs/${jobId}/attempts`, null, {

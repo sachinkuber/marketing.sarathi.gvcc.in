@@ -24,6 +24,7 @@ describe('content and approval tables', () => {
       'asset',
       'brand',
       'brand_document',
+      'brand_document_part',
       'check_result',
       'content_item',
       'content_version',

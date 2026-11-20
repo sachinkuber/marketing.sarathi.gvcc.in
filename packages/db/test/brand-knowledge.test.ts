@@ -8,6 +8,7 @@ const A = '11111111-1111-4111-8111-111111111111'
 const TABLES = [
   'onboarding',
   'brand_document',
+  'brand_document_part',
   'research_source',
   'suggestion',
   'profile_item',
