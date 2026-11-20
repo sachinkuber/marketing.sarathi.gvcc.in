@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { JobClass } from '@mkt/queue'
-import { CoreError, type CoreClient } from './core-client.ts'
+import { CoreError, type CoreClient, type JobDocument } from './core-client.ts'
 import {
   isDefiniteRefusal,
   ModelStopped,
@@ -106,6 +106,13 @@ export interface JobContext {
   // `allowHeld`: stop only for a cancel (used before the result is posted, when a held job still posts so
   // the core keeps the paid-for result).
   checkStop(options?: { allowHeld?: boolean }): Promise<void>
+  // The brand documents the job lists (its input.documentIds), read through the core with the attempt token.
+  document(documentId: string): Promise<{ mediaType: string; bytes: Buffer }>
+  documents(): Promise<JobDocument[]>
+  documentPart(
+    documentId: string,
+    partNo: number,
+  ): Promise<{ firstPage: number; lastPage: number; bytes: Buffer }>
 }
 export type JobHandler = (ctx: JobContext) => Promise<{ type: string; result: unknown }>
 
@@ -190,6 +197,9 @@ export async function runJob(
       if (control.cancelRequested) throw new JobStopped('cancelled')
       if (control.held && !options?.allowHeld) throw new JobStopped('held')
     },
+    document: (documentId) => deps.core.document(job.id, started.token, documentId),
+    documents: () => deps.core.documents(job.id, started.token),
+    documentPart: (documentId, partNo) => deps.core.documentPart(job.id, started.token, documentId, partNo),
     async modelStep(step, request) {
       const registered = await deps.core.registerModelCall(job.id, started.token, {
         step,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ModelStopped, type ModelRequest } from '../src/model.ts'
 import { modelTurns } from '../src/model-turns.ts'
 import type { JobContext, ModelStepResult } from '../src/runner.ts'
+import { NO_DOCUMENTS } from './no-documents.ts'
 
 const usage = (searches: number, fetches = 0) => ({
   inputTokens: 1,
@@ -26,6 +27,7 @@ function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_6
       return next
     },
     async checkStop() {},
+    ...NO_DOCUMENTS,
   }
   return { ctx, seen }
 }

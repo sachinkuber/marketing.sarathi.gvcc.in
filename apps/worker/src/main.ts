@@ -7,6 +7,12 @@ import type { ModelClient } from './model.ts'
 import { DEFAULT_MAX_WAIT_SECONDS, startMaintenance } from './maintenance.ts'
 import { runJob, type HandlerEntry } from './runner.ts'
 import { checkHandler } from './agents/check.ts'
+import {
+  RESEARCH_DIR,
+  RESEARCH_MERGE_DIR,
+  researchGroupHandler,
+  researchMergeHandler,
+} from './agents/research.ts'
 import { SUMMARY_DIR, summaryHandler } from './agents/summary.ts'
 
 export interface WorkerOptions {
@@ -78,6 +84,16 @@ export async function startWorker(
 export function defaultHandlers(): Record<string, HandlerEntry> {
   return {
     'summary.v1': { handler: summaryHandler, agent: 'summary', filesHash: agentFilesHash(SUMMARY_DIR) },
+    'research_group.v1': {
+      handler: researchGroupHandler,
+      agent: 'research',
+      filesHash: agentFilesHash(RESEARCH_DIR),
+    },
+    'research.v1': {
+      handler: researchMergeHandler,
+      agent: 'research_merge',
+      filesHash: agentFilesHash(RESEARCH_MERGE_DIR),
+    },
     'placeholder_check.v1': { handler: checkHandler, agent: null, filesHash: null },
   }
 }
