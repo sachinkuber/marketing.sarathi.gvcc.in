@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,8 +15,9 @@ const dirs: string[] = []
 
 // A copy of agents/summary at a version the database does not know yet.
 function agentDir(version = 3): string {
-  const dir = mkdtempSync(join(tmpdir(), 'release-'))
-  dirs.push(dir)
+  const parent = mkdtempSync(join(tmpdir(), 'release-'))
+  dirs.push(parent)
+  const dir = join(parent, 'summary')
   cpSync(SUMMARY_DIR, dir, { recursive: true })
   const file = join(dir, 'definition.json')
   const def = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
@@ -39,6 +40,9 @@ beforeAll(async () => {
   await db.admin.query(
     `insert into auth."user" (name, email, "emailVerified") values ('n', 'plain@release.test', true)`,
   )
+  await db.admin.query(
+    `select app.create_brand('Brand A', 'brand-a'), app.create_brand('Brand B', 'brand-b')`,
+  )
 }, 120_000)
 afterAll(async () => {
   await db?.drop()
@@ -46,16 +50,26 @@ afterAll(async () => {
 })
 beforeEach(async () => {
   await db.admin.query(`delete from app.agent_definition_version where agent = 'summary' and version >= 3`)
+  await db.admin.query(
+    `update app.agent_definition_version set live = true where agent = 'summary' and version = 2`,
+  )
+  await db.admin.query('delete from app.evaluation_result')
   await db.admin.query('delete from app.evaluation_run')
 })
 
-async function recordRun(dir: string, passed: boolean, version = 3): Promise<string> {
+async function recordRun(dir: string, passed: boolean, brandSlug?: string, version = 3): Promise<string> {
   const r = await db.admin.query<{ id: string }>(
-    `insert into app.evaluation_run (agent, version, files_hash, sets_hash, model, finished_at, passed)
-     values ('summary', $1, $2, $3, 'claude-sonnet-5-5', now(), $4) returning id`,
-    [version, agentFilesHash(dir), setsHash(dir), passed],
+    `insert into app.evaluation_run
+       (agent, version, files_hash, sets_hash, model, finished_at, passed, subject_brand_id)
+     values ('summary', $1, $2, $3, 'claude-sonnet-5-5', now(), $4,
+             (select id from app.brand where slug = $5)) returning id`,
+    [version, agentFilesHash(dir), setsHash(dir), passed, brandSlug ?? null],
   )
   return r.rows[0]!.id
+}
+function addBrandFolder(dir: string, slug: string): void {
+  mkdirSync(join(dir, 'eval', slug), { recursive: true })
+  writeFileSync(join(dir, 'eval', slug, 'c1.json'), '{}')
 }
 const release = (dir: string, byEmail = OWNER) =>
   releaseAgent({ adminUrl: db.urlFor('migration'), agentDir: dir, byEmail })
@@ -92,8 +106,7 @@ describe('releaseAgent', () => {
   it('refuses when the evaluation set changed after the run', async () => {
     const dir = agentDir()
     await recordRun(dir, true)
-    const sets = join(dir, 'eval')
-    cpSync(join(sets, 'shared'), join(sets, 'shared2'), { recursive: true })
+    appendFileSync(join(dir, 'eval', 'shared', 'extra.json'), '{}')
     await expect(release(dir)).rejects.toThrow(/no passing evaluation run/)
   })
 
@@ -144,6 +157,90 @@ describe('releaseAgent', () => {
     await recordRun(dir, true)
     await release(dir)
     await expect(release(dir)).rejects.toThrow(/already live/)
+    expect(await liveRows()).toHaveLength(1)
+  })
+
+  it('matches the owner email without regard to case', async () => {
+    const dir = agentDir()
+    await recordRun(dir, true)
+    await expect(release(dir, 'Owner@Release.TEST')).resolves.toMatchObject({ version: 3 })
+  })
+
+  it('refuses a definition whose agent differs from the folder name', async () => {
+    const dir = agentDir()
+    const file = join(dir, 'definition.json')
+    const def = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    def['agent'] = 'other'
+    writeFileSync(file, JSON.stringify(def))
+    await expect(release(dir)).rejects.toThrow(/names the agent "other" but the folder is "summary"/)
+  })
+
+  it('names the failed case ids of the newest failing run, never their content', async () => {
+    const dir = agentDir()
+    const runId = await recordRun(dir, false)
+    await db.admin.query(
+      `insert into app.evaluation_result (run_id, case_id, hostile, passed, checks, input_tokens, output_tokens)
+       values ($1, 'bad-case', true, false, '[{"text":"SECRET CONTENT"}]', 1, 1),
+              ($1, 'good-case', false, true, '[]', 1, 1)`,
+      [runId],
+    )
+    const message = await release(dir).then(
+      () => '',
+      (e: Error) => e.message,
+    )
+    expect(message).toContain('bad-case')
+    expect(message).not.toContain('good-case')
+    expect(message).not.toContain('SECRET')
+  })
+
+  it('refuses a shared-only passing run when a brand folder exists, naming the brand and the command', async () => {
+    const dir = agentDir()
+    addBrandFolder(dir, 'brand-a')
+    await recordRun(dir, true)
+    const message = await release(dir).then(
+      () => '',
+      (e: Error) => e.message,
+    )
+    expect(message).toContain('brand-a')
+    expect(message).toContain('npm run eval -- --agent summary --brand brand-a')
+    expect(await liveRows()).toMatchObject([{ version: 2 }])
+  })
+
+  it('refuses until every brand folder has a passing run for its own brand', async () => {
+    const dir = agentDir()
+    addBrandFolder(dir, 'brand-a')
+    addBrandFolder(dir, 'brand-b')
+    await recordRun(dir, true, 'brand-a')
+    await recordRun(dir, true, 'brand-a')
+    await expect(release(dir)).rejects.toThrow(/brand brand-b/)
+    await expect(release(dir)).rejects.not.toThrow(/brand-a/)
+  })
+
+  it('releases when every brand folder has a passing run', async () => {
+    const dir = agentDir()
+    addBrandFolder(dir, 'brand-a')
+    addBrandFolder(dir, 'brand-b')
+    await recordRun(dir, true, 'brand-a')
+    const b = await recordRun(dir, true, 'brand-b')
+    const out = await release(dir)
+    expect(out.version).toBe(3)
+    expect([(await liveRows())[0]?.version]).toEqual([3])
+    expect(b).toBeTruthy()
+  })
+
+  it('a run for one brand does not stand in for the no-brand case', async () => {
+    const dir = agentDir()
+    await recordRun(dir, true, 'brand-a')
+    await expect(release(dir)).rejects.toThrow(/no passing evaluation run/)
+  })
+
+  it('two concurrent releases: one wins, the other refuses plainly', async () => {
+    const dir = agentDir()
+    await recordRun(dir, true)
+    const results = await Promise.allSettled([release(dir), release(dir)])
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
+    expect(failed.reason).toBeInstanceOf(Refused)
     expect(await liveRows()).toHaveLength(1)
   })
 

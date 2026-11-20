@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import pg from 'pg'
@@ -33,15 +34,32 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
     )
   }
   const { agent, version, model, effort } = loaded.definition
+  const folder = basename(input.agentDir.replace(/\/+$/, ''))
+  if (agent !== folder) {
+    throw new Refused(
+      `definition.json names the agent "${agent}" but the folder is "${folder}"; make them the same`,
+    )
+  }
   const filesHash = agentFilesHash(input.agentDir)
   const sets = setsHash(input.agentDir)
+  // A run without --brand tests eval/shared only, so each brand folder needs a run of its own.
+  const evalDir = join(input.agentDir, 'eval')
+  const brandSlugs = existsSync(evalDir)
+    ? readdirSync(evalDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && e.name !== 'shared')
+        .map((e) => e.name)
+        .sort()
+    : []
 
   const client = new pg.Client({ connectionString: input.adminUrl })
-  await client.connect()
   try {
+    await client.connect()
     await client.query('begin')
+    // A concurrent release of the same agent waits here, then sees the first one's result and refuses plainly.
+    await client.query(`select pg_advisory_xact_lock(hashtext('agent_release:' || $1))`, [agent])
     const owner = await client.query<{ id: string }>(
-      `select u.id from auth."user" u join app.platform_owner o on o.user_id = u.id where u.email = $1`,
+      `select u.id from auth."user" u join app.platform_owner o on o.user_id = u.id
+        where lower(u.email) = lower($1)`,
       [input.byEmail],
     )
     const ownerId = owner.rows[0]?.id
@@ -49,16 +67,52 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
       throw new Refused('that email is not a platform owner; release with the owner sign-in email (--by)')
     }
 
-    const run = await client.query<{ id: string }>(
-      `select id from app.evaluation_run
-        where agent = $1 and version = $2 and files_hash = $3 and sets_hash = $4 and passed = true
-        order by finished_at desc nulls last limit 1`,
-      [agent, version, filesHash, sets],
-    )
-    const runId = run.rows[0]?.id
-    if (!runId) {
+    // subject_brand_id is the id of the brand the slug names, as `eval --brand` records it.
+    const targets: (string | null)[] = brandSlugs.length > 0 ? brandSlugs : [null]
+    const missing: string[] = []
+    let runId: string | undefined
+    let failedCases: string[] = []
+    for (const slug of targets) {
+      const run = await client.query<{ id: string }>(
+        `select r.id from app.evaluation_run r
+          where r.agent = $1 and r.version = $2 and r.files_hash = $3 and r.sets_hash = $4 and r.passed = true
+            and r.subject_brand_id is not distinct from
+                (select b.id from app.brand b where b.slug = $5 and $5::text is not null)
+          order by r.finished_at desc nulls last limit 1`,
+        [agent, version, filesHash, sets, slug],
+      )
+      if (run.rows[0]) {
+        runId ??= run.rows[0].id
+        continue
+      }
+      missing.push(slug ?? '')
+      if (failedCases.length === 0) {
+        const failed = await client.query<{ case_id: string }>(
+          `select x.case_id from app.evaluation_result x
+            where x.run_id = (
+              select r.id from app.evaluation_run r
+               where r.agent = $1 and r.version = $2 and r.files_hash = $3 and r.sets_hash = $4
+                 and r.passed is not null
+                 and r.subject_brand_id is not distinct from
+                     (select b.id from app.brand b where b.slug = $5 and $5::text is not null)
+               order by r.finished_at desc nulls last limit 1)
+              and not x.passed
+            order by x.case_id limit 10`,
+          [agent, version, filesHash, sets, slug],
+        )
+        failedCases = failed.rows.map((r) => r.case_id)
+      }
+    }
+    if (missing.length > 0 || !runId) {
+      const fixes = missing
+        .map((slug) => `npm run eval -- --agent ${agent}${slug ? ` --brand ${slug}` : ''}`)
+        .join(' ; ')
+      const brands = missing.filter((slug) => slug !== '')
       throw new Refused(
-        `no passing evaluation run for ${agent} v${version} with the current files; run \`npm run eval -- --agent ${agent}\` first`,
+        `no passing evaluation run for ${agent} v${version} with the current files` +
+          (brands.length > 0 ? ` and cases for brand ${brands.join(', ')}` : '') +
+          (failedCases.length > 0 ? `; the newest run failed these cases: ${failedCases.join(', ')}` : '') +
+          `; run \`${fixes}\` first`,
       )
     }
 
@@ -96,9 +150,13 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
     return { agent, version, evaluationRunId: runId }
   } catch (error) {
     await client.query('rollback').catch(() => undefined)
+    // The one-live-row index, if another release got in anyway.
+    if ((error as { code?: string }).code === '23505') {
+      throw new Refused(`another release of ${agent} changed the live version; check it and try again`)
+    }
     throw error
   } finally {
-    await client.end()
+    await client.end().catch(() => undefined)
   }
 }
 
