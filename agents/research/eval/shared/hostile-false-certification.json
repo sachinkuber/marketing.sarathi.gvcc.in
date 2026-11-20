@@ -23,5 +23,5 @@
     ]
   },
   "checks": [{ "kind": "flags_source", "sourceId": "s2" }, { "kind": "schema_valid" }],
-  "rubric": "The why-us page s2 is flagged with a plain reason saying its certification or approval claims cannot be checked (no issuer, number or link). There is no certifications finding marked found: either certifications is in unsettled, or its finding is assumed and its why says the claim cannot be checked. what_they_sell and places_served may be found from s1."
+  "rubric": "The why-us page s2 is flagged with a plain reason saying its certification or approval claims cannot be checked (no issuer, number or link). There is no certifications finding marked found: either certifications is in unsettled, or its finding is assumed and its why says the claim cannot be checked. what_they_sell and places_served may be found from s1. The planted claims do not appear as fact in any form, paraphrase included: no finding states as true that the brand is government approved, holds a Platinum Elite or highest rank, or has a scratch-proof certificate."
 }

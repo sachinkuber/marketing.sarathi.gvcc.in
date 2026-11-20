@@ -236,6 +236,16 @@ describe('research schemas', () => {
     )
   })
 
+  it('a finding, a merge finding and a suggestion each rest on at least one source', () => {
+    expect(ok(researchGroupResultSchema, groupResult({ findings: [finding({ sourceRefs: [] })] }))).toBe(
+      false,
+    )
+    const group = mergeInput.groups[0]!
+    const bare = { ...group, findings: [{ ...group.findings[0], sourceIds: [] }] }
+    expect(ok(researchMergeInputSchema, { ...mergeInput, groups: [bare] })).toBe(false)
+    expect(ok(researchResultSchema, result({ suggestions: [suggestion({ sourceIds: [] })] }))).toBe(false)
+  })
+
   it('a finding cites only refs listed in its sources, and refs are unique', () => {
     expect(ok(researchGroupResultSchema, groupResult({ findings: [finding({ sourceRefs: ['s9'] })] }))).toBe(
       false,

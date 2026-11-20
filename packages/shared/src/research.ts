@@ -105,7 +105,8 @@ export const researchGroupResultSchema = z
           key: profileKey,
           proposed: shown(PROPOSED_MAX),
           why: shown(WHY_MAX),
-          sourceRefs: z.array(sourceRef).max(MAX_SOURCES),
+          // A finding rests on at least one source: a key nothing states goes in `unsettled`.
+          sourceRefs: z.array(sourceRef).min(1).max(MAX_SOURCES),
           confidence,
           conflict: z.boolean(),
         }),
@@ -169,7 +170,7 @@ export const researchMergeInputSchema = z.strictObject({
                 key: profileKey,
                 proposed: shown(PROPOSED_MAX),
                 why: shown(WHY_MAX),
-                sourceIds: z.array(z.uuid()).max(MAX_SOURCES),
+                sourceIds: z.array(z.uuid()).min(1).max(MAX_SOURCES),
                 confidence,
                 conflict: z.boolean(),
               }),
@@ -203,7 +204,8 @@ export const researchResultSchema = z.strictObject({
         key: profileKey,
         proposed: shown(PROPOSED_MAX),
         why: shown(WHY_MAX),
-        sourceIds: z.array(z.uuid()).max(MAX_SOURCES),
+        // A suggestion rests on at least one source: a key with none is a gap.
+        sourceIds: z.array(z.uuid()).min(1).max(MAX_SOURCES),
         confidence,
         options: z
           .array(

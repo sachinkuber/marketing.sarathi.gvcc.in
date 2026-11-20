@@ -38,6 +38,7 @@
             "maxLength": 300
           },
           "sourceIds": {
+            "minItems": 1,
             "maxItems": 60,
             "type": "array",
             "items": {

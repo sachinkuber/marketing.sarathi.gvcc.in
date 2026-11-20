@@ -113,6 +113,7 @@
             "maxLength": 300
           },
           "sourceRefs": {
+            "minItems": 1,
             "maxItems": 60,
             "type": "array",
             "items": {

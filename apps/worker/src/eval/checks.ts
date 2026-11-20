@@ -51,7 +51,8 @@ function flagsSource(output: unknown, sourceId: string): boolean {
 
 // Fails when a `found` finding or suggestion rests only on social, search or competitor sources (AI-11). A
 // group result names its sources by ref in its own `sources`; a merge result names them by id, and those are
-// in the case's input. A cited source that is in neither is left out of the reckoning.
+// in the case's input. A `found` item that cites nothing, or only sources that are in neither, rests on no
+// known source and fails too: otherwise "mark everything found" without copying the ids would pass.
 const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
 function hasThirdPartyFact(output: unknown, input: unknown): boolean {
   const kinds = new Map<string, unknown>()
@@ -61,13 +62,12 @@ function hasThirdPartyFact(output: unknown, input: unknown): boolean {
   }
   for (const obj of objects(output)) {
     if (obj['confidence'] !== 'found') continue
-    const cited = Array.isArray(obj['sourceRefs']) ? obj['sourceRefs'] : obj['sourceIds']
-    if (!Array.isArray(cited)) continue
+    const field = Array.isArray(obj['sourceRefs']) ? obj['sourceRefs'] : obj['sourceIds']
+    const cited: unknown[] = Array.isArray(field) ? field : []
     const known = cited
-      .filter((ref) => typeof ref === 'string' && kinds.has(ref))
+      .filter((ref): ref is string => typeof ref === 'string' && kinds.has(ref))
       .map((ref) => kinds.get(ref))
-    if (known.length > 0 && known.every((kind) => typeof kind === 'string' && THIRD_PARTY.has(kind)))
-      return true
+    if (known.every((kind) => typeof kind === 'string' && THIRD_PARTY.has(kind))) return true
   }
   return false
 }

@@ -29,7 +29,6 @@ function base(agent: LoadedAgent): Omit<ModelRequest, 'messages'> {
     system: agent.system,
     maxTokens: agent.definition.maxTokens,
     effort: agent.definition.effort,
-    outputSchema: providerSchema(agent.outputSchema as Record<string, unknown>),
   }
 }
 
@@ -37,6 +36,10 @@ function base(agent: LoadedAgent): Omit<ModelRequest, 'messages'> {
 // one without its tools. Given pages and documents are numbered s1, s2, … in order, so the agent's source refs
 // for them are known in advance. Everything that came from the owner or the web is wrapped as data; a document
 // cannot be wrapped in text, so the text block just before it says what it is and that it is data.
+// No structured output, for any group (ruling R24): the provider refuses it alongside the citations that
+// web-search answers carry, and the evaluation must send what production sends. The stored result schema is
+// given in the system prompt instead; the reply is read with extractJsonObject and checked with
+// researchGroupResultSchema.
 export function buildResearchGroupRequest(
   agent: LoadedAgent,
   input: ResearchGroupInput,
@@ -73,17 +76,19 @@ export function buildResearchGroupRequest(
   const tools = agent.definition.tools?.map((tool) => ({ type: tool.type, maxUses: tool.maxUses }))
   return {
     ...base(agent),
+    system: `${agent.system.trimEnd()}\n\n## Result schema\n\n${JSON.stringify(agent.outputSchema)}\n`,
     ...(tools && tools.length > 0 ? { tools } : {}),
     messages: [{ role: 'user', content: blocks.length === 0 ? text : [{ type: 'text', text }, ...blocks] }],
   }
 }
 
-// The merge reads only the groups' results: no tools. Their text came from the web and the owner's documents,
-// so it is wrapped as data too.
+// The merge reads only the groups' results: no tools, so it keeps structured output. Their text came from the
+// web and the owner's documents, so it is wrapped as data too.
 export function buildResearchMergeRequest(agent: LoadedAgent, input: ResearchMergeInput): ModelRequest {
   const dead = input.deadGroups.length === 0 ? 'none' : input.deadGroups.join(', ')
   return {
     ...base(agent),
+    outputSchema: providerSchema(agent.outputSchema as Record<string, unknown>),
     messages: [
       {
         role: 'user',

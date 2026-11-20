@@ -3,11 +3,13 @@ import {
   briefSchema,
   RESEARCH_SOURCE_KINDS,
   researchGroupInputSchema,
+  researchGroupResultSchema,
   researchMergeInputSchema,
   type LoadedAgent,
 } from '@mkt/shared'
 import { buildResearchGroupRequest, buildResearchMergeRequest } from '../agents/research.ts'
 import { buildSummaryRequest } from '../agents/summary.ts'
+import { extractJsonObject } from '../json-reply.ts'
 import type { ModelClient, ModelReply, ModelUsage } from '../model.ts'
 
 export type EvalRunner = (
@@ -27,6 +29,22 @@ function graded(reply: ModelReply): { output: unknown; usage: ModelUsage } {
   }
   if (reply.stopReason !== null && reply.stopReason !== 'end_turn') output = reply.text
   return { output, usage: reply.usage }
+}
+
+// A research group reply has no structured output (R24): its JSON object is read out of the text, as the job
+// handler reads it, and checked with the strict schema. A valid result is graded as the schema returns it; an
+// object the schema refuses is graded as it is (schema_valid fails it); text with no object stays text.
+function gradedGroup(reply: ModelReply): { output: unknown; usage: ModelUsage } {
+  if (reply.stopReason !== null && reply.stopReason !== 'end_turn')
+    return { output: reply.text, usage: reply.usage }
+  let found: Record<string, unknown>
+  try {
+    found = extractJsonObject(reply.text)
+  } catch {
+    return { output: reply.text, usage: reply.usage }
+  }
+  const checked = researchGroupResultSchema.safeParse(found)
+  return { output: checked.success ? checked.data : found, usage: reply.usage }
 }
 
 // Evaluation never reads the live web ("recorded inputs"): a research case carries the pages and documents the
@@ -87,7 +105,7 @@ export const EVAL_RUNNERS: Record<string, { inputSchema: ZodType; run: EvalRunne
       const request = buildResearchGroupRequest(def, groupInput, { pages, documents })
       // The web tools are removed: the case's pages and documents are all the agent may read.
       delete request.tools
-      return graded(await model.send(request))
+      return gradedGroup(await model.send(request))
     },
   },
   research_merge: {

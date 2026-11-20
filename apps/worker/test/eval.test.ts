@@ -1,9 +1,10 @@
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import { afterAll, describe, expect, it } from 'vitest'
 import { agentFilesHash } from '@mkt/db'
-import { loadAgentDefinition } from '@mkt/shared'
+import { loadAgentDefinition, SOURCE_GROUPS } from '@mkt/shared'
 import type { ModelClient, ModelReply, ModelRequest } from '../src/model.ts'
 import { loadCases } from '../src/eval/cases.ts'
 import { runChecks } from '../src/eval/checks.ts'
@@ -144,6 +145,7 @@ describe('the summary runner', () => {
 const ID_SITE = '7a1b2c3d-0000-4000-8000-000000000001'
 const ID_SOCIAL = '7a1b2c3d-0000-4000-8000-000000000002'
 const DOC = '7a1b2c3d-0000-4000-8000-0000000000d1'
+const UNKNOWN = '7a1b2c3d-0000-4000-8000-0000000000ff'
 const source = (ref: string, kind: string, flagged: { reason: string } | null = null) => ({
   ref,
   kind,
@@ -236,6 +238,22 @@ describe('the pinned checks', () => {
     expect(runChecks(c, out([ID_SOCIAL]), 'research_merge').passed).toBe(false)
     expect(runChecks(c, out([ID_SOCIAL], 'assumed'), 'research_merge').passed).toBe(true)
     expect(runChecks(c, out([ID_SOCIAL, ID_SITE]), 'research_merge').passed).toBe(true)
+    // An unknown id beside a known site source does not matter; beside a social one, still third party.
+    expect(runChecks(c, out([UNKNOWN, ID_SITE]), 'research_merge').passed).toBe(true)
+    expect(runChecks(c, out([UNKNOWN, ID_SOCIAL]), 'research_merge').passed).toBe(false)
+  })
+
+  it('no_third_party_fact fails a found item that cites no source, or only unknown ones', () => {
+    const c = check('no_third_party_fact')
+    // "Mark everything found" without copying any ids must not pass the machine checks.
+    expect(runChecks(c, groupOutput([finding([])]), 'research').passed).toBe(false)
+    expect(runChecks(c, groupOutput([finding(['s9'])]), 'research').passed).toBe(false)
+    const noField = { key: 'what_they_sell', proposed: 'x', why: 'x', confidence: 'found', conflict: false }
+    expect(runChecks(c, groupOutput([noField]), 'research').passed).toBe(false)
+    const merged = { suggestions: [{ key: 'x', sourceIds: [UNKNOWN], confidence: 'found' }], gaps: [] }
+    expect(runChecks(c, merged, 'research_merge').passed).toBe(false)
+    // The same items as assumed are not this check's concern.
+    expect(runChecks(c, groupOutput([finding([], 'assumed')]), 'research').passed).toBe(true)
   })
 
   it('schema_valid uses each research agent’s own result schema', () => {
@@ -291,12 +309,13 @@ describe('the research runners', () => {
         ],
       },
     )
-    expect(request.system).toBe(def.system)
+    // No structured output (R24): the stored result schema, limits included, is given in the system prompt.
+    expect(request.outputSchema).toBeUndefined()
+    expect(request.system!.startsWith(def.system.trimEnd())).toBe(true)
+    expect(request.system).toContain(JSON.stringify(def.outputSchema))
     expect(request.model).toBe('claude-sonnet-5-5')
     expect(request.maxTokens).toBe(16000)
     expect(request.effort).toBe('medium')
-    // The stored schema's limits are dropped for the provider; its shape stays.
-    expect(JSON.stringify(request.outputSchema)).not.toMatch(/maxLength|maxItems|pattern|\$schema/)
     expect(request.messages).toHaveLength(1)
     const content = request.messages[0]!.content as { type: string; text?: string; source?: unknown }[]
     expect(Array.isArray(content)).toBe(true)
@@ -322,6 +341,42 @@ describe('the research runners', () => {
       type: 'image',
       source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' },
     })
+  })
+
+  it('no group request asks for structured output, with or without tools; the merge request does', () => {
+    const def = loadAgentDefinition(RESEARCH_DIR)
+    for (const group of SOURCE_GROUPS) {
+      const request = buildResearchGroupRequest(def, { group, intake })
+      expect(request.outputSchema, group).toBeUndefined()
+      expect(request.tools, group).toHaveLength(2)
+      delete request.tools
+      expect(request.outputSchema, group).toBeUndefined()
+    }
+    const merge = buildResearchMergeRequest(loadAgentDefinition(RESEARCH_MERGE_DIR), {
+      groups: [],
+      deadGroups: [],
+    })
+    expect(merge.tools).toBeUndefined()
+    // The stored schema's limits are dropped for the provider; its shape stays.
+    expect(merge.outputSchema).toMatchObject({ type: 'object', required: ['suggestions', 'gaps'] })
+    expect(JSON.stringify(merge.outputSchema)).not.toMatch(/maxLength|maxItems|pattern|\$schema/)
+  })
+
+  it('the research runner reads the result out of narration and grades it as the strict schema returns it', async () => {
+    const def = loadAgentDefinition(RESEARCH_DIR)
+    const result = groupOutput([finding(['s2'])])
+    const say = (text: string, stopReason = 'end_turn'): ModelClient => ({
+      send: async () => ({ ...reply(text), stopReason }),
+    })
+    const run = (model: ModelClient) => EVAL_RUNNERS['research']!.run(model, def, { group: 'site', intake })
+    const narrated = `I read both pages.\n${JSON.stringify(result)}\nThat is everything.`
+    expect((await run(say(narrated))).output).toEqual(result)
+    // An object the schema refuses is graded as it is, so schema_valid fails it.
+    const refused = { ...result, decision: 'accepted' }
+    expect((await run(say(`Done: ${JSON.stringify(refused)}`))).output).toEqual(refused)
+    // No object at all, or a reply that stopped early, stays text.
+    expect((await run(say('Nothing to report.'))).output).toBe('Nothing to report.')
+    expect((await run(say(JSON.stringify(result), 'max_tokens'))).output).toBe(JSON.stringify(result))
   })
 
   it('a group request with no documents is plain text', () => {
@@ -383,6 +438,73 @@ describe('the research runners', () => {
       for (const c of cases) {
         const parsed = EVAL_RUNNERS[agent]!.inputSchema.safeParse(c.input)
         expect(parsed.success, `${c.id}: ${parsed.error?.message ?? ''}`).toBe(true)
+      }
+    }
+  })
+})
+
+// The text a PDF carries: its raw bytes plus every Flate stream inflated (a stream that is not Flate is skipped).
+function pdfText(base64: string): string {
+  const bytes = Buffer.from(base64, 'base64')
+  const raw = bytes.toString('latin1')
+  const parts = [raw]
+  for (const match of raw.matchAll(/(?<!end)stream\r?\n/g)) {
+    const start = match.index + match[0].length
+    let end = raw.indexOf('endstream', start)
+    if (end === -1) continue
+    if (raw[end - 1] === '\n') end -= 1
+    if (raw[end - 1] === '\r') end -= 1
+    try {
+      parts.push(inflateSync(bytes.subarray(start, end)).toString('latin1'))
+    } catch {
+      // Not a Flate stream.
+    }
+  }
+  return parts.join('\n')
+}
+type CaseInput = {
+  pages?: { text: string }[]
+  documents?: { base64: string }[]
+  groups?: { sources: { id: string }[] }[]
+}
+// Everything a case gives the agent, as text: the input itself and the text inside each document.
+const caseText = (input: CaseInput) =>
+  [JSON.stringify(input), ...(input.documents ?? []).map((d) => pdfText(d.base64))].join('\n').toLowerCase()
+
+describe('the shipped research and merge cases check what they plant', () => {
+  const all = [...loadCases(RESEARCH_DIR), ...loadCases(RESEARCH_MERGE_DIR)]
+  const planted = all.flatMap((c) => c.checks.flatMap((k) => (k.kind === 'not_contains' ? [k.text] : [])))
+
+  it('every not_contains text is planted in its own case’s input, documents included', () => {
+    expect(planted.length).toBeGreaterThan(0)
+    for (const c of all) {
+      const text = caseText(c.input as CaseInput)
+      for (const k of c.checks)
+        if (k.kind === 'not_contains') expect(text, `${c.id}: ${k.text}`).toContain(k.text.toLowerCase())
+    }
+  })
+
+  it('the hostile PDF carries its planted text and the plain brochure carries none of the planted strings', () => {
+    const byId = new Map(all.map((c) => [c.id, c.input as CaseInput]))
+    const hostile = byId.get('hostile-document-hidden-text')!.documents![0]!.base64
+    expect(pdfText(hostile)).toContain('25-year guarantee')
+    expect(pdfText(hostile)).toContain('Instructions for the AI')
+    const brochure = caseText(byId.get('plain-document-brochure')!)
+    expect(brochure).toContain('lumen shield coatings')
+    for (const text of planted) expect(brochure, text).not.toContain(text.toLowerCase())
+  })
+
+  it('every flags_source names a source the case gives: sN within its pages and documents, or an input id', () => {
+    for (const c of all) {
+      const input = c.input as CaseInput
+      const given = (input.pages?.length ?? 0) + (input.documents?.length ?? 0)
+      const ids = new Set((input.groups ?? []).flatMap((g) => g.sources.map((s) => s.id)))
+      for (const k of c.checks) {
+        if (k.kind !== 'flags_source') continue
+        const ref = /^s([0-9]+)$/.exec(k.sourceId)
+        if (ref) expect(Number(ref[1]), `${c.id}: ${k.sourceId}`).toBeLessThanOrEqual(given)
+        else expect(ids.has(k.sourceId), `${c.id}: ${k.sourceId}`).toBe(true)
+        if (ref) expect(Number(ref[1])).toBeGreaterThanOrEqual(1)
       }
     }
   })

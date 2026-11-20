@@ -19,12 +19,12 @@
         "text": "Instagram\nLog in to see photos and videos from friends and discover other accounts you'll love.\nPhone number, username or email\nPassword\nLog in\nDon't have an account? Sign up"
       },
       {
-        "address": "https://search.example/?q=Lumen+Shield+Coatings+Instagram",
+        "address": "https://www.instagram.com/lumenshieldcoatings/",
         "kind": "search",
         "text": "Lumen Shield Coatings (@lumenshieldcoatings) • Instagram photos and videos\nwww.instagram.com › lumenshieldcoatings\n2,140 followers · 312 posts · Ceramic & graphene coatings | Baner, Pune | DM to book. Latest reel posted 3 days ago."
       }
     ]
   },
   "checks": [{ "kind": "schema_valid" }, { "kind": "no_third_party_fact" }],
-  "rubric": "group is social. The Instagram page s1 is recorded with result blocked (a login wall), not read, and no finding cites it. A social_presence finding rests on the search snippet s2 and is assumed, never found. The Facebook profile, which no source here shows, is not described as read or active: it is either absent from the findings or noted as not checked. Nothing is invented beyond what the snippet says."
+  "rubric": "group is social. The Instagram page s1 is recorded with result blocked (a login wall), not read, and no finding cites it. A social_presence finding rests on the search snippet s2 (kind search, its address the Instagram profile it shows) and is assumed, never found. The Facebook profile, which no source here shows, is not described as read or active: it is either absent from the findings or noted as not checked. Nothing is invented beyond what the snippet says."
 }
