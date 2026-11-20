@@ -135,6 +135,7 @@ export async function createStack(
         backlogLimit: config.queueBacklogLimit,
         now: () => new Date(options.now ? options.now() : Date.now()),
         results: new Map(),
+        settled: new Map(),
       }
     : null
   const core = buildCore({

@@ -16,7 +16,23 @@ export interface JobsDeps {
   backlogLimit: number
   now: () => Date
   results: ResultHandlers
+  // Result types whose run decides for itself what the end of one of its jobs means (research groups).
+  settled?: SettledHooks
 }
+
+// Called when a job of a result type registered here settles, inside the transaction that ends it, with the
+// job's input row and then its run row locked (the engine's lock order) and the job's end already written: by
+// applyResult once its result is applied, and by markDead once it is marked dead. A job of such a type that dies
+// does not fail its run: the hook decides what follows (the research merge, for a research group), and the
+// dead job counts as settled when the run ends (finaliseRun). Every other type keeps the Phase 1 rule.
+export type SettledHook = (
+  client: PoolClient,
+  context: { brandId: string; runId: string; jobId: string },
+) => Promise<void>
+export type SettledHooks = Map<string, SettledHook>
+
+// The result types whose dead jobs settle rather than fail their run.
+export const settledTypes = (deps: Pick<JobsDeps, 'settled'>): string[] => [...(deps.settled?.keys() ?? [])]
 
 export interface NewRun {
   agent: string
@@ -222,8 +238,8 @@ export async function startAttempt(
     const attemptId = created.rows[0]!.id
     // A requeued job is no longer dead, and its run (failed when the job was marked dead) runs again. This
     // is what makes a requeue whose database half rolled back still end right. A run with another job still
-    // dead stays failed: reviving it would leave it running with a job that is listed as dead. The job_input
-    // lock is held;
+    // dead stays failed: reviving it would leave it running with a job that is listed as dead (a dead job of a
+    // settled type does not hold its run failed). The job_input lock is held;
     // the run row is taken next, the engine's lock order.
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
@@ -233,8 +249,9 @@ export async function startAttempt(
       `update app.run set state = 'running', finished_at = null
         where id = $1 and state = 'failed' and not exists (
           select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2)`,
-      [row.run_id, jobId],
+           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2
+             and not (i.expected_result_type = any($3::text[])))`,
+      [row.run_id, jobId, settledTypes(deps)],
     )
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)
@@ -723,28 +740,45 @@ export async function postResult(
   })
 }
 
-// How a run ends (plan decision 15), called by applyResult and by cancelJob with the run row locked by the
-// caller, after the job's own change is written. A job is open when it is neither finished nor cancelled.
+// How a run ends (plan decision 15), called by applyResult, markDead (for a settled type) and cancelJob with
+// the run row locked by the caller, after the job's own change is written. A job is open when it is neither
+// finished nor cancelled, nor dead with one of the `settledWhenDead` result types (SettledHook): such a job has
+// settled without a result.
 // - Any open job that is dead: the run stays as it is (failed), never succeeded.
 // - Otherwise, an open job left: a run that a dead job failed runs again (its dead jobs were cancelled or
 //   requeued since), so the later finish can end it.
-// - Otherwise every job is finished or cancelled: succeeded when at least one finished, else cancelled.
+// - Otherwise every job has settled: succeeded when at least one finished, else failed when one died with a
+//   settled type, else cancelled.
 // Only a run that is still going (created, running, or failed by a dead job) is moved: a run someone
 // cancelled, or one held or needing manual work, keeps its state. The run row is locked, so a sibling
 // finishing at the same moment waits for the caller and reads its job's end once it commits: one of the two
 // always sees the run complete.
-export async function finaliseRun(client: PoolClient, runId: string): Promise<void> {
-  const { rows } = await client.query<{ state: string; finished: number; open: number; dead: number }>(
+export async function finaliseRun(
+  client: PoolClient,
+  runId: string,
+  settledWhenDead: readonly string[] = [],
+): Promise<void> {
+  const { rows } = await client.query<{
+    state: string
+    finished: number
+    open: number
+    dead: number
+    settled: number
+  }>(
     `select r.state,
             count(*) filter (where i.finished_at is not null)::int as finished,
-            count(*) filter (where i.finished_at is null and not c.cancel_requested)::int as open,
-            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null)::int as dead
+            count(*) filter (where i.finished_at is null and not c.cancel_requested
+                               and not (c.dead_at is not null and i.expected_result_type = any($2::text[])))::int as open,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null
+                               and not (i.expected_result_type = any($2::text[])))::int as dead,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null
+                               and i.expected_result_type = any($2::text[]))::int as settled
        from app.run r
        join app.job_input i on i.run_id = r.id
        join app.job_control c on c.job_id = i.job_id
       where r.id = $1
       group by r.state`,
-    [runId],
+    [runId, settledWhenDead],
   )
   const run = rows[0]
   if (!run || !['created', 'running', 'failed'].includes(run.state)) return
@@ -755,9 +789,10 @@ export async function finaliseRun(client: PoolClient, runId: string): Promise<vo
     }
     return
   }
-  await client.query(`update app.run set state = $2, finished_at = now() where id = $1`, [
+  const end = run.finished > 0 ? 'succeeded' : run.settled > 0 ? 'failed' : 'cancelled'
+  await client.query(`update app.run set state = $2, finished_at = now() where id = $1 and state <> $2`, [
     runId,
-    run.finished > 0 ? 'succeeded' : 'cancelled',
+    end,
   ])
 }
 
@@ -773,7 +808,7 @@ export interface HeldResult {
 // held result goes through exactly the path a normal post does.
 export async function applyResult(
   client: PoolClient,
-  deps: Pick<JobsDeps, 'results'>,
+  deps: Pick<JobsDeps, 'results' | 'settled'>,
   input: { brandId: string; jobId: string; runId: string; attemptId: string; posted: PostedResult },
 ): Promise<unknown> {
   const { posted } = input
@@ -800,7 +835,13 @@ export async function applyResult(
   await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
     input.attemptId,
   ])
-  await finaliseRun(client, input.runId)
+  // A type whose run settles itself hears of the job's end once it is written (its outcome included).
+  await deps.settled?.get(posted.type)?.(client, {
+    brandId: input.brandId,
+    runId: input.runId,
+    jobId: input.jobId,
+  })
+  await finaliseRun(client, input.runId, settledTypes(deps))
   // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
   return JSON.parse(JSON.stringify(outcome ?? null)) as unknown
 }

@@ -35,8 +35,8 @@ async function membersWith(client: PoolClient, brandId: string, role: string): P
   return rows.map((r) => r.user_id)
 }
 
-export async function platformOwnersOf(pool: Pool): Promise<string[]> {
-  const { rows } = await pool.query<{ id: string }>('select app.platform_owner_ids() as id')
+export async function platformOwnersOf(db: Pick<Pool, 'query'>): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>('select app.platform_owner_ids() as id')
   return rows.map((r) => r.id)
 }
 

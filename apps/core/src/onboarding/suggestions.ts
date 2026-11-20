@@ -151,12 +151,23 @@ async function decideWithin(
   let createdId: string | null = null
 
   if (accepted && row.step === 'profile') {
+    // Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
+    // current item is locked first, so a decision on the same key elsewhere waits, then supersedes this one.
+    await client.query(
+      `select id from app.profile_item where brand_id = $1 and key = $2 and superseded_by is null for update`,
+      [input.brandId, row.key],
+    )
     const made = await client.query<{ id: string }>(
       `insert into app.profile_item (brand_id, key, value, status, source_ids, from_suggestion)
        values ($1, $2, $3::jsonb, $4, $5::uuid[], $6) returning id`,
       [input.brandId, row.key, JSON.stringify(chosen), row.confidence, row.source_ids, row.id],
     )
     createdId = made.rows[0]!.id
+    await client.query(
+      `update app.profile_item set superseded_by = $3
+        where brand_id = $1 and key = $2 and superseded_by is null and id <> $3`,
+      [input.brandId, row.key, createdId],
+    )
   } else if (accepted && row.step === 'fact') {
     createdId = await writeFact(client, input, row, chosen)
   } else if (accepted && row.step === 'rule') {

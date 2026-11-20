@@ -39,7 +39,7 @@ interface Freed {
 //
 // Repeating a release changes nothing: releaseSwitch calls this only with jobs whose held flag it changed.
 export function releaseHeldJobs(
-  deps: Pick<JobsDeps, 'queue' | 'results' | 'audit'>,
+  deps: Pick<JobsDeps, 'queue' | 'results' | 'settled' | 'audit'>,
 ): (client: PoolClient, unheldJobIds: string[]) => Promise<void> {
   return async (client, unheldJobIds) => {
     if (unheldJobIds.length === 0) return
