@@ -1,23 +1,38 @@
 export interface ModelRequest {
   model: string
   system?: string
-  messages: { role: 'user' | 'assistant'; content: string }[]
+  // `content` is a string, or raw provider content blocks when an assistant turn is sent back (pause_turn).
+  messages: { role: 'user' | 'assistant'; content: string | unknown[] }[]
   maxTokens: number
   effort?: 'low' | 'medium' | 'high'
   // A JSON schema the reply must follow (structured output).
   outputSchema?: Record<string, unknown>
+  // Server-side web tools the provider runs itself. `maxUses` caps uses within this one request.
+  tools?: ModelTool[]
+  // How long this request may take; the adapter's own default applies when absent.
+  timeoutMs?: number
+}
+export interface ModelTool {
+  type: 'web_search_20260209' | 'web_fetch_20260209'
+  maxUses: number
 }
 export interface ModelUsage {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  // Server-side tool requests made in this reply (absent means none; the runner reads absent as 0).
+  serverToolSearches?: number
+  serverToolFetches?: number
 }
 export interface ModelReply {
   text: string
+  // The raw provider content blocks (absent means none), kept so a pause_turn reply can be sent back.
+  content?: unknown[]
   messageId: string
   requestId: string | null
-  // Why the provider stopped: 'end_turn' is a finished reply; anything else (max_tokens, refusal) is not.
+  // Why the provider stopped: 'end_turn' is a finished reply; 'pause_turn' means the provider paused a long turn and expects it to be sent back; anything else
+  // (max_tokens, refusal) is not finished.
   stopReason: string | null
   usage: ModelUsage
 }

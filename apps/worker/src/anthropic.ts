@@ -23,22 +23,34 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
     async send(request: ModelRequest): Promise<ModelReply> {
       let response
       try {
-        response = await client.messages.create({
-          model: request.model,
-          max_tokens: request.maxTokens,
-          ...(request.system ? { system: request.system } : {}),
-          ...(request.effort || request.outputSchema
-            ? {
-                output_config: {
-                  ...(request.effort ? { effort: request.effort } : {}),
-                  ...(request.outputSchema
-                    ? { format: { type: 'json_schema' as const, schema: request.outputSchema } }
-                    : {}),
-                },
-              }
-            : {}),
-          messages: request.messages,
-        })
+        response = await client.messages.create(
+          {
+            model: request.model,
+            max_tokens: request.maxTokens,
+            ...(request.system ? { system: request.system } : {}),
+            ...(request.effort || request.outputSchema
+              ? {
+                  output_config: {
+                    ...(request.effort ? { effort: request.effort } : {}),
+                    ...(request.outputSchema
+                      ? { format: { type: 'json_schema' as const, schema: request.outputSchema } }
+                      : {}),
+                  },
+                }
+              : {}),
+            ...(request.tools && request.tools.length > 0
+              ? {
+                  tools: request.tools.map((tool) =>
+                    tool.type === 'web_search_20260209'
+                      ? { type: tool.type, name: 'web_search' as const, max_uses: tool.maxUses }
+                      : { type: tool.type, name: 'web_fetch' as const, max_uses: tool.maxUses },
+                  ),
+                }
+              : {}),
+            messages: request.messages as Anthropic.MessageParam[],
+          },
+          request.timeoutMs === undefined ? undefined : { timeout: request.timeoutMs },
+        )
       } catch (error) {
         // An HTTP error status carries its code to the runner; a connection error or timeout passes as is.
         if (error instanceof Anthropic.APIError && typeof error.status === 'number') {
@@ -49,6 +61,7 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
       const text = response.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
       return {
         text,
+        content: response.content as unknown[],
         messageId: response.id,
         stopReason: response.stop_reason ?? null,
         requestId: (response as { _request_id?: string | null })._request_id ?? null,
@@ -57,6 +70,8 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
           outputTokens: response.usage.output_tokens,
           cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
           cacheWriteTokens: response.usage.cache_creation_input_tokens ?? 0,
+          serverToolSearches: response.usage.server_tool_use?.web_search_requests ?? 0,
+          serverToolFetches: response.usage.server_tool_use?.web_fetch_requests ?? 0,
         },
       }
     },

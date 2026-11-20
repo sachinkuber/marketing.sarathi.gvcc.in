@@ -512,4 +512,143 @@ describe('running a job', () => {
     expect(hashes[0]).not.toBe(hashes[1])
     expect(hashes[3]).not.toBe(hashes[1])
   })
+
+  const toolsRequest = (maxUses: number): ModelRequest => ({
+    model: 'm',
+    messages: [{ role: 'user', content: 'hi' }],
+    maxTokens: 10,
+    tools: [{ type: 'web_search_20260209', maxUses }],
+  })
+  const runOne = (core: CoreClient, modelClient: ModelClient, request: ModelRequest, out: unknown[]) =>
+    runJob(
+      {
+        ...deps(core),
+        model: modelClient,
+        handlers: {
+          'test.echo': plain(async (ctx) => {
+            out.push(await ctx.modelStep('s', request))
+            return { type: 'test.echo', result: null }
+          }),
+        },
+      },
+      { id: 'jt', jobClass: 'production' },
+    )
+
+  it('pause_turn is checkpointed as a reply, not a stop', async () => {
+    const blocks = [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: {} }]
+    const paused: ModelClient = {
+      async send() {
+        return {
+          text: 'part',
+          content: blocks,
+          messageId: 'm1',
+          requestId: 'r1',
+          stopReason: 'pause_turn',
+          usage: {
+            inputTokens: 5,
+            outputTokens: 6,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            serverToolSearches: 2,
+            serverToolFetches: 0,
+          },
+        }
+      },
+    }
+    const bodies: Record<string, unknown>[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        bodies.push(body as unknown as Record<string, unknown>)
+        return { costed: true }
+      },
+    })
+    const out: unknown[] = []
+    await runOne(core, paused, toolsRequest(5), out)
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]!.stopped).toBeUndefined()
+    expect(JSON.parse(bodies[0]!.output as string)).toEqual({
+      text: 'part',
+      content: blocks,
+      stopReason: 'pause_turn',
+    })
+    // R1: nothing new goes to the core.
+    expect(bodies[0]!.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 6,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })
+    expect(out[0]).toMatchObject({
+      text: 'part',
+      stopReason: 'pause_turn',
+      content: blocks,
+      usage: { serverToolSearches: 2, serverToolFetches: 0 },
+    })
+  })
+
+  it('replays a saved pause_turn step with its content and counts', async () => {
+    const blocks = [
+      { type: 'server_tool_use', name: 'web_search' },
+      { type: 'server_tool_use', name: 'web_fetch' },
+    ]
+    const core = fakeCore({
+      async registerModelCall() {
+        return {
+          outcome: 'use_checkpoint',
+          output: JSON.stringify({ text: 'p', content: blocks, stopReason: 'pause_turn' }),
+        }
+      },
+    })
+    const out: unknown[] = []
+    await runOne(core, model, toolsRequest(5), out)
+    expect(out[0]).toMatchObject({
+      text: 'p',
+      stopReason: 'pause_turn',
+      content: blocks,
+      usage: { inputTokens: 0, serverToolSearches: 1, serverToolFetches: 1 },
+    })
+  })
+
+  it('sends the timeout of the job class', async () => {
+    const out: unknown[] = []
+    const sent: ModelRequest[] = []
+    const spy: ModelClient = {
+      async send(request) {
+        sent.push(request)
+        return model.send(request)
+      },
+    }
+    const asClass = (jobClass: 'interactive' | 'production') =>
+      fakeCore({
+        async startAttempt() {
+          return { ...(await fakeCore().startAttempt('j', 'w')), jobClass } as never
+        },
+      })
+    await runOne(asClass('production'), spy, toolsRequest(1), out)
+    await runOne(asClass('interactive'), spy, toolsRequest(1), out)
+    expect(sent.map((r) => r.timeoutMs)).toEqual([900_000, 240_000])
+  })
+
+  it('requestHash changes when tools change', async () => {
+    const hashes: string[] = []
+    const core = fakeCore({
+      async registerModelCall(_j, _t, input) {
+        hashes.push(input.requestHash)
+        return { outcome: 'use_checkpoint', output: { text: 'x' } }
+      },
+    })
+    const out: unknown[] = []
+    const plainRequest: ModelRequest = {
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 10,
+    }
+    await runOne(core, model, plainRequest, out)
+    await runOne(core, model, toolsRequest(5), out)
+    await runOne(core, model, toolsRequest(5), out)
+    await runOne(core, model, toolsRequest(6), out)
+    expect(hashes[1]).toBe(hashes[2])
+    expect(hashes[0]).not.toBe(hashes[1])
+    expect(hashes[3]).not.toBe(hashes[1])
+  })
 })

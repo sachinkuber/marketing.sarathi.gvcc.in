@@ -62,7 +62,7 @@ export function createApp(deps: AppDeps): Express {
   if (deps.guard) app.use('/api', deps.guard)
   // The auth library reads the raw request body, so it is mounted before the JSON parser.
   if (deps.authHandler) app.all('/api/auth/*splat', deps.authHandler)
-  // One request skips the 100 kB parser: a worker's checkpoint, whose route reads up to 1 MB itself after the
+  // One request skips the 100 kB parser: a worker's checkpoint, whose route reads up to 8 MB itself after the
   // worker credential and attempt token are checked. The match is exact: POST, case-sensitive, uuid segments,
   // no trailing segment, so no other path or method gets the larger limit and nothing large is read before auth.
   const smallJson = express.json({ limit: '100kb', strict: true })

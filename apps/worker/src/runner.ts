@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto'
 import type { JobClass } from '@mkt/queue'
 import { CoreError, type CoreClient } from './core-client.ts'
-import { isDefiniteRefusal, ModelStopped, type ModelClient, type ModelRequest } from './model.ts'
+import {
+  isDefiniteRefusal,
+  ModelStopped,
+  type ModelClient,
+  type ModelRequest,
+  type ModelUsage,
+} from './model.ts'
 
 export class JobStopped extends Error {
   readonly why: 'cancelled' | 'held'
@@ -11,12 +17,75 @@ export class JobStopped extends Error {
   }
 }
 
+// What a model step gives back. A step replayed from a checkpoint carries zero token usage (it was not paid
+// for again); `content` is [] for a step saved before content was kept. The runner always
+// sets both; they are optional so a test double of a step need not.
+export interface ModelStepResult {
+  text: string
+  // Absent only on a step saved before the stop reason was kept.
+  stopReason?: string | null
+  content?: unknown[]
+  usage?: Required<ModelUsage>
+}
+
+// Request timeout by job class: a request must end before the queue expires the job. Production jobs run
+// long research steps and expire later.
+const TIMEOUT_MS_BY_CLASS: Partial<Record<JobClass, number>> = {
+  interactive: 240_000,
+  production: 900_000,
+}
+
+const NO_USAGE = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  serverToolSearches: 0,
+  serverToolFetches: 0,
+}
+
+// Search and fetch counts of a replayed step, read from its saved content (counts are not saved apart).
+function toolCounts(content: unknown[]): { serverToolSearches: number; serverToolFetches: number } {
+  let serverToolSearches = 0
+  let serverToolFetches = 0
+  for (const block of content) {
+    const b = block as { type?: unknown; name?: unknown }
+    if (b?.type !== 'server_tool_use') continue
+    if (b.name === 'web_search') serverToolSearches += 1
+    if (b.name === 'web_fetch') serverToolFetches += 1
+  }
+  return { serverToolSearches, serverToolFetches }
+}
+
+function serverCounts(usage: ModelUsage): { serverToolSearches: number; serverToolFetches: number } {
+  return {
+    serverToolSearches: usage.serverToolSearches ?? 0,
+    serverToolFetches: usage.serverToolFetches ?? 0,
+  }
+}
+
+function replayed(output: unknown): ModelStepResult {
+  // A pause_turn step is saved as a JSON string; any other step as an object.
+  const saved = (typeof output === 'string' ? JSON.parse(output) : output) as {
+    text: string
+    stopReason?: string | null
+    content?: unknown[]
+  }
+  const content = saved.content ?? []
+  return {
+    text: saved.text,
+    ...(saved.stopReason === undefined ? {} : { stopReason: saved.stopReason }),
+    content,
+    usage: { ...NO_USAGE, ...toolCounts(content) },
+  }
+}
+
 export interface JobContext {
   jobId: string
   jobClass: JobClass
   input: unknown
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
-  modelStep(step: string, request: ModelRequest): Promise<{ text: string; stopReason?: string | null }>
+  modelStep(step: string, request: ModelRequest): Promise<ModelStepResult>
   // Called between steps: throws JobStopped when the job was cancelled or held.
   // `allowHeld`: stop only for a cancel (used before the result is posted, when a held job still posts so
   // the core keeps the paid-for result).
@@ -61,6 +130,8 @@ function requestHash(request: ModelRequest): string {
     maxTokens: request.maxTokens,
     effort: request.effort ?? null,
     outputSchema: request.outputSchema ?? null,
+    // Added only when present, so a request without tools hashes as it did before tools existed.
+    ...(request.tools && request.tools.length > 0 ? { tools: request.tools } : {}),
   }
   return createHash('sha256').update(JSON.stringify(ordered)).digest('hex')
 }
@@ -108,8 +179,7 @@ export async function runJob(
         requestHash: requestHash(request),
         model: request.model,
       })
-      if (registered.outcome === 'use_checkpoint')
-        return registered.output as { text: string; stopReason?: string | null }
+      if (registered.outcome === 'use_checkpoint') return replayed(registered.output)
       if (registered.outcome === 'cancelled' || registered.outcome === 'held') {
         throw new JobStopped(registered.outcome)
       }
@@ -117,6 +187,8 @@ export async function runJob(
       // An empty system prompt and none are the same request, and are sent the same way.
       const sent: ModelRequest = { ...request }
       if (!sent.system) delete sent.system
+      const classTimeout = TIMEOUT_MS_BY_CLASS[started.jobClass]
+      if (sent.timeoutMs === undefined && classTimeout !== undefined) sent.timeoutMs = classTimeout
 
       let reply
       try {
@@ -138,11 +210,23 @@ export async function runJob(
         }
         throw error
       }
-      const stopped = reply.stopReason !== 'end_turn'
+      // pause_turn is a normal reply: the provider paused a long turn, and the handler sends it back.
+      const paused = reply.stopReason === 'pause_turn'
+      const stopped = reply.stopReason !== 'end_turn' && !paused
+      const content = reply.content ?? []
       // A reply that did not end its turn was still paid for: the call is completed and costed (no step is
       // saved, so a retry asks again), and only then does the job stop. It is not failCall: that means the
       // provider refused and did no work.
-      const output = stopped ? null : { text: reply.text, stopReason: reply.stopReason }
+      let output: unknown = null
+      if (paused) output = JSON.stringify({ text: reply.text, content, stopReason: reply.stopReason })
+      else if (!stopped) {
+        output = { text: reply.text, stopReason: reply.stopReason }
+        // A step that used tools keeps its content too, so a replay can hand it back. A step without tools
+        // is saved exactly as before.
+        if (request.tools && request.tools.length > 0) (output as { content?: unknown[] }).content = content
+      }
+      // Ruling R1: the core's checkpoint schema is strict; only the four token counts go on the wire.
+      const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = reply.usage
       const body = {
         step,
         output,
@@ -150,7 +234,7 @@ export async function runJob(
         model: request.model,
         providerMessageId: reply.messageId,
         providerRequestId: reply.requestId,
-        usage: reply.usage,
+        usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
       }
       let delay = deps.checkpointRetryDelayMs ?? 250
       for (let attempt = 1; ; attempt += 1) {
@@ -164,7 +248,12 @@ export async function runJob(
         }
       }
       if (stopped) throw new ModelStopped(reply.stopReason)
-      return output as { text: string; stopReason: string | null }
+      return {
+        text: reply.text,
+        stopReason: reply.stopReason,
+        content,
+        usage: { ...NO_USAGE, ...reply.usage, ...serverCounts(reply.usage) },
+      }
     },
   }
 

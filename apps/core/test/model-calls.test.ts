@@ -416,7 +416,7 @@ describe('the model-call routes', () => {
       })
     const auth = { authorization: `Worker ${jobs.workerSecret}`, 'x-attempt-token': token }
 
-    // Over the 1 MB limit, so a parser that ran before authentication would answer 413. A wrong worker
+    // Over the 8 MB limit, so a parser that ran before authentication would answer 413. A wrong worker
     // credential reaches workerAuth (without any Authorization header the /api guard answers 403 first).
     expect(
       (
@@ -424,16 +424,16 @@ describe('the model-call routes', () => {
           `/api/v1${path}`,
           'POST',
           { authorization: 'Worker wrong', 'x-attempt-token': token },
-          1_200_000,
+          9_000_000,
         )
       ).status,
     ).toBe(401)
     // A valid worker credential but no attempt token: attemptAuth refuses it before the body is read.
     expect(
-      (await send(`/api/v1${path}`, 'POST', { authorization: auth.authorization }, 1_200_000)).status,
+      (await send(`/api/v1${path}`, 'POST', { authorization: auth.authorization }, 9_000_000)).status,
     ).toBe(403)
-    // Over 1 MB with valid credentials: too large.
-    expect((await send(`/api/v1${path}`, 'POST', auth, 1_200_000)).status).toBe(413)
+    // Over 8 MB with valid credentials: too large.
+    expect((await send(`/api/v1${path}`, 'POST', auth, 9_000_000)).status).toBe(413)
     // Variants do not get the large limit: whatever the guard or the router does with them, a 200 kB body is
     // not accepted (413 from the 100 kB parser, or refused earlier / not found).
     const upper = path.replace('/worker/', '/Worker/')
@@ -448,6 +448,21 @@ describe('the model-call routes', () => {
     }
     // The real request, 200 kB, is accepted.
     expect((await send(`/api/v1${path}`, 'POST', auth, 200_000)).status).toBe(200)
+  })
+
+  it('accepts a checkpoint body of about 2 MB (search results and page text), ruling R4', async () => {
+    const { jobId, claims, token } = await startedJob()
+    const reg = await registerModelCall(jobs, claims, { step: 'r4', requestHash: 'r', model: 'test-model' })
+    if (reg.outcome !== 'send') throw new Error('unexpected')
+    const res = await post(`/worker/jobs/${jobId}/model-calls/${reg.callId}/checkpoint`, token, {
+      step: 'r4',
+      output: JSON.stringify({ text: 'x', content: ['y'.repeat(2_000_000)], stopReason: 'pause_turn' }),
+      model: 'test-model',
+      providerMessageId: 'm',
+      providerRequestId: null,
+      usage: USAGE,
+    })
+    expect(res.status).toBe(200)
   })
 
   it('refuses a checkpoint containing U+0000 with a 400, not a 500', async () => {

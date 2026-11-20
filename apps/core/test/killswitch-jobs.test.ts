@@ -38,7 +38,7 @@ const modelCalls = new Map<string, number>()
 let gate: { entered: () => void; release: Promise<void> } | null = null
 const model: ModelClient = {
   async send(request) {
-    const jobId = request.messages[0]!.content
+    const jobId = request.messages[0]!.content as string
     modelCalls.set(jobId, (modelCalls.get(jobId) ?? 0) + 1)
     if (gate) {
       const g = gate

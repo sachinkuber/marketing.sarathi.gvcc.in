@@ -117,7 +117,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     ],
   })
 
-  // The global JSON parser (100 kB) skips exactly this request (see app.ts); the 1 MB parser runs here, after
+  // The global JSON parser (100 kB) skips exactly this request (see app.ts); the 8 MB parser runs here (research steps keep search results and page text), after
   // the worker credential and the attempt token have been checked, so nothing large is read for a stranger.
   table.add({
     method: 'post',
@@ -125,7 +125,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     access: { kind: 'attempt' },
     summary: 'A worker saves a step and its cost in one transaction',
     handlers: [
-      express.json({ limit: '1mb', strict: true }),
+      express.json({ limit: '8mb', strict: true }),
       validate({ params: callParams, body: checkpointBody }),
       async (_req, res) => {
         const { params, body } = inputOf<{

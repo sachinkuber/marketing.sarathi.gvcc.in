@@ -17,7 +17,8 @@ export interface StandInOptions {
 export function standInModel(options: StandInOptions): ModelClient {
   return {
     async send(request) {
-      const step = request.messages[request.messages.length - 1]!.content
+      // The stand-in is only sent plain-text requests.
+      const step = request.messages[request.messages.length - 1]!.content as string
       await appendFile(options.logFile, `sent ${step}\n`)
       if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs))
       if (options.crashBeforeReplyOn === step) process.kill(process.pid, 'SIGKILL')

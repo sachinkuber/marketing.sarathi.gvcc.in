@@ -35,7 +35,7 @@ function stub(
       requests.push(request)
       const props = (request.outputSchema?.['properties'] ?? {}) as Record<string, unknown>
       if ('passed' in props) return reply(JSON.stringify(options.judge ?? { passed: true, reason: 'fine' }))
-      const brief = request.messages[0]?.content ?? ''
+      const brief = (request.messages[0]?.content ?? '') as string
       return reply(options.follow?.(brief) ? FOLLOWED : GOOD)
     },
   }
