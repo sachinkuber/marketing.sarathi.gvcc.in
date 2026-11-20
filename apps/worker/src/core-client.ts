@@ -58,10 +58,9 @@ export interface CoreClient {
     posted: { type: string; result: unknown },
   ): Promise<{ status: 'applied' | 'repeated' | 'held' }>
   // The attempt stopped because its job is held: the core ends it, so a release starts a fresh one.
-  endAttempt(jobId: string, token: string, reason: 'held'): Promise<void>
+  endAttempt(jobId: string, token: string, reason: 'held' | 'agent_files_mismatch'): Promise<void>
   // Worker-level calls (no attempt token): the dead-letter watcher and the reconciliation timer (task 10).
-  // `reason` names why the worker itself gives the job up (agent_files_mismatch); the watcher sends none.
-  jobDead(jobId: string, reason?: string): Promise<void>
+  jobDead(jobId: string): Promise<void>
   reconcile(): Promise<{ marked: number }>
   // Of these failed job IDs, the ones the core has not yet marked dead.
   unmarkedDead(jobIds: string[]): Promise<string[]>
@@ -182,8 +181,7 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     },
     endAttempt: (jobId, token, reason) =>
       call('POST', `/worker/jobs/${jobId}/attempt/end`, token, { reason }),
-    jobDead: (jobId, reason) =>
-      call('POST', `/worker/jobs/${jobId}/dead`, null, reason === undefined ? {} : { reason }),
+    jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
     async unmarkedDead(jobIds) {
       if (jobIds.length === 0) return []
       const found: string[] = []

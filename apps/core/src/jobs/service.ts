@@ -71,14 +71,22 @@ export async function createJob(
   if (!scheduleKey) throw new AppError(404, 'brand_not_found', 'No such brand.')
   let filesHash: string | null = null
   if (job.agent !== undefined) {
-    const live = await client.query<{ files_hash: string }>(
-      'select files_hash from app.agent_definition_version where agent = $1 and live',
-      [job.agent],
+    // The run's own agent runs the version the run is pinned to (a requeue keeps it, ruling R7); another agent
+    // in the same run runs that agent's live release.
+    const found = await client.query<{ files_hash: string }>(
+      `select v.files_hash
+         from app.run r
+         join app.agent_definition_version v on v.id = r.definition_version_id
+        where r.id = $1 and r.agent = $2
+       union all
+       select files_hash from app.agent_definition_version
+        where agent = $2 and live and not exists (select 1 from app.run where id = $1 and agent = $2)`,
+      [job.runId, job.agent],
     )
-    if (!live.rows[0]) {
+    if (!found.rows[0]) {
       throw new AppError(503, 'agent_unavailable', `The ${job.agent} agent has no live release.`)
     }
-    filesHash = live.rows[0].files_hash
+    filesHash = found.rows[0].files_hash
   }
   const jobId = randomUUID()
   await client.query(
@@ -289,7 +297,11 @@ export async function requireCurrentAttempt(
 // Only the job's latest attempt, the one in the token, may end: an older token is refused and recorded
 // like any other stale attempt. An attempt that has already ended (a repeat) is left as it is. The state is
 // 'failed' (the enum has no 'held'); nothing is audited, as a hold is not an event of the attempt's own.
-export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise<void> {
+export async function endAttempt(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  reason: 'held' | 'agent_files_mismatch' = 'held',
+): Promise<void> {
   await withBrand(deps.pool, claims.brandId, async (client) => {
     await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
     const { rows } = await client.query<{ id: string; state: string }>(
@@ -313,6 +325,20 @@ export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise
       `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
       [claims.attemptId],
     )
+    // A held stop is not an event of the attempt's own. A files mismatch is: the worker refused to run.
+    if (reason === 'agent_files_mismatch') {
+      await deps.audit.record(
+        {
+          action: 'worker.attempt_ended',
+          actor: null,
+          brandId: claims.brandId,
+          subject: claims.jobId,
+          outcome: 'failure',
+          detail: { reason, jobId: claims.jobId, attemptId: claims.attemptId },
+        },
+        client,
+      )
+    }
   })
 }
 

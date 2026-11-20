@@ -82,9 +82,10 @@ export async function runJob(
   // Ruling R9: the worker runs only the released agent files. A handler that names an agent runs only a job
   // that recorded the same agent and files hash (a job made before they were recorded carries neither and is
   // refused). A handler that names none runs whatever the job carries. On a mismatch no model call is made:
-  // the core is told, and the error ends this delivery.
+  // the attempt is ended, and the error makes the queue retry; when it gives up, the dead-letter watcher marks the
+  // job dead as for any failure.
   if (entry.agent !== null && (started.agent !== entry.agent || started.filesHash !== entry.filesHash)) {
-    await deps.core.jobDead(job.id, 'agent_files_mismatch')
+    await deps.core.endAttempt(job.id, started.token, 'agent_files_mismatch')
     throw new Error(
       `agent_files_mismatch: job ${job.id} was released with ${started.agent ?? 'no agent'} files ${
         started.filesHash ?? 'none'

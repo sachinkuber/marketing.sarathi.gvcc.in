@@ -21,8 +21,6 @@ import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
-// The reason a worker gives a job up itself; the dead-letter watcher sends none.
-const deadBody = z.strictObject({ reason: z.literal('agent_files_mismatch').optional() })
 // queueId: the queue row the worker claimed (optional, so an older worker is still understood).
 const startBody = z.strictObject({ workerId: z.string().min(1).max(200), queueId: z.uuid().optional() })
 
@@ -64,7 +62,7 @@ const resultBody = z.strictObject({
 })
 const tickBody = z.strictObject({ workerId: z.string().min(1).max(200) })
 const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
-const endBody = z.strictObject({ reason: z.literal('held') })
+const endBody = z.strictObject({ reason: z.enum(['held', 'agent_files_mismatch']) })
 const failureBody = z.strictObject({ error: text(2000) })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
@@ -177,11 +175,13 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     method: 'post',
     path: '/worker/jobs/:jobId/attempt/end',
     access: { kind: 'attempt' },
-    summary: 'A worker ends its current attempt because the job is held, so a release starts a fresh one',
+    summary:
+      "A worker ends its current attempt because the job is held or its agent files differ from the job's",
     handlers: [
       validate({ params: jobParams, body: endBody }),
       async (_req, res) => {
-        await endAttempt(deps, claimsOf(res))
+        const { body } = inputOf<{ body: z.infer<typeof endBody> }>(res)
+        await endAttempt(deps, claimsOf(res), body.reason)
         res.status(204).end()
       },
     ],
@@ -193,13 +193,10 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     access: { kind: 'worker' },
     summary: 'The dead-letter watcher reports a job the queue gave up on',
     handlers: [
-      validate({ params: jobParams, body: deadBody }),
+      validate({ params: jobParams }),
       async (_req, res) => {
-        const { params, body } = inputOf<{
-          params: z.infer<typeof jobParams>
-          body: z.infer<typeof deadBody>
-        }>(res)
-        await markDead(deps, params.jobId, body.reason)
+        const { params } = inputOf<{ params: z.infer<typeof jobParams> }>(res)
+        await markDead(deps, params.jobId)
         res.status(204).end()
       },
     ],

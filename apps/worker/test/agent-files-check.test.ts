@@ -6,7 +6,8 @@ import { runJob, type JobHandler } from '../src/runner.ts'
 const HASH = 'a'.repeat(64)
 
 function core(started: { agent: string | null; filesHash: string | null }) {
-  const dead: Array<{ jobId: string; reason: string | undefined }> = []
+  const ended: string[] = []
+  const dead: string[] = []
   const posted: unknown[] = []
   const client = {
     async startAttempt() {
@@ -29,11 +30,14 @@ function core(started: { agent: string | null; filesHash: string | null }) {
       posted.push(p)
       return { status: 'applied' }
     },
-    async jobDead(jobId: string, reason?: string) {
-      dead.push({ jobId, reason })
+    async endAttempt(jobId: string, _t: string, reason: string) {
+      ended.push(`${jobId}:${reason}`)
+    },
+    async jobDead(jobId: string) {
+      dead.push(jobId)
     },
   } as unknown as CoreClient
-  return { client, dead, posted }
+  return { client, ended, dead, posted }
 }
 
 const sent: unknown[] = []
@@ -57,13 +61,14 @@ function deps(c: CoreClient, entry: { agent: string | null; filesHash: string | 
 }
 
 describe('the worker runs only the released agent files', () => {
-  it('a job whose files hash differs is marked dead without a model call', async () => {
+  it('a job whose files hash differs is ends its attempt without a model call', async () => {
     const c = core({ agent: 'summary', filesHash: 'b'.repeat(64) })
     const d = deps(c.client, { agent: 'summary', filesHash: HASH })
     await expect(runJob(d.deps, { id: 'j1', jobClass: 'interactive' })).rejects.toThrow(
       /agent_files_mismatch/,
     )
-    expect(c.dead).toEqual([{ jobId: 'j1', reason: 'agent_files_mismatch' }])
+    expect(c.ended).toEqual(['j1:agent_files_mismatch'])
+    expect(c.dead).toEqual([])
     expect(d.ran()).toBe(0)
     expect(sent).toHaveLength(0)
     expect(c.posted).toHaveLength(0)
@@ -73,7 +78,7 @@ describe('the worker runs only the released agent files', () => {
     const c = core({ agent: 'other', filesHash: HASH })
     const d = deps(c.client, { agent: 'summary', filesHash: HASH })
     await expect(runJob(d.deps, { id: 'j2', jobClass: 'interactive' })).rejects.toThrow()
-    expect(c.dead).toHaveLength(1)
+    expect(c.ended).toHaveLength(1)
     expect(d.ran()).toBe(0)
   })
 

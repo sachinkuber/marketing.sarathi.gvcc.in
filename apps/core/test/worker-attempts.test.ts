@@ -420,4 +420,45 @@ describe('ending an attempt that stopped because its job is held', () => {
     expect(res.status).toBe(400)
     expect(await states(jobId)).toEqual([{ state: 'active', ended: false }])
   })
+
+  it('takes agent_files_mismatch only with the current attempt token, ends the attempt and audits the reason', async () => {
+    const jobId = await makeJob(brandA)
+    const started = await begin(jobId)
+    const send = (token?: string) =>
+      call('POST', `/worker/jobs/${jobId}/attempt/end`, {
+        ...(token ? { token } : {}),
+        body: { reason: 'agent_files_mismatch' },
+      })
+    expect((await send()).status).toBe(403)
+    expect(await states(jobId)).toEqual([{ state: 'active', ended: false }])
+    expect((await send(started.token)).status).toBe(204)
+    expect(await states(jobId)).toEqual([{ state: 'failed', ended: true }])
+    const entry = await stack.db.admin.query(
+      `select detail from audit.log where subject = $1 and action = 'worker.attempt_ended'`,
+      [jobId],
+    )
+    expect(entry.rows).toHaveLength(1)
+    expect(entry.rows[0].detail).toMatchObject({ reason: 'agent_files_mismatch' })
+    const dead = await stack.db.admin.query('select dead_at from app.job_control where job_id = $1', [jobId])
+    expect(dead.rows[0].dead_at).toBeNull()
+  })
+
+  it('refuses agent_files_mismatch from a superseded attempt', async () => {
+    const jobId = await makeJob(brandA)
+    const old = await begin(jobId)
+    await begin(jobId)
+    const res = await call('POST', `/worker/jobs/${jobId}/attempt/end`, {
+      token: old.token,
+      body: { reason: 'agent_files_mismatch' },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('the dead route ignores a reason: the job stays not dead while the queue has not given up', async () => {
+    const jobId = await makeJob(brandA)
+    const res = await call('POST', `/worker/jobs/${jobId}/dead`, { body: { reason: 'agent_files_mismatch' } })
+    expect(res.status).toBe(204)
+    const dead = await stack.db.admin.query('select dead_at from app.job_control where job_id = $1', [jobId])
+    expect(dead.rows[0].dead_at).toBeNull()
+  })
 })

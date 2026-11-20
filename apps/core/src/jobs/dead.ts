@@ -55,10 +55,7 @@ async function lockJob(client: PoolClient, jobId: string): Promise<Locked> {
 }
 
 // Called by the worker's dead-letter watcher when the library has given up on a job. Repeating it is safe.
-// `reason` is sent only by a worker that refuses the job itself (its agent files differ from the job's):
-// the queue still shows that job as claimed, so the queue's own record is not asked, and the reason is
-// audited. The watcher sends none.
-export async function markDead(deps: JobsDeps, jobId: string, reason?: string): Promise<void> {
+export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
   const brandId = await brandOf(deps, jobId)
   await withBrand(deps.pool, brandId, async (client) => {
     const job = await lockJob(client, jobId)
@@ -68,11 +65,7 @@ export async function markDead(deps: JobsDeps, jobId: string, reason?: string): 
     if (job.deadAt && job.runState === 'failed') return
     // Nor is a job the queue is running again: a redelivered copy, or the reconciliation, arriving after an
     // owner's requeue must not fail the run or the live attempt. The queue's own record decides.
-    if (
-      reason === undefined &&
-      (await deps.queue.state(job.jobClass, await currentQueueId(client, jobId))) !== 'failed'
-    )
-      return
+    if ((await deps.queue.state(job.jobClass, await currentQueueId(client, jobId))) !== 'failed') return
     await client.query(
       'update app.job_control set dead_at = coalesce(dead_at, now()), updated_at = now() where job_id = $1',
       [jobId],
@@ -90,14 +83,7 @@ export async function markDead(deps: JobsDeps, jobId: string, reason?: string): 
     )
     if (job.deadAt) return
     await deps.audit.record(
-      {
-        action: 'jobs.dead',
-        actor: null,
-        brandId,
-        subject: jobId,
-        outcome: 'success',
-        detail: reason === undefined ? { jobId } : { jobId, reason },
-      },
+      { action: 'jobs.dead', actor: null, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
       client,
     )
   })

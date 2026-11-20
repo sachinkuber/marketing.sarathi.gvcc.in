@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url'
 import { agentFilesHash, initErrorTracking } from '@mkt/shared'
 import { openQueue, type JobClass } from '@mkt/queue'
 import { anthropicModel } from './anthropic.ts'
@@ -8,7 +7,7 @@ import type { ModelClient } from './model.ts'
 import { DEFAULT_MAX_WAIT_SECONDS, startMaintenance } from './maintenance.ts'
 import { runJob, type HandlerEntry } from './runner.ts'
 import { checkHandler } from './agents/check.ts'
-import { summaryHandler } from './agents/summary.ts'
+import { SUMMARY_DIR, summaryHandler } from './agents/summary.ts'
 
 export interface WorkerOptions {
   core: CoreClient
@@ -73,9 +72,6 @@ export async function startWorker(
     },
   }
 }
-
-// The agent folder the summary handler loaded its files from, and the hash of it taken once at startup.
-const SUMMARY_DIR = fileURLToPath(new URL('../../../agents/summary/', import.meta.url))
 
 // The production registry. The summary handler runs on agents/summary/; the placeholder check loads no agent
 // files and makes no model call (ruling R3), so it names no agent.

@@ -16,6 +16,7 @@ let definitionId: string
 let worker: { stop(): Promise<void> }
 let shouldFail = true
 let handlerRuns = 0
+let guardedRuns = 0
 const OWNER = '88888888-8888-4888-8888-888888888888'
 
 beforeAll(async () => {
@@ -37,6 +38,15 @@ beforeAll(async () => {
         },
         agent: null,
         filesHash: null,
+      },
+      // The worker holds agent files whose hash is not the one released: every delivery is refused.
+      'test.guarded': {
+        handler: async () => {
+          guardedRuns += 1
+          return { type: 'test.guarded', result: {} }
+        },
+        agent: 'guarded',
+        filesHash: 'worker-files',
       },
     },
     queueUrl: stack.db.urlFor('queue'),
@@ -109,5 +119,58 @@ describe('acceptance test 28', () => {
       [jobId],
     )
     expect(actions.rows.map((r) => r.action)).toEqual(expect.arrayContaining(['jobs.dead', 'jobs.requeued']))
+  }, 300_000)
+
+  it('a job whose agent files differ is retried, and is dead only once the queue gives up', async () => {
+    await stack.db.admin.query(
+      `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live, released_at)
+       values ('guarded', 1, 'claude-opus-5-5', 'low', 'released-files', true, now())`,
+    )
+    const jobId = await withBrand(stack.appPool, brand, async (client) => {
+      const runId = await createRun(client, brand, {
+        agent: 'test-agent',
+        definitionVersionId: definitionId,
+        startedByKind: 'system',
+        startedById: null,
+      })
+      return createJob(client, jobs, brand, {
+        runId,
+        jobClass: 'interactive',
+        input: {},
+        expectedResultType: 'test.guarded',
+        agent: 'guarded',
+      })
+    })
+    const deadAt = async () =>
+      (await stack.db.admin.query('select dead_at from app.job_control where job_id = $1', [jobId])).rows[0]
+        .dead_at
+    const deadAudits = async () =>
+      (
+        await stack.db.admin.query(`select 1 from audit.log where subject = $1 and action = 'jobs.dead'`, [
+          jobId,
+        ])
+      ).rowCount
+    const attemptCount = async () =>
+      (await stack.db.admin.query('select 1 from app.job_attempt where job_id = $1', [jobId])).rowCount
+
+    // Until the queue gives up, the job is neither dead nor audited as dead.
+    await until(async () => {
+      if ((await listDead(jobs, brand)).some((j) => j.jobId === jobId)) return true
+      const attempts = (await attemptCount()) ?? 0
+      if (attempts >= 1 && attempts < 3) {
+        expect(await deadAt()).toBeNull()
+        expect(await deadAudits()).toBe(0)
+      }
+      return false
+    }, 150_000)
+    expect(await attemptCount()).toBe(3)
+    expect(guardedRuns).toBe(0)
+    expect(await deadAudits()).toBe(1)
+    const ended = await stack.db.admin.query(
+      `select detail from audit.log where subject = $1 and action = 'worker.attempt_ended'`,
+      [jobId],
+    )
+    expect(ended.rowCount).toBe(3)
+    expect(ended.rows[0].detail).toMatchObject({ reason: 'agent_files_mismatch' })
   }, 300_000)
 })
