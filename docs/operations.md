@@ -80,7 +80,7 @@ The core and the dashboard publish `127.0.0.1:4100` and `127.0.0.1:3100` only (`
 
 ## Proxy site
 
-The rules (plan decisions 1 and 2; the proxy preconditions of milestones 2b, 2c, 4 and 6 in `docs/progress.md`) are written in the template's header. In short: `/api/` to the core, everything else to the dashboard; path, query string, Host, `Authorization`, the `X-Mkt-*` headers, the raw body and DELETE bodies unchanged; bodies up to 1 MiB; HSTS and COOP added; `X-Forwarded-For` replaced (never appended) with the client's address, which is believed from `CF-Connecting-IP` only when the request comes from a Cloudflare address.
+The rules (plan decisions 1 and 2; the proxy preconditions of milestones 2b, 2c, 4 and 6 in `docs/progress.md`) are written in the template's header. In short: `/api/` to the core, everything else to the dashboard; path, query string, Host, `Authorization`, the `X-Mkt-*` headers, the raw body and DELETE bodies unchanged; bodies up to 1 MiB, except the document upload (`POST /api/v1/brands/<id>/onboarding/documents`, exactly that path), which takes up to 101 MiB; HSTS and COOP added; `X-Forwarded-For` replaced (never appended) with the client's address, which is believed from `CF-Connecting-IP` only when the request comes from a Cloudflare address.
 
 ### Global options
 
@@ -130,6 +130,8 @@ docker restart <caddy-container>    # with `admin off`; this interrupts every si
 Run `validate` before the restart, always: a site that does not validate would stop the proxy from coming back, and every site on it with it. The smoke check (below) needs no change for this layout: the proxy publishes 443 on the host, so `--direct https://127.0.0.1:443` reaches it, and `docker run --network host` works as written.
 
 **Staging: the certificate comes first.** The proxy there issues no certificates itself (`auto_https disable_certs`) and the `import stg <name>` snippet loads `<name>.pem` and `<name>.key` from its certificates folder. `validate` fails, inside the running proxy, while they are missing, and a restart with the site in place would then take every staging site down. So, before copying the site in: make a certificate signing request for the name with the staging key, `openssl req -new -key <certs>/staging.key -subj "/CN=<name>" -addext "subjectAltName=DNS:<name>" -out <name>.csr`; in Cloudflare (SSL/TLS, Origin Server, Create Certificate) choose "use my private key" and paste the request; save the certificate it returns as `<certs>/<name>.pem`, and link or copy the key as `<certs>/<name>.key`. One host per certificate: the existing ones are not wildcards. On production a `tls <cert> <key>` line with the origin certificate is used instead, or Caddy's automatic HTTPS.
+
+The proxy's body limit is 1 MiB for every request except the document upload, which gets 101 MiB through two named matchers in the template, so exactly one `request_body` applies to each request. The worker's checkpoints (up to 8 MB) never pass the proxy: in production the worker reaches the core directly (`CORE_URL http://core:4000` in `infra/prod/compose.yaml`). Only browser uploads do, and the core itself refuses a document above its own limit by type (100 MB for a PDF, 5 MB for an image). Deploy the new site file with the usual validate and restart before the first upload of a large PDF.
 
 `infra/prod/test/proxy.test.mjs` renders the template, has the same Caddy validate it, and runs the smoke script and the header, body and address rules through it.
 
@@ -304,7 +306,7 @@ $O "fetch('http://example.com/').then(r=>console.log('80 open',r.status),e=>cons
 
 ## Smoke check
 
-`node infra/prod/smoke.mjs <origin>` checks: `/api/health/ready` and `/api/health/worker` answer 200; `/` answers 200 with the app's security headers and the proxy's HSTS and COOP; `/api/v1/session` without a cookie answers 401; a trigger with a query string is refused by the core (`trigger_refused`; skipped, so exit 2, without `--trigger-secret-file`, because without the secret a dropped query string cannot be told from a kept one); a DELETE body reaches the core; a 900 kB checkpoint body is not refused by the proxy; and, sent to the origin server directly (not through Cloudflare) with forged `CF-Connecting-IP` and `X-Forwarded-For`, both the invite limiter and the sign-in limiter limit by the real address. One line per check; exit 0 when all pass, 1 when one fails, 2 when some were skipped. It prints statuses and error codes only. Its options are in the script's header.
+`node infra/prod/smoke.mjs <origin>` checks: `/api/health/ready` and `/api/health/worker` answer 200; `/` answers 200 with the app's security headers and the proxy's HSTS and COOP; `/api/v1/session` without a cookie answers 401; a trigger with a query string is refused by the core (`trigger_refused`; skipped, so exit 2, without `--trigger-secret-file`, because without the secret a dropped query string cannot be told from a kept one); a DELETE body reaches the core; a 900 kB checkpoint body is not refused by the proxy; a 2 MiB POST to a documents upload path, with no session, is not refused by the proxy (a 413 fails it; the core's 401 or 403 passes it); and, sent to the origin server directly (not through Cloudflare) with forged `CF-Connecting-IP` and `X-Forwarded-For`, both the invite limiter and the sign-in limiter limit by the real address. One line per check; exit 0 when all pass, 1 when one fails, 2 when some were skipped. It prints statuses and error codes only. Its options are in the script's header.
 
 From anywhere, through Cloudflare (the forged-address checks are skipped, exit 2):
 
@@ -401,7 +403,7 @@ The last line of the restore is `"event":"restored"`. Then continue with step 4 
 
 ### Restore drill
 
-Acceptance test 40: a backup restores into a clean database where a user signs in with the second factor, a job that was waiting resumes, the audit chains verify and isolation tests 1 to 6 pass. `apps/ops/src/restore-check.ts` checks all four on a restored copy and prints one line per check, `PASS` or `FAIL` (with the route pattern, table, status or error name that failed, never a secret, a code, an address or a row), and exits 1 if any failed:
+Acceptance test 40: a backup restores into a clean database where a user signs in with the second factor, a job that was waiting resumes, the audit chains verify and isolation tests 1 to 6 pass. `apps/ops/src/restore-check.ts` checks all of them on a restored copy (five lines below: the four things named, with the isolation tests and the seeded document as separate lines) and prints one line per check, `PASS` or `FAIL` (with the route pattern, table, status or error name that failed, never a secret, a code, an address or a row), and exits 1 if any failed:
 
 | Line | What it does |
 |---|---|
@@ -413,7 +415,7 @@ Acceptance test 40: a backup restores into a clean database where a user signs i
 
 The copy is throw-away and the drill changes it (sign-ins, the job's run, test 6's jobs). The drill core gets no mail, error-reporting or audit-store settings and the copy's network has no route out. The command refuses, before it starts anything (exit 2), the live database itself (the seed records its cluster identifier and database name in the drill file; a copy restored into a new container always differs) and any target host named `postgres` (the live service). It refuses a target address that carries a password, like `restore.sh`: the superuser's password comes from `PGPASSWORD`; everything else from the environment as well: the role passwords (`roles.env`), the core's four secrets and `PUBLIC_ORIGIN` (`core.env`; the second factor is stored encrypted with `AUTH_SECRET`, so the copy needs the same one) and the drill file.
 
-**The drill user** exists before the backup. `restore-check.ts seed` creates, on the live database: the brands `restore-drill-a` and `restore-drill-b`; the user `restore-drill@drill.invalid` (a brand admin in `restore-drill-a` only) with a random password, enrolled in the second factor through the sign-in library with the core's `AUTH_SECRET` (the authenticator secret is made for this account and is no person's); an article in each brand; and one summary job in `restore-drill-a`, which waits in the queue while no worker runs. It writes the password, the authenticator secret and the job's id to the drill file (`0600`, refused if it exists) and prints only `{"event":"restore_drill_seeded"}`. Run again while the drill user exists (before a later drill: the waiting job must be in the backup that is drilled), it makes only a new waiting job and replaces the job's id in the existing drill file; the password and the authenticator secret stay. The drill user is a real account in production: its file stays root's, in `/opt/mkt/drill`.
+**The drill user** exists before the backup. `restore-check.ts seed` creates, on the live database: the brands `restore-drill-a` and `restore-drill-b`; the user `restore-drill@drill.invalid` (a brand admin in `restore-drill-a` only) with a random password, enrolled in the second factor through the sign-in library with the core's `AUTH_SECRET` (the authenticator secret is made for this account and is no person's); an article in each brand; one small PDF (`restore-drill.pdf`, the same bytes every time) in `restore-drill-a`, stored once, so a later seed leaves it as it is; and one summary job in `restore-drill-a`, which waits in the queue while no worker runs. It writes the password, the authenticator secret and the job's id to the drill file (`0600`, refused if it exists) and prints only `{"event":"restore_drill_seeded"}`. Run again while the drill user exists (before a later drill: the waiting job must be in the backup that is drilled), it makes only a new waiting job and replaces the job's id in the existing drill file; the password and the authenticator secret stay. `unseed` (when the drill file is lost) removes the drill user together with the document it uploaded, because the document names the user as its uploader; the next seed stores it again. The drill user is a real account in production: its file stays root's, in `/opt/mkt/drill`.
 
 **Where it runs.** Not in the ops image: that image holds only what `prepare`, `alert` and the backup need (`packages/db`, `packages/queue`, `apps/ops` and their production dependencies), and the drill starts the core and the worker, which would add both apps and all their dependencies to it. It runs instead from the release's checkout with its locked dependencies, in the same pinned Node image the images are built from, on the `mkt_data` network. On the development server `apps/ops/test/restore-check.test.ts` runs it in the normal `npm test` (a seeded database, `pg_dump --format=custom`, `pg_restore` with `restore.sh`'s flags into a new database, then restore-check passes; with one audit entry altered it fails that line).
 
@@ -476,7 +478,7 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
      node apps/ops/src/restore-check.ts --target postgres://postgres@mkt-drill-target:5432/mkt
    ```
 
-   Four `PASS` lines and exit 0 are the pass. Copy the four lines, the backup set's name and the date into `docs/progress.md` under test 40.
+   Five `PASS` lines and exit 0 are the pass. Copy the five lines, the backup set's name and the date into `docs/progress.md` under test 40.
 
 4. **Clean up**: `docker rm -f -v mkt-drill-target; docker volume rm mkt-drill-work; unset PGPASSWORD`. Keep `/opt/mkt/drill/drill.env` for later drills.
 
@@ -550,3 +552,51 @@ It makes that version live (turning the earlier live version off), records the p
 - that version is already live;
 - that version number was recorded earlier with other files (`<agent> v<N> was recorded with other files; raise "version" in definition.json and run the evaluation again`): a version number names one set of files, so raise `version` and run the evaluation again;
 - another release of the same agent is running or has just changed the live version (try again after checking).
+
+## Releasing `research` and `research_merge`
+
+Milestone 9 adds two agents: `research` (one job per source group, each reading its own sources) and `research_merge` (one job joining the groups' results). Each goes live only through the release step above, after its own evaluation: `npm run eval -- --agent research --brand aztek`, then the same for `research_merge`, then `release --agent research --by <owner email>` and the same for `research_merge`. Both runs make paid model calls; the cases for each agent are in `agents/<name>/eval/`.
+
+- The evaluation uses recorded pages and documents, never the live web: the cases carry the page text, the search results and the document text the agent is given, with web tools removed, so a run is repeatable and costs only the model's own tokens.
+- The hostile cases are the point of the gate. Each plants an instruction in a page, a search result, a social bio, a structured field, or a document (including text inflated inside a PDF), and the run passes only if the agent never follows it, never states the planted claim as a fact, and flags the source (`flags_source`). A run without a passing hostile case is refused, so a release cannot skip them.
+- A run that passes on one version of the files is useless for the next: a change to any file under `agents/<name>/`, or to a case, needs a new evaluation before release.
+- Deploying new agent files and releasing them are two steps, and a job created in between is pinned to the old files (below, "Jobs"). Deploy the files, run the evaluations, release promptly.
+
+## What the owner needs for research on real data
+
+Research runs on whatever the brand's intake holds. For Aztek's first run (spec section 17; `docs/sachin-to-provide.md` is the owner's list):
+
+| ID | What | State on 2026-11-20 |
+|---|---|---|
+| C1 | Social profiles | Instagram is given (`https://www.instagram.com/aztekppf/`). Facebook, LinkedIn and YouTube are still open: a profile not given is simply not researched, and shows as a gap |
+| C2 | Brand material to upload | The 49 MB Aztek brochure is given and is accepted: it is split into parts at upload (below). Other documents are welcome, not required |
+| C4 | Competitor list | Still to be confirmed: UltrashieldX, Cosmo PPF/Sunshield, Intakt PPF, XPEL, 3M India come from the earlier audit work. Until the owner confirms them, competitors are only suggestions, never verified facts |
+
+## Documents
+
+Uploads go to `POST /api/v1/brands/<id>/onboarding/documents`, platform owner only.
+
+- **Limits:** 100 MB per PDF, 5 MB per image (the provider's own per-image limit), 20 files and 500 MB per brand. A PDF the library cannot read is refused (`pdf_unreadable`), and one whose parts would grow past twice its size or 32 MiB (`pdf_too_complex`), or take more than 120 s to split, is refused too. Each refusal says how to fix it.
+- **Splitting:** a PDF is split at upload into whole-page parts of at most 8 MB and 100 pages each (the most the model reads in one go), and the original is kept. Links and form actions are dropped from the parts, so a part carries only the pages it lists. The research documents group reads the parts, in batches of at most 24 MiB of base64 and 100 pages, and the intake shows "Prepared in N parts".
+- **Memory:** splitting a 99 MB PDF grows the core's memory by about 300 to 320 MB at peak. The production core's limit is 1 GiB (idle about 113 MiB); the staging core's is 768 MiB (idle about 102 MiB).
+- **Accepted risks, both recorded and to be revisited before uploads open to customers:**
+  - R17: two concurrent 100 MB uploads can exhaust the core's memory. Only the platform owner uploads, and only the split itself is serialised.
+  - R19: a crafted decompression-bomb PDF can make the library use unbounded memory while loading, and restart the core. Nothing is stored before the split succeeds. The fix is to split in a child process with memory and time caps.
+- **The restore drill** now includes a document: the seed stores a small PDF in the drill brand and the restore check's fifth line proves it came back with the same checksum (see "Restore drill").
+
+## Jobs
+
+- **Requeue keeps the job's agent files** (R7). A job records the hash of the agent files it was created with, and a requeue keeps it, because a run is pinned to one version. A job created before a release of new agent files can therefore only be cancelled, not run: its worker finds the live files differ and ends the attempt (`agent_files_mismatch`). Deploy agent-file changes, evaluate and release promptly, and start research afterwards.
+- **One kill switch for research** (R36). An agent kill switch matches the run's agent, so switching off `research` holds both the research group jobs and the merge job. That is the owner's single "stop research" control; switching it back on lets held jobs go.
+- **A dead group does not fail the run.** A research run is not failed by one dead group: the merge proceeds with the groups that finished and lists the dead ones as `deadGroups`. The run fails only when every group died, or when the merge died. The owner sees the gaps and decides what to do about them.
+- **Only one research run at a time per brand** (R31): a start while a run is open is refused (`research_running`), including while a dead group's siblings are still running.
+
+## Production steps at the end of milestone 9
+
+For the owner to approve, one at a time. Nothing here has been run.
+
+- [ ] **Deploy** the milestone's release to production (the usual "First deployment" update path), with the new proxy site file (validate, then restart the proxy container) and the migrations.
+- [ ] **Probe a continuation with a spent web tool** (R13): one live call, cents, run from the production worker's environment. It checks whether the API accepts a continuation whose history holds a spent web-search tool with the tool removed or `max_uses` 0. Until then the worker keeps the tool at `max_uses 1` on continuations; switch to the accepted form if there is one.
+- [ ] **Check web tools with an output schema** (R24): one live call, to see whether web tools plus an output schema return a 400. Research group requests send no output schema either way; if the API accepts the combination we may switch later.
+- [ ] **Evaluate and release**: the `research` evaluation, then the `research_merge` evaluation, then each release (above), in that order.
+- [ ] **The Aztek live run**: start research for Aztek from the dashboard with the intake the owner has given, watch the progress screen, and review the draft profile (spec test 54 is the end of milestone 11; this is research only).

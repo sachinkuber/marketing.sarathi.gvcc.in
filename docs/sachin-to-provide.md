@@ -53,10 +53,10 @@ Without these, the product can be built but "does it work?" cannot be measured.
 
 | ID | What I need | Exactly what to provide | Why I need it | Status |
 |---|---|---|---|---|
-| C1 | Aztek's social profiles | The links to Aztek's Instagram, Facebook, LinkedIn and YouTube accounts | The research agent studies them before building the questionnaire | Open |
-| C2 | Brand material | Brochures, product sheets, price lists, presentations, brand guidelines (logo files, colours, fonts) | Research starts from what is public; these fill the gaps and set the visual system | Open |
+| C1 | Aztek's social profiles | The links to Aztek's Instagram, Facebook, LinkedIn and YouTube accounts | The research agent studies them before building the questionnaire | Partly given 2026-11-20: Instagram https://www.instagram.com/aztekppf/ ; Facebook, LinkedIn, YouTube still open |
+| C2 | Brand material | Brochures, product sheets, price lists, presentations, brand guidelines (logo files, colours, fonts) | Research starts from what is public; these fill the gaps and set the visual system | Brochure given 2026-11-20 (49 MB): accepted, and split into AI-ready parts at upload. Other material (price lists, brand guidelines, logo files) still welcome |
 | C3 | Search Console and analytics access | Add the product's service account (I will give the address) to Aztek's Search Console property and the GA4 property | To read real search queries, pages and traffic for research and later reporting | Open |
-| C4 | Competitor list | Confirm or correct: UltrashieldX, Cosmo PPF/Sunshield, Intakt PPF, XPEL, 3M India | Research compares Aztek against named competitors; these five come from the earlier audit work | Open |
+| C4 | Competitor list | Confirm or correct: UltrashieldX, Cosmo PPF/Sunshield, Intakt PPF, XPEL, 3M India | Research compares Aztek against named competitors; these five come from the earlier audit work | Open: to confirm. Until then competitors are only suggestions, never verified facts |
 | C5 | Questionnaire answers | About 20 to 30 answers on the dashboard, after research has run | The agent asks only what research could not settle. The answers become the brand profile. | Not yet due |
 | C6 | Sign-off on the verified-facts list | Confirm each fact, with its source: numbers, certifications, warranty terms, countries, partner counts | No content may state a fact that is not on this list. Known so far: "100+ certified studios", "50+ Partners", "5 Countries". | Not yet due |
 | C7 | Things Aztek must never say | Forbidden topics and claims, competitors not to be named, tone limits | Becomes the brand safety rulebook that every item is checked against | Open |

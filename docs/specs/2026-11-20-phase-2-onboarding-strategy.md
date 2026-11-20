@@ -28,6 +28,7 @@ Aztek goes through onboarding for real and ends with three approved things: a **
 | D5 | Build approach: each onboarding step is an agent job on the Phase 1 work engine (section 4). | 2026-11-20 |
 | D6 | **Suggest, then decide.** At every step the product proposes and the owner decides. The owner should rarely type from scratch (section 5). | 2026-11-20 |
 | D7 | The owner's own statement is a valid source for a verified fact: source kind `owner_statement`, recording who stated it, when, and the exact wording. Reviews, competitor pages and third-party listings are still never enough on their own. | 2026-11-20 |
+| D8 | Document limits, amending the 10 MB per document first written in sections 7 and 13: a PDF up to 100 MB, split at upload into AI-ready parts of at most 8 MB and 100 pages (the original is kept); an image up to 5 MB (the provider's own limit); 20 files and 500 MB per brand. Decided after Aztek's brochure came to 49 MB. | 2026-11-20 |
 
 ## 3. Scope
 
@@ -122,7 +123,7 @@ New tables in `app`, brand-scoped with row-level security exactly as in Phase 1 
 | Table | Key columns | Notes |
 |---|---|---|
 | `onboarding` | brand, step, started at, completed at | One per brand |
-| `brand_document` | brand, file name, media type, bytes, size, sha256, uploaded by, uploaded at | Owner uploads; PDF, PNG, JPEG, WebP; at most 10 MB each, 20 per brand. Stored in Postgres (`bytea`) so backups and restore cover them; owner-only in Phase 2 |
+| `brand_document` | brand, file name, media type, bytes, size, sha256, uploaded by, uploaded at | Owner uploads; PDF, PNG, JPEG, WebP; a PDF up to 100 MB (split into AI-ready parts at upload), an image up to 5 MB, 20 files and 500 MB per brand (D8). Stored in Postgres (`bytea`) so backups and restore cover them; owner-only in Phase 2 |
 | `research_source` | brand, run, kind (site, social, search, document, competitor, owner_statement), address or document, read at, result, extract | Every source an agent read, and every owner statement (D7): stated by, stated at, exact wording as the extract |
 | `suggestion` | brand, step (profile, question, fact, rule, choice), key, proposed (jsonb), why, sources (ids), confidence, options (jsonb), decision, decided value, decided by, decided at, superseded by | The shared shape of section 5. A re-run inserts new rows and marks the old undecided ones superseded |
 | `profile_item` | brand, key, value, status (found, assumed, unknown), source ids, from suggestion | The accepted brand profile |
@@ -221,7 +222,7 @@ The layout follows the Phase 1 dashboard (frame, tokens, phone checks). Screens 
 
 ## 13. API
 
-New routes under `/api/v1/brands/:brandId/onboarding/...` for each step's reads and decisions, document upload, starting a step, and answering agent questions. Every route declares its permission in the route table (Phase 1 test 13). Phase 2 adds the permission `onboard_brand`, held only by the platform owner. Uploads are refused above 10 MB, outside the allowed media types, or past 20 documents.
+New routes under `/api/v1/brands/:brandId/onboarding/...` for each step's reads and decisions, document upload, starting a step, and answering agent questions. Every route declares its permission in the route table (Phase 1 test 13). Phase 2 adds the permission `onboard_brand`, held only by the platform owner. Uploads are refused above 100 MB for a PDF or 5 MB for an image, outside the allowed media types, past 20 documents, or past 500 MB for the brand (D8).
 
 ## 14. Costs
 

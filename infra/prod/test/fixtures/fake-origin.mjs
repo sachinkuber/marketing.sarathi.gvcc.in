@@ -16,6 +16,7 @@ import { createServer } from 'node:http'
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const CHECKPOINT = new RegExp(`^/api/v1/worker/jobs/${UUID}/model-calls/${UUID}/checkpoint$`)
+const DOCUMENTS = new RegExp(`^/api/v1/brands/${UUID}/onboarding/documents$`)
 const REMOVE_MEMBER = new RegExp(`^/api/v1/brands/${UUID}/users/${UUID}$`)
 const SECURITY_HEADERS = {
   'content-security-policy': "default-src 'self'",
@@ -146,6 +147,13 @@ export async function startFakeOrigin(options = {}) {
       }
       if (req.headers.authorization !== `Worker ${workerSecret}`) return error(res, 401, 'unauthorized')
       return json(res, 200, { ok: true })
+    }
+    if (req.method === 'POST' && DOCUMENTS.test(path)) {
+      if (faults.documentsBodyLimit !== undefined && body.length > faults.documentsBodyLimit) {
+        res.writeHead(413, { 'content-type': 'text/plain' })
+        return res.end('Request Entity Too Large')
+      }
+      return error(res, 401, 'not_signed_in')
     }
     return error(res, 404, 'not_found')
   }

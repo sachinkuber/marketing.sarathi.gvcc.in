@@ -388,6 +388,23 @@ async function checkpointBody() {
   return `${body.length} bytes reached the core (401 unauthorized)`
 }
 
+// 2 MiB (2097152 bytes) to the document upload route, without a session: the core refuses it as not signed in
+// (401 or 403); a proxy still holding the 1 MiB site limit would answer 413 first. Only that route is raised
+// (to 101 MiB), so a 2 MiB body to any other path is still refused: not checked here, the proxy test does.
+async function documentBody() {
+  const size = 2 * 1024 * 1024
+  const r = await request(`/api/v1/brands/${uuid()}/onboarding/documents`, {
+    method: 'POST',
+    headers: { origin: ORIGIN, 'content-type': 'application/pdf', 'x-file-name': 'smoke-check.pdf' },
+    body: Buffer.alloc(size, 0x61),
+  })
+  if (r.status === 413) throw new Error('a 2 MiB document upload was refused by the proxy (413)')
+  if (r.status !== 401 && r.status !== 403) {
+    throw new Error(`a 2 MiB document upload answered ${described(r)}, not the core's 401 or 403`)
+  }
+  return `${size} bytes reached the core (${described(r)})`
+}
+
 const CHECKS = [
   ['ready', () => health('/api/health/ready')],
   ['worker', () => health('/api/health/worker')],
@@ -398,6 +415,7 @@ const CHECKS = [
   ['forged-sign-in', forgedSignIn],
   ['delete-body', deleteBody],
   ['checkpoint-body', checkpointBody],
+  ['document-body', documentBody],
 ]
 
 const counts = { PASS: 0, FAIL: 0, SKIP: 0 }
