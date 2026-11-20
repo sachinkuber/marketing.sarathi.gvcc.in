@@ -2,11 +2,12 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import type { z } from 'zod'
-import { api, type ApiError } from '../api/client'
+import { ApiError, api } from '../api/client'
 import { onboardingReply, type researchSource } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
 import {
   GROUP_NAME,
+  OWNER_ONLY,
   RESULT_WORD,
   STATE_WORD,
   costWords,
@@ -90,6 +91,8 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
   const [data, setData] = useState<Onboarding | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [stale, setStale] = useState(false)
+  // A refusal that will not change on its own (signed out, not the owner, no such brand): polling stops.
+  const [stopped, setStopped] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
 
   // Reads now, then again every POLL_MS while anything is open. The timer is cleared when the screen goes, so
@@ -108,6 +111,16 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
         again = isOpen(fresh.research)
       } catch (e) {
         if (!live) return
+        if (e instanceof ApiError && [401, 403, 404].includes(e.status)) {
+          setStopped(
+            e.status === 401
+              ? 'You are signed out. Sign in again to see the progress.'
+              : e.status === 403
+                ? OWNER_ONLY
+                : 'This brand was not found. Open All brands and choose it again.',
+          )
+          return
+        }
         setStale(true)
         setError(e instanceof Error ? e : new Error('failed'))
       }
@@ -131,7 +144,11 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
           <p>What each part of the research is reading, and what it costs.</p>
         </div>
       </div>
-      {!data ? (
+      {stopped ? (
+        <div className="callout warn" role="alert">
+          {stopped}
+        </div>
+      ) : !data ? (
         error ? (
           <LoadError
             what="the research progress"

@@ -4,7 +4,8 @@ import { api } from '../api/client'
 import { onboardingReply } from '../api/schemas'
 import { useLoad } from '../api/use-load'
 import { LoadError } from '../frame/LoadError'
-import { costWords } from './onboarding-words'
+import { OwnerOnly } from './OwnerOnly'
+import { costWords, isForbidden } from './onboarding-words'
 
 const STEP_WORD: Record<string, string> = {
   intake: 'Intake: the website, social links, competitors and documents',
@@ -27,6 +28,7 @@ function nextPath(brandId: string, step: string): string {
 export function OnboardingScreen({ brandId }: { brandId: string }) {
   const load = useLoad(() => api(onboardingReply, 'GET', `/brands/${brandId}/onboarding`), brandId)
   const data = load.data
+  if (isForbidden(load.error)) return <OwnerOnly />
   return (
     <main id="content" className="page">
       <div className="page-head">

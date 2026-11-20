@@ -13,7 +13,8 @@ import {
 } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
 import { useLoad } from '../api/use-load'
-import { DOCUMENT_LIMITS, failureWords, isOpen, megabytes } from './onboarding-words'
+import { OwnerOnly } from './OwnerOnly'
+import { DOCUMENT_LIMITS, failureWords, isForbidden, isOpen, megabytes } from './onboarding-words'
 
 type Doc = z.infer<typeof documentSummary>
 
@@ -152,7 +153,8 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
 
   const [docs, setDocs] = useState<Doc[]>([])
   const [uploading, setUploading] = useState<{ name: string; fraction: number } | null>(null)
-  const [docError, setDocError] = useState<string | null>(null)
+  const [docErrors, setDocErrors] = useState<string[]>([])
+  const addDocError = (message: string) => setDocErrors((now) => [...now, message])
   const [removing, setRemoving] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -169,7 +171,7 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
   }, [docsLoad.state, docsLoad.data])
 
   const dirty = JSON.stringify(payloadOf(form)) !== JSON.stringify(saved)
-  const canStart = saved !== null && saved.website !== '' && !dirty && !running && !busy
+  const canStart = saved !== null && saved.website !== '' && !dirty && !running && !busy && uploading === null
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -208,17 +210,21 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
   }
 
   const sendFiles = async (files: File[]) => {
-    setDocError(null)
+    setDocErrors([])
     for (const file of files) {
       // Checked here so nothing is sent for a file the core would refuse; the core's check is the authority.
-      if (file.name.trim().length > MAX_NAME || file.name.trim().length === 0) {
-        setDocError(
+      if (file.name.trim().length === 0) {
+        addDocError('This file has no name. Rename it, then upload it again.')
+        continue
+      }
+      if (file.name.trim().length > MAX_NAME) {
+        addDocError(
           `${file.name.slice(0, 40)}…: Rename the file to 200 characters or fewer, then upload it again.`,
         )
         continue
       }
       if (!TYPES.includes(file.type)) {
-        setDocError(`${file.name}: Upload a PDF, PNG, JPEG or WebP file.`)
+        addDocError(`${file.name}: Upload a PDF, PNG, JPEG or WebP file.`)
         continue
       }
       setUploading({ name: file.name, fraction: 0 })
@@ -231,7 +237,7 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
         )
         setDocs((now) => [made, ...now.filter((d) => d.id !== made.id)])
       } catch (error) {
-        setDocError(`${file.name}: ${failureWords(error, 'The file could not be uploaded. Try again.')}`)
+        addDocError(`${file.name}: ${failureWords(error, 'The file could not be uploaded. Try again.')}`)
       }
     }
     setUploading(null)
@@ -240,12 +246,12 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
 
   const remove = async (doc: Doc) => {
     setRemoving(doc.id)
-    setDocError(null)
+    setDocErrors([])
     try {
       await api(deletedReply, 'DELETE', `/brands/${brandId}/onboarding/documents/${doc.id}`)
       setDocs((now) => now.filter((d) => d.id !== doc.id))
     } catch (error) {
-      setDocError(`${doc.fileName}: ${failureWords(error, 'The file could not be removed. Try again.')}`)
+      addDocError(`${doc.fileName}: ${failureWords(error, 'The file could not be removed. Try again.')}`)
     } finally {
       setRemoving(null)
     }
@@ -258,6 +264,8 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
       ...f,
       competitors: f.competitors.map((c, at) => (at === i ? { ...c, ...patch } : c)),
     }))
+
+  if (isForbidden(overview.error) || isForbidden(docsLoad.error)) return <OwnerOnly />
 
   return (
     <main id="content" className="page narrow">
@@ -390,10 +398,12 @@ export function OnboardingIntakeScreen({ brandId }: { brandId: string }) {
               <progress className="onb-bar" max={1} value={uploading.fraction} />
             </div>
           ) : null}
-          {docError ? (
-            <p className="callout danger" role="alert">
-              {docError}
-            </p>
+          {docErrors.length > 0 ? (
+            <ul className="callout danger onb-errors" role="alert">
+              {docErrors.map((message, i) => (
+                <li key={i}>{message}</li>
+              ))}
+            </ul>
           ) : null}
           {docsLoad.state === 'error' ? (
             <LoadError what="the documents" error={docsLoad.error} onRetry={docsLoad.retry} />

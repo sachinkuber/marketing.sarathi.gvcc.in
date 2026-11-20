@@ -1652,3 +1652,10 @@ a.inherit {
 .onb-sources {
   border-top: 1px solid var(--line);
 }
+
+.onb-errors {
+  list-style: none;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}

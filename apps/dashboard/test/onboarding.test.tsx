@@ -7,6 +7,7 @@ import { OnboardingScreen } from '../src/screens/Onboarding'
 import { ResearchProgressScreen } from '../src/screens/ResearchProgress'
 import { SideMenu, menuFor } from '../src/frame/SideMenu'
 import { Dom, brandId, sessionAs } from './dom-support'
+import { POLL_MS } from '../src/screens/ResearchProgress'
 
 const push = vi.fn()
 vi.mock('next/navigation', () => ({
@@ -30,9 +31,14 @@ const intake = { website: 'https://aztek.example', socials: {}, competitors: [] 
 interface Answer {
   status: number
   body: unknown
+  // Sent as the body text as it is (a proxy's HTML page), instead of `body` as JSON.
+  raw?: string
+  // The request fails before any answer, as a cut connection does.
+  fail?: boolean
 }
+const FRESH: Answer = { status: 201, body: {} }
 let xhrs: FakeXhr[] = []
-let xhrAnswer: Answer = { status: 201, body: {} }
+let xhrAnswer: Answer = FRESH
 class FakeXhr {
   method = ''
   url = ''
@@ -60,16 +66,20 @@ class FakeXhr {
     this.sent = body
     setTimeout(() => {
       this.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 })
+      if (xhrAnswer.fail) {
+        this.onerror?.()
+        return
+      }
       this.status = xhrAnswer.status
-      this.responseText = JSON.stringify(xhrAnswer.body)
+      this.responseText = xhrAnswer.raw ?? JSON.stringify(xhrAnswer.body)
       this.onload?.()
     }, 0)
   }
 }
 
-function pick(dom: Dom, file: File) {
+function pick(dom: Dom, ...files: File[]) {
   const input = dom.field('in-file') as HTMLInputElement
-  Object.defineProperty(input, 'files', { value: [file], configurable: true })
+  Object.defineProperty(input, 'files', { value: files, configurable: true })
   act(() => {
     input.dispatchEvent(new Event('change', { bubbles: true }))
   })
@@ -81,6 +91,7 @@ describe('onboarding screens, driven', () => {
     dom.start()
     push.mockClear()
     xhrs = []
+    xhrAnswer = FRESH
     vi.stubGlobal('XMLHttpRequest', FakeXhr)
   })
   afterEach(() => dom.stop())
@@ -314,6 +325,158 @@ describe('onboarding screens, driven', () => {
     expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/research"]`)?.textContent).toBe(
       'Continue',
     )
+  })
+
+  const loadIntake = async (intakeBody: unknown = null) => {
+    dom.replies.push(
+      { status: 200, body: overview({ intake: intakeBody }) },
+      { status: 200, body: { documents: [] } },
+    )
+    await dom.mount(<OnboardingIntakeScreen brandId={brandId} />, sessionAs('owner'))
+  }
+  const pdf = (name: string) => new File(['x'], name, { type: 'application/pdf' })
+
+  it('a proxy 413 with an HTML page still says how to fix it', async () => {
+    await loadIntake()
+    xhrAnswer = { status: 413, body: null, raw: '<html><body>413 Request Entity Too Large</body></html>' }
+    pick(dom, pdf('big.pdf'))
+    await dom.settle()
+    expect(dom.text()).toContain('over the size limit: PDF up to 100 MB, images up to 5 MB')
+    expect(dom.text()).toContain('then upload it again')
+  })
+
+  it('a cut connection and a 502 say the upload was cut off', async () => {
+    await loadIntake()
+    xhrAnswer = { status: 0, body: null, fail: true }
+    pick(dom, pdf('a.pdf'))
+    await dom.settle()
+    expect(dom.text()).toContain('Check your connection')
+    xhrAnswer = { status: 502, body: null, raw: '<html>Bad gateway</html>' }
+    pick(dom, pdf('b.pdf'))
+    await dom.settle()
+    expect(dom.text()).toContain(
+      'The upload took too long or was cut off. Check your connection, then upload again.',
+    )
+  })
+
+  it('several refused files each show their own error, and an empty name has its own copy', async () => {
+    await loadIntake()
+    pick(dom, pdf(`${'a'.repeat(201)}.pdf`), new File(['x'], 'notes.txt', { type: 'text/plain' }), pdf(' '))
+    await dom.settle()
+    const items = [...dom.host.querySelectorAll('.onb-errors li')].map((li) => li.textContent)
+    expect(items).toHaveLength(3)
+    expect(items[0]).toContain('Rename the file to 200 characters or fewer')
+    expect(items[1]).toContain('notes.txt: Upload a PDF, PNG, JPEG or WebP file.')
+    expect(items[2]).toBe('This file has no name. Rename it, then upload it again.')
+    expect(xhrs).toHaveLength(0)
+  })
+
+  it('Start research is disabled while an upload is in progress', async () => {
+    await loadIntake(intake)
+    expect(dom.button('Start research').disabled).toBe(false)
+    xhrAnswer = {
+      status: 201,
+      body: {
+        id: 'd1',
+        fileName: 'a.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: 1,
+        sha256: 'x',
+        parts: 0,
+      },
+    }
+    pick(dom, pdf('a.pdf'))
+    expect(dom.button('Start research').disabled).toBe(true)
+    await dom.settle()
+    expect(dom.button('Start research').disabled).toBe(false)
+  })
+
+  it('a refusal to the owner-only screens shows one sentence and nothing to use', async () => {
+    const refused = { status: 403, body: { error: { code: 'forbidden', message: 'No.' } } }
+    dom.replies.push(refused, refused)
+    await dom.mount(<OnboardingIntakeScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.text()).toBe('Only the platform owner can use onboarding.')
+    expect(dom.host.querySelector('form, #in-file, button')).toBeNull()
+  })
+
+  it('the overview shows the same sentence on a 403', async () => {
+    dom.replies.push({ status: 403, body: { error: { code: 'forbidden', message: 'No.' } } })
+    await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.text()).toBe('Only the platform owner can use onboarding.')
+  })
+
+  describe('polling', () => {
+    const flush = async () => {
+      for (let i = 0; i < 10; i += 1) await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
+    }
+    const tick = async (ms: number) => {
+      await act(async () => void (await vi.advanceTimersByTimeAsync(ms)))
+      await flush()
+    }
+    const groupOf = (state: string) => ({
+      group: 'site',
+      state,
+      searches: 0,
+      fetches: 0,
+      cost: { usdMicros: '0', inrMicros: '0' },
+      sources: [],
+    })
+    const reply = (state: string, merge: string) => ({
+      status: 200,
+      body: overview({
+        step: 'research',
+        intake,
+        research: { runId: 'r1', state: 'running', groups: [groupOf(state)], merge },
+      }),
+    })
+    const gets = () => dom.calls.filter((c) => c.method === 'GET').length
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      dom.settle = flush
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it('asks again every 5 seconds while anything is open, and stops once all is settled', async () => {
+      expect(POLL_MS).toBe(5000)
+      dom.replies.push(reply('running', 'waiting'), reply('done', 'done'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(gets()).toBe(1)
+      await tick(4999)
+      expect(gets()).toBe(1)
+      await tick(1)
+      expect(gets()).toBe(2)
+      await tick(20_000)
+      expect(gets()).toBe(2)
+    })
+
+    it('stops when the screen is left', async () => {
+      dom.replies.push(reply('running', 'waiting'), reply('running', 'waiting'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      dom.stop()
+      await tick(20_000)
+      expect(gets()).toBe(1)
+    })
+
+    it('stops on a 403 or a 404 and says so', async () => {
+      for (const [status, words] of [
+        [403, 'Only the platform owner can use onboarding.'],
+        [404, 'This brand was not found.'],
+      ] as const) {
+        dom.stop()
+        dom.start()
+        dom.replies.push(reply('running', 'waiting'), {
+          status,
+          body: { error: { code: 'x', message: 'x' } },
+        })
+        await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+        await tick(5000)
+        expect(dom.text()).toContain(words)
+        const before = gets()
+        await tick(20_000)
+        expect(gets()).toBe(before)
+      }
+    })
   })
 
   it('the menu shows Onboarding to the platform owner only', () => {

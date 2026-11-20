@@ -10,13 +10,19 @@ import {
   contentItemReply,
   contentListReply,
   deadJobsReply,
+  deletedReply,
+  documentSummary,
+  documentsReply,
   homeReply,
+  intakeSavedReply,
   inviteCreatedReply,
   killSwitchReply,
   modelCallReviewReply,
   noContent,
+  onboardingReply,
   overdueAllReply,
   overdueReply,
+  researchStartedReply,
   roleChangedReply,
   runDetailReply,
   runStartedReply,
@@ -40,7 +46,10 @@ import {
   PASSWORD,
   type Cast,
 } from './reads-support.ts'
-import { addUser, enrolledClient, totp, type Stack, type TestClient } from './support.ts'
+import { fileURLToPath } from 'node:url'
+import { agentFilesHash } from '@mkt/db'
+import { pdfOf } from './pdf-fixtures.ts'
+import { addBrand, addUser, enrolledClient, totp, type Stack, type TestClient } from './support.ts'
 
 // The dashboard parses every reply with the schema of the same name; the core's real replies must satisfy them.
 let stack: Stack
@@ -262,6 +271,119 @@ describe('the dashboard schemas accept the core’s replies', () => {
         expect(shadow.status).toBe(200)
         expect(shadowModeReply.parse(shadow.json)).toEqual({ shadowMode: value })
       }
+    })
+  })
+
+  describe('onboarding (M9): the overview in each state, the intake, research start and the documents', () => {
+    let owner: TestClient
+    let brand: string
+    let ownerId: string
+    const q = (sql: string, params: unknown[] = []) => stack.db.admin.query(sql, params)
+    const base = () => api(brand, '/onboarding')
+    const overview = async () => {
+      const reply = await owner.request('GET', base())
+      expect(reply.status).toBe(200)
+      return onboardingReply.parse(reply.json)
+    }
+
+    beforeAll(async () => {
+      brand = await addBrand(stack, 'contract-onboarding')
+      ownerId = await addUser(stack, {
+        email: 'contract-onb@example.test',
+        password: PASSWORD,
+        platformOwner: true,
+      })
+      owner = (await enrolledClient(stack, 'contract-onb@example.test', PASSWORD)).client
+      for (const agent of ['research', 'research_merge']) {
+        await q(
+          `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+           values ($1, 1, 'claude-sonnet-5-5', 'low', $2, true)`,
+          [agent, agentFilesHash(fileURLToPath(new URL(`../../../agents/${agent}`, import.meta.url)))],
+        )
+      }
+    }, 120_000)
+
+    it('the overview, intake and research start, with no intake, a saved intake, running and done', async () => {
+      expect(await overview()).toMatchObject({ step: 'intake', intake: null, research: null })
+
+      const intake = {
+        website: 'https://aztek.example/',
+        socials: { instagram: 'https://instagram.com/aztek' },
+        competitors: [{ name: 'Rival', website: 'https://rival.example/' }, { name: 'Other' }],
+      }
+      const saved = await owner.request('PUT', `${base()}/intake`, { body: intake })
+      expect(saved.status).toBe(200)
+      intakeSavedReply.parse(saved.json)
+      expect((await overview()).intake).toEqual(intake)
+
+      const started = await owner.request('POST', `${base()}/research`, { body: {} })
+      expect(started.status).toBe(200)
+      const { runId } = researchStartedReply.parse(started.json)
+      const running = await overview()
+      expect(running.research?.runId).toBe(runId)
+      expect(running.research?.groups.length).toBeGreaterThan(0)
+
+      // Every group finished, the first with sources: one web page and one document.
+      const doc = await q(
+        `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+         values ($1, 'brochure.pdf', 'application/pdf', '\\x255044462d', 5, 'h', $2) returning id`,
+        [brand, ownerId],
+      )
+      const insert = async (kind: string, address: string | null, document: string | null) =>
+        (
+          await q(
+            `insert into app.research_source (brand_id, run_id, kind, address, document_id, result, extract)
+             values ($1, $2, $3, $4, $5, 'read', 'About us') returning id`,
+            [brand, runId, kind, address, document],
+          )
+        ).rows[0].id as string
+      const s1 = await insert('site', 'https://aztek.example/about', null)
+      const s2 = await insert('document', 'brochure.pdf, pages 1–100', doc.rows[0].id as string)
+      const jobs = (
+        await q(
+          `select job_id, input->>'group' as grp from app.job_input where run_id = $1 and expected_result_type = 'research_group.v1'`,
+          [runId],
+        )
+      ).rows
+      for (const job of jobs) {
+        const sources =
+          job.grp === 'site'
+            ? [
+                { ref: 's1', id: s1 },
+                { ref: 's2', id: s2 },
+              ]
+            : []
+        await q(`update app.job_input set finished_at = now(), outcome = $2::jsonb where job_id = $1`, [
+          job.job_id,
+          JSON.stringify({ group: job.grp, sources, findings: [] }),
+        ])
+      }
+      await q(
+        `update app.job_input set finished_at = now(), outcome = 'null'::jsonb
+          where run_id = $1 and expected_result_type = 'research.v1'`,
+        [runId],
+      )
+      const done = await overview()
+      expect(done.research?.groups.every((g) => g.state === 'done')).toBe(true)
+      expect(done.research?.groups.find((g) => g.group === 'site')?.sources).toHaveLength(2)
+    })
+
+    it('documents: a split PDF in the upload reply and the list, then a delete', async () => {
+      const bytes = await pdfOf([4_000_000, 4_000_000, 4_000_000])
+      const made = await owner.request('POST', `${base()}/documents`, {
+        raw: bytes,
+        headers: { 'content-type': 'application/pdf', 'x-file-name': encodeURIComponent('catalogue.pdf') },
+      })
+      expect(made.status).toBe(201)
+      const summary = documentSummary.parse(made.json)
+      expect(summary.parts).toBeGreaterThan(0)
+      const listed = await owner.request('GET', `${base()}/documents`)
+      expect(listed.status).toBe(200)
+      const docs = documentsReply.parse(listed.json).documents
+      expect(docs.find((d) => d.id === summary.id)?.parts).toBe(summary.parts)
+      const gone = await owner.request('DELETE', `${base()}/documents/${summary.id}`)
+      expect(gone.status).toBe(204)
+      expect(deletedReply.parse(gone.text === '' ? null : JSON.parse(gone.text))).toBeNull()
     })
   })
 

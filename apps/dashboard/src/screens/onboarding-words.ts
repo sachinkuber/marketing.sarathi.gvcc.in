@@ -74,10 +74,20 @@ const FALLBACK: Record<string, string> = {
 export function failureWords(error: unknown, otherwise: string): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return 'The platform could not be reached. Check your connection and try again.'
-    if (error.status === 403) return 'Only the platform owner can use onboarding.'
+    if (error.status === 403) return OWNER_ONLY
     // The core's own message when it sent one; the client's stand-in text ('The request failed.') is not one.
     if (error.code !== 'error' && error.code !== 'bad_reply' && error.message) return error.message
-    return FALLBACK[error.code] ?? otherwise
+    if (FALLBACK[error.code]) return FALLBACK[error.code]!
+    // No usable JSON came back: a proxy or the network answered instead of the core.
+    if (error.status === 413)
+      return 'This file is over the size limit: PDF up to 100 MB, images up to 5 MB. Use a smaller file, then upload it again.'
+    if (error.status === 408 || error.status === 502 || error.status === 504)
+      return 'The upload took too long or was cut off. Check your connection, then upload again.'
+    if (error.status >= 500)
+      return 'The platform had a problem with this request. Wait a minute, then try again.'
+    if (error.status >= 400)
+      return 'The platform did not accept this request. Reload the page, then try again.'
+    return otherwise
   }
   return otherwise
 }
@@ -93,4 +103,10 @@ export function isOpen(research: { groups: { state: GroupState }[]; merge: Group
   if (!research) return false
   const open = (s: GroupState) => s === 'waiting' || s === 'running'
   return research.groups.some((g) => open(g.state)) || open(research.merge)
+}
+
+export const OWNER_ONLY = 'Only the platform owner can use onboarding.'
+
+export function isForbidden(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403
 }
