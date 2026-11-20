@@ -580,7 +580,7 @@ Built 2026-11-20 on branch `m9-research`. Plan: `docs/plans/2026-11-20-m9-resear
 | Package | State | Evidence |
 |---|---|---|
 | 22 Server-side web tools; searches and fetches counted and costed | Done | Worker tools, `pause_turn` continuation, replay-stable steps and the attempt time budget (87e92f1, e6f8c3c: `apps/worker/test/`); searches recorded and priced in USD and INR (efc8664: `apps/core` model-call tests) |
-| 23 Research agent and its jobs per source group; documents as input | Done | Agents `agents/research` and `agents/research_merge` with 14 recorded evaluation cases, 10 of them hostile (7386c93, 1d2f65c); group and merge handlers (fafbf61, f724fe3: `apps/worker/test/research-handler.test.ts`); intake and start (b81f4f0, 7d8a189); results to graded suggestions (120a396, eafd9c2: `apps/core/test/research-results.test.ts`, `research-e2e`) |
+| 23 Research agent and its jobs per source group; documents as input | Done | Agents `agents/research` and `agents/research_merge` with 14 recorded evaluation cases, 7 hostile (research 6, merge 1) and 7 plain (7386c93, 1d2f65c); group and merge handlers (fafbf61, f724fe3: `apps/worker/test/research-handler.test.ts`); intake and start (b81f4f0, 7d8a189); results to graded suggestions (120a396, eafd9c2: `apps/core/test/research-results.test.ts`, `research-e2e`) |
 | 29 Onboarding screens: overview, intake, progress, profile | Done | Overview, intake, per-group progress (searches, page reads, cost, sources) (f6a7979, fd99bde); draft profile with suggest-then-decide and the browser flow (ef861ca: `apps/dashboard` e2e) |
 | Document upload and large PDFs (owner decision 2026-11-20) | Done | Upload with limits by type and brand (c12774f, 0a4765a); split into parts with `pdf-lib` (0d06893, 688c295) |
 | Proxy upload path | Done | `infra/prod/proxy/marketing.caddy`: 101 MiB for the document upload path only; smoke check `document-body`; `infra/prod/test/proxy.test.mjs` runs it in the pinned Caddy |
@@ -593,7 +593,7 @@ Built 2026-11-20 on branch `m9-research`. Plan: `docs/plans/2026-11-20-m9-resear
 | 51 | Upload limits are enforced; documents are restored by the restore drill | Proven here | Size, type, count and per-brand total refused with a message that says how to fix it (`apps/core/test/documents.test.ts`); the restore check's fifth line proves the seeded PDF came back with its checksum (`apps/ops/test/restore-check.test.ts`) |
 | 53 | Onboarding screens work at 390 x 844 with touch | Proven here, for these screens | The browser flow and the phone check in `apps/dashboard` e2e; two real layout bugs found and fixed (owner top bar, list rows) |
 
-M8 carry-overs closed here: R9 and R10 (the intake and run linkage, the document and result checks), `research_source.result` written and graded, the upload route's size and count enforcement, the check semantics for `flags_source` and `no_third_party_fact` (now pinned, with a static integrity test over the cases), `recordedReplies` (replaced by recorded pages in the cases), and research serialised per brand (no overlap).
+M8 carry-overs closed here: the live files-hash check (`job_input.agent` and `files_hash`, so the worker runs only the released agent files), `profile_item.superseded_by` (accepting or editing a profile suggestion supersedes the old item), `recordedReplies` (replaced by recorded pages in the cases), `research_source.result` written and graded, the upload route's size and count enforcement, the check semantics for `flags_source` and `no_third_party_fact` (now pinned, with a static integrity test over the cases), and research serialised per brand (no overlap).
 
 Full run on the development server, 2026-11-20, from the tree of this milestone's last commit:
 
@@ -611,7 +611,7 @@ Full run on the development server, 2026-11-20, from the tree of this milestone'
   - R24, R29: research group requests send no output schema; the JSON is taken from the final text and validated, with one repair request per invalid reply in the same attempt; the merge keeps its schema.
   - R26, R27, R27a: document batches are at most 24 MiB of base64 and 100 pages; batch results are joined by key and normalised proposal, capped at 40 findings and 60 sources, the rest moving to `unsettled`.
   - R28, R38: the overview reads each group's sources from its job outcome joined to `research_source`; the research block also returns the merge's `gaps`.
-  - R31: a new research run cannot start while an earlier run's groups still run.
+  - Research start guard (commit 7d8a189, no ruling number): a new research run cannot start while an earlier run's groups still run.
   - R36: a kill switch on `research` holds the merge as well; it is the owner's single stop control.
 - Accepted risks: R17 (two concurrent 100 MB uploads) and R19 (a decompression-bomb PDF can restart the core); both in `docs/operations.md`, "Documents". Revisit before uploads open to customers.
 - Not proven on a live model: the research prompts and the 14 evaluation cases have not run against the provider (no key on the development server); the owner's evaluation gate is a production step. Also unproven: whether the API accepts a continuation with a spent web tool removed (R13) and web tools with an output schema (R24).

@@ -403,7 +403,7 @@ The last line of the restore is `"event":"restored"`. Then continue with step 4 
 
 ### Restore drill
 
-Acceptance test 40: a backup restores into a clean database where a user signs in with the second factor, a job that was waiting resumes, the audit chains verify and isolation tests 1 to 6 pass. `apps/ops/src/restore-check.ts` checks all of them on a restored copy (five lines below: the four things named, with the isolation tests and the seeded document as separate lines) and prints one line per check, `PASS` or `FAIL` (with the route pattern, table, status or error name that failed, never a secret, a code, an address or a row), and exits 1 if any failed:
+Acceptance test 40: a backup restores into a clean database where a user signs in with the second factor, a job that was waiting resumes, the audit chains verify and isolation tests 1 to 6 pass. `apps/ops/src/restore-check.ts` checks all of them on a restored copy (five lines, listed below: sign-in, a waiting job finishing, audit chains, the seeded brand document, and isolation tests 1 to 6) and prints one line per check, `PASS` or `FAIL` (with the route pattern, table, status or error name that failed, never a secret, a code, an address or a row), and exits 1 if any failed:
 
 | Line | What it does |
 |---|---|
@@ -582,6 +582,7 @@ Uploads go to `POST /api/v1/brands/<id>/onboarding/documents`, platform owner on
 - **Accepted risks, both recorded and to be revisited before uploads open to customers:**
   - R17: two concurrent 100 MB uploads can exhaust the core's memory. Only the platform owner uploads, and only the split itself is serialised.
   - R19: a crafted decompression-bomb PDF can make the library use unbounded memory while loading, and restart the core. Nothing is stored before the split succeeds. The fix is to split in a child process with memory and time caps.
+- **Cloudflare's own limit:** Cloudflare caps request bodies at 100 MB on the Free and Pro plans, so a PDF between 100,000,000 and 104,857,600 bytes may be refused at Cloudflare with its own 413; the dashboard shows the size-limit message for that. The app limit stays at 100 MiB, and the 49 MB Aztek brochure is unaffected.
 - **The restore drill** now includes a document: the seed stores a small PDF in the drill brand and the restore check's fifth line proves it came back with the same checksum (see "Restore drill").
 
 ## Jobs
@@ -589,7 +590,7 @@ Uploads go to `POST /api/v1/brands/<id>/onboarding/documents`, platform owner on
 - **Requeue keeps the job's agent files** (R7). A job records the hash of the agent files it was created with, and a requeue keeps it, because a run is pinned to one version. A job created before a release of new agent files can therefore only be cancelled, not run: its worker finds the live files differ and ends the attempt (`agent_files_mismatch`). Deploy agent-file changes, evaluate and release promptly, and start research afterwards.
 - **One kill switch for research** (R36). An agent kill switch matches the run's agent, so switching off `research` holds both the research group jobs and the merge job. That is the owner's single "stop research" control; switching it back on lets held jobs go.
 - **A dead group does not fail the run.** A research run is not failed by one dead group: the merge proceeds with the groups that finished and lists the dead ones as `deadGroups`. The run fails only when every group died, or when the merge died. The owner sees the gaps and decides what to do about them.
-- **Only one research run at a time per brand** (R31): a start while a run is open is refused (`research_running`), including while a dead group's siblings are still running.
+- **Only one research run at a time per brand** (commit 7d8a189): a start while a run is open is refused (`research_running`), including while a dead group's siblings are still running.
 
 ## Production steps at the end of milestone 9
 

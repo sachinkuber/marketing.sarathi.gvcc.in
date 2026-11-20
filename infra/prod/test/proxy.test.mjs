@@ -317,6 +317,7 @@ test('only the document upload path takes more than 1 MiB (up to 101 MiB)', asyn
   assert.equal((await post(upload, 2 * MiB, 'PUT')).status, 413)
   assert.equal((await post(`${upload}/extra`, 2 * MiB)).status, 413)
   assert.equal((await post(`/api/v1/brands/${id}/onboarding/other`, 2 * MiB)).status, 413)
+  assert.equal((await post('/api/v1/brands/not-a-uuid/onboarding/documents', 2 * MiB)).status, 413)
   assert.ok(!core.seen.slice(before).some((r) => r.bodyLength > 101 * MiB))
 })
 
