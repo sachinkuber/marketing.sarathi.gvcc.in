@@ -23,34 +23,39 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
     async send(request: ModelRequest): Promise<ModelReply> {
       let response
       try {
-        response = await client.messages.create(
-          {
-            model: request.model,
-            max_tokens: request.maxTokens,
-            ...(request.system ? { system: request.system } : {}),
-            ...(request.effort || request.outputSchema
-              ? {
-                  output_config: {
-                    ...(request.effort ? { effort: request.effort } : {}),
-                    ...(request.outputSchema
-                      ? { format: { type: 'json_schema' as const, schema: request.outputSchema } }
-                      : {}),
-                  },
-                }
-              : {}),
-            ...(request.tools && request.tools.length > 0
-              ? {
-                  tools: request.tools.map((tool) =>
-                    tool.type === 'web_search_20260209'
-                      ? { type: tool.type, name: 'web_search' as const, max_uses: tool.maxUses }
-                      : { type: tool.type, name: 'web_fetch' as const, max_uses: tool.maxUses },
-                  ),
-                }
-              : {}),
-            messages: request.messages as Anthropic.MessageParam[],
-          },
-          request.timeoutMs === undefined ? undefined : { timeout: request.timeoutMs },
-        )
+        const body = {
+          model: request.model,
+          max_tokens: request.maxTokens,
+          ...(request.system ? { system: request.system } : {}),
+          ...(request.effort || request.outputSchema
+            ? {
+                output_config: {
+                  ...(request.effort ? { effort: request.effort } : {}),
+                  ...(request.outputSchema
+                    ? { format: { type: 'json_schema' as const, schema: request.outputSchema } }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(request.tools && request.tools.length > 0
+            ? {
+                tools: request.tools.map((tool) =>
+                  tool.type === 'web_search_20260209'
+                    ? { type: tool.type, name: 'web_search' as const, max_uses: tool.maxUses }
+                    : { type: tool.type, name: 'web_fetch' as const, max_uses: tool.maxUses },
+                ),
+              }
+            : {}),
+          messages: request.messages as Anthropic.MessageParam[],
+        }
+        const requestOptions = request.timeoutMs === undefined ? undefined : { timeout: request.timeoutMs }
+        // A request with tools can run for many minutes: it is streamed and read as its final message, because
+        // a non-streaming call that long is cut off by the HTTP client's own header timeout. A request without
+        // tools (summary) is sent as before.
+        response =
+          request.tools && request.tools.length > 0
+            ? await client.messages.stream(body, requestOptions).finalMessage()
+            : await client.messages.create(body, requestOptions)
       } catch (error) {
         // An HTTP error status carries its code to the runner; a connection error or timeout passes as is.
         if (error instanceof Anthropic.APIError && typeof error.status === 'number') {

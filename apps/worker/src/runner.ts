@@ -30,7 +30,7 @@ export interface ModelStepResult {
 
 // Request timeout by job class: a request must end before the queue expires the job. Production jobs run
 // long research steps and expire later.
-const TIMEOUT_MS_BY_CLASS: Partial<Record<JobClass, number>> = {
+export const TIMEOUT_MS_BY_CLASS: Partial<Record<JobClass, number>> = {
   interactive: 240_000,
   production: 900_000,
 }
@@ -65,25 +65,41 @@ function serverCounts(usage: ModelUsage): { serverToolSearches: number; serverTo
 }
 
 function replayed(output: unknown): ModelStepResult {
-  // A pause_turn step is saved as a JSON string; any other step as an object.
+  // A tool step is saved as a JSON string; a step without tools as an object.
   const saved = (typeof output === 'string' ? JSON.parse(output) : output) as {
     text: string
     stopReason?: string | null
     content?: unknown[]
+    serverToolSearches?: number
+    serverToolFetches?: number
   }
   const content = saved.content ?? []
+  // The provider's own counts were saved with the step; counting blocks is only for a step saved without them
+  // (a search that errored is in the blocks but not billed, and the counts decide the next request's budget).
+  const counted = toolCounts(content)
   return {
     text: saved.text,
     ...(saved.stopReason === undefined ? {} : { stopReason: saved.stopReason }),
     content,
-    usage: { ...NO_USAGE, ...toolCounts(content) },
+    usage: {
+      ...NO_USAGE,
+      serverToolSearches: saved.serverToolSearches ?? counted.serverToolSearches,
+      serverToolFetches: saved.serverToolFetches ?? counted.serverToolFetches,
+    },
   }
+}
+
+// A step is a tool step when its request has tools or carries raw content blocks (a continuation).
+function isToolStep(request: ModelRequest): boolean {
+  return (request.tools?.length ?? 0) > 0 || request.messages.some((m) => typeof m.content !== 'string')
 }
 
 export interface JobContext {
   jobId: string
   jobClass: JobClass
   input: unknown
+  // When the attempt's token expires: nothing may be started that cannot end before it.
+  deadline: Date
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
   modelStep(step: string, request: ModelRequest): Promise<ModelStepResult>
   // Called between steps: throws JobStopped when the job was cancelled or held.
@@ -168,6 +184,7 @@ export async function runJob(
     jobId: job.id,
     jobClass: job.jobClass,
     input: started.input,
+    deadline: started.expiresAt === undefined ? new Date(8.64e15) : new Date(started.expiresAt * 1000),
     async checkStop(options) {
       const control = await deps.core.control(job.id, started.token)
       if (control.cancelRequested) throw new JobStopped('cancelled')
@@ -212,18 +229,28 @@ export async function runJob(
       }
       // pause_turn is a normal reply: the provider paused a long turn, and the handler sends it back.
       const paused = reply.stopReason === 'pause_turn'
-      const stopped = reply.stopReason !== 'end_turn' && !paused
+      const toolStep = isToolStep(request)
+      // A tools request must come back with its content blocks: without them a continuation would send an
+      // empty assistant turn. Treated as a stop (the call is costed) and then an error.
+      const missingContent = (request.tools?.length ?? 0) > 0 && reply.content === undefined
+      const stopped = (reply.stopReason !== 'end_turn' && !paused) || missingContent
       const content = reply.content ?? []
       // A reply that did not end its turn was still paid for: the call is completed and costed (no step is
       // saved, so a retry asks again), and only then does the job stop. It is not failCall: that means the
       // provider refused and did no work.
       let output: unknown = null
-      if (paused) output = JSON.stringify({ text: reply.text, content, stopReason: reply.stopReason })
-      else if (!stopped) {
-        output = { text: reply.text, stopReason: reply.stopReason }
-        // A step that used tools keeps its content too, so a replay can hand it back. A step without tools
-        // is saved exactly as before.
-        if (request.tools && request.tools.length > 0) (output as { content?: unknown[] }).content = content
+      if (!stopped) {
+        output = toolStep
+          ? // A tool step is saved as a JSON string (text may hold U+0000, which JSON escapes), with the
+            // provider's own counts, so a replay gives the same budget as the first attempt.
+            JSON.stringify({
+              text: reply.text,
+              content,
+              stopReason: reply.stopReason,
+              serverToolSearches: reply.usage.serverToolSearches ?? 0,
+              serverToolFetches: reply.usage.serverToolFetches ?? 0,
+            })
+          : { text: reply.text, stopReason: reply.stopReason }
       }
       // Ruling R1: the core's checkpoint schema is strict; only the four token counts go on the wire.
       const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = reply.usage
@@ -247,6 +274,8 @@ export async function runJob(
           delay *= 2
         }
       }
+      if (missingContent)
+        throw new Error('the model reply carried no content blocks for a request with tools')
       if (stopped) throw new ModelStopped(reply.stopReason)
       return {
         text: reply.text,

@@ -132,6 +132,8 @@ export interface StartedAttempt {
   // The agent files the job must run (null: none, or a job made before they were recorded).
   agent: string | null
   filesHash: string | null
+  // When the attempt token expires (epoch seconds): the worker plans its requests to end before it.
+  expiresAt: number
 }
 export interface FinishedJob {
   finished: true
@@ -256,6 +258,7 @@ export async function startAttempt(
       jobClass: row.class,
       agent: row.agent,
       filesHash: row.files_hash,
+      expiresAt: claims.expiresAt,
     }
   })
 }

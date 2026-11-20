@@ -14,11 +14,25 @@ export interface StandInOptions {
   replyFor?: (step: string) => string
 }
 
+// A stable string for a message: block arrays become the text of their text blocks, with markers for
+// documents and images, so logs and replies are the same for the same request.
+export function contentText(content: string | unknown[]): string {
+  if (typeof content === 'string') return content
+  return content
+    .map((b) => {
+      const block = b as { type?: string; text?: unknown }
+      if (block?.type === 'text' && typeof block.text === 'string') return block.text
+      if (block?.type === 'document') return '[document]'
+      if (block?.type === 'image') return '[image]'
+      return ''
+    })
+    .join('')
+}
+
 export function standInModel(options: StandInOptions): ModelClient {
   return {
     async send(request) {
-      // The stand-in is only sent plain-text requests.
-      const step = request.messages[request.messages.length - 1]!.content as string
+      const step = contentText(request.messages[request.messages.length - 1]!.content)
       await appendFile(options.logFile, `sent ${step}\n`)
       if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs))
       if (options.crashBeforeReplyOn === step) process.kill(process.pid, 'SIGKILL')

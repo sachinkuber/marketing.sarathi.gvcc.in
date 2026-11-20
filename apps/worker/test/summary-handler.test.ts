@@ -20,6 +20,7 @@ function stubContext(
     jobId: 'j',
     jobClass: 'interactive',
     input,
+    deadline: new Date(8.64e15),
     async modelStep(name, request) {
       requests.push({ step: name, request })
       return step

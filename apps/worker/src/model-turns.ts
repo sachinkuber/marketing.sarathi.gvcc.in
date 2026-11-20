@@ -1,7 +1,11 @@
 import { ModelStopped, type ModelRequest, type ModelTool } from './model.ts'
-import type { JobContext } from './runner.ts'
+import { TIMEOUT_MS_BY_CLASS, type JobContext } from './runner.ts'
 
 export const DEFAULT_MAX_CONTINUATIONS = 6
+// Time kept back at the end of the attempt for checkpointing and posting the result.
+export const DEADLINE_MARGIN_MS = 60_000
+// A request given less time than this is not started.
+export const MIN_REQUEST_MS = 30_000
 
 export interface TurnCaps {
   searches: number
@@ -17,6 +21,8 @@ export interface TurnsResult {
   searches: number
   fetches: number
 }
+
+const TOOL_NAME = { web_search_20260209: 'web_search', web_fetch_20260209: 'web_fetch' } as const
 
 // One logical model turn that may take several provider requests: the provider pauses a long turn with
 // `pause_turn` and expects the same request back with its assistant content appended (no "continue" message).
@@ -36,24 +42,44 @@ export async function modelTurns(
   let fetches = 0
 
   for (let turn = 0; ; turn += 1) {
-    const remaining = (tool: ModelTool): number =>
-      Math.min(
-        tool.maxUses,
-        tool.type === 'web_search_20260209' ? caps.searches - searches : caps.fetches - fetches,
-      )
-    const tools = (request.tools ?? [])
-      .map((tool) => ({ ...tool, maxUses: remaining(tool) }))
-      .filter((tool) => tool.maxUses > 0)
-    const next: ModelRequest = { ...request, messages }
+    // Each request ends before the attempt's token does (less the margin), or is not started.
+    const classTimeout = request.timeoutMs ?? TIMEOUT_MS_BY_CLASS[ctx.jobClass] ?? 240_000
+    const timeoutMs = Math.min(classTimeout, ctx.deadline.getTime() - Date.now() - DEADLINE_MARGIN_MS)
+    if (timeoutMs < MIN_REQUEST_MS) throw new ModelStopped('time_budget')
+
+    const used = (tool: ModelTool): number => (tool.type === 'web_search_20260209' ? searches : fetches)
+    const cap = (tool: ModelTool): number =>
+      tool.type === 'web_search_20260209' ? caps.searches : caps.fetches
+    // A tool whose budget is spent is left out. Exception: a continuation whose history holds that tool's
+    // blocks keeps it with max_uses 1, because it is not known whether the API accepts such a history with
+    // the tool omitted or with max_uses 0 (see the live probe in anthropic-live.test.ts). The cost is that a
+    // spent tool may be used once more per continuation.
+    const inHistory = (tool: ModelTool): boolean =>
+      content.some((b) => {
+        const block = b as { type?: unknown; name?: unknown }
+        return block?.type === 'server_tool_use' && block.name === TOOL_NAME[tool.type]
+      })
+    const tools: ModelTool[] = []
+    for (const tool of request.tools ?? []) {
+      const left = Math.min(tool.maxUses, cap(tool) - used(tool))
+      if (left > 0) tools.push({ ...tool, maxUses: left })
+      else if (inHistory(tool)) tools.push({ ...tool, maxUses: 1 })
+    }
+    const next: ModelRequest = { ...request, messages: [...messages], timeoutMs }
     delete next.tools
     if (tools.length > 0) next.tools = tools
     const reply = await ctx.modelStep(`${step}#${turn}`, next)
     searches += reply.usage?.serverToolSearches ?? 0
     fetches += reply.usage?.serverToolFetches ?? 0
-    const blocks = reply.content ?? []
-    content.push(...blocks)
-    if (reply.stopReason === 'end_turn') return { text: reply.text, content, searches, fetches }
+    const blocks = reply.content
+    if (reply.stopReason === 'end_turn') {
+      content.push(...(blocks ?? []))
+      return { text: reply.text, content, searches, fetches }
+    }
     if (reply.stopReason !== 'pause_turn') throw new ModelStopped(reply.stopReason ?? null)
+    // Never send an empty assistant turn back.
+    if (!blocks || blocks.length === 0) throw new Error('a paused reply carried no content blocks')
+    content.push(...blocks)
     if (turn + 1 > maxContinuations) throw new ModelStopped('cap_reached')
     messages.push({ role: 'assistant', content: blocks })
   }

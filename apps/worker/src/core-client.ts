@@ -12,6 +12,8 @@ export interface StartedAttempt {
   jobClass: JobClass
   agent: string | null
   filesHash: string | null
+  // When the attempt token expires, in epoch seconds. Absent from a core that does not send it.
+  expiresAt?: number
 }
 export type Registered =
   | { outcome: 'send'; callId: string; possibleDuplicate: boolean }
@@ -95,6 +97,7 @@ export const replySchemas = {
       jobClass: z.enum(JOB_CLASSES),
       agent: z.string().nullable(),
       filesHash: z.string().nullable(),
+      expiresAt: z.number().int().optional(),
     }),
   ]),
   checkpoint: z.object({ costed: z.boolean() }),

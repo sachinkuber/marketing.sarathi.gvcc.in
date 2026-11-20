@@ -100,6 +100,8 @@ describe('starting an attempt', () => {
       expectedResultType: 'test.echo',
     })
     expect(body.token).toMatch(/^v1\./)
+    // The token's expiry (epoch seconds), so the worker can plan its requests to end before it.
+    expect(body.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000))
   })
 
   it('refuses a job the queue does not show as active', async () => {

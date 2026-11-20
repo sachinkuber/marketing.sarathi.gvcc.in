@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CoreError, type CoreClient } from '../src/core-client.ts'
 import { ModelRefusedError, ModelStopped, type ModelClient, type ModelRequest } from '../src/model.ts'
+import { modelTurns } from '../src/model-turns.ts'
 import { runJob, type JobHandler } from '../src/runner.ts'
 
 function fakeCore(
@@ -570,6 +571,8 @@ describe('running a job', () => {
       text: 'part',
       content: blocks,
       stopReason: 'pause_turn',
+      serverToolSearches: 2,
+      serverToolFetches: 0,
     })
     // R1: nothing new goes to the core.
     expect(bodies[0]!.usage).toEqual({
@@ -615,7 +618,7 @@ describe('running a job', () => {
     const spy: ModelClient = {
       async send(request) {
         sent.push(request)
-        return model.send(request)
+        return { ...(await model.send(request)), content: [] }
       },
     }
     const asClass = (jobClass: 'interactive' | 'production') =>
@@ -650,5 +653,173 @@ describe('running a job', () => {
     expect(hashes[1]).toBe(hashes[2])
     expect(hashes[0]).not.toBe(hashes[1])
     expect(hashes[3]).not.toBe(hashes[1])
+  })
+
+  it('replays the saved provider counts, not a count of blocks', async () => {
+    const blocks = [
+      { type: 'server_tool_use', name: 'web_search' },
+      { type: 'server_tool_use', name: 'web_search' },
+    ]
+    const core = fakeCore({
+      async registerModelCall() {
+        return {
+          outcome: 'use_checkpoint',
+          output: JSON.stringify({
+            text: 'p',
+            content: blocks,
+            stopReason: 'pause_turn',
+            serverToolSearches: 1,
+            serverToolFetches: 0,
+          }),
+        }
+      },
+    })
+    const out: unknown[] = []
+    await runOne(core, model, toolsRequest(5), out)
+    expect(out[0]).toMatchObject({ usage: { serverToolSearches: 1, serverToolFetches: 0 } })
+  })
+
+  it('saves a tool step that ends its turn as a JSON string and replays text holding U+0000', async () => {
+    const reply: ModelClient = {
+      async send() {
+        return {
+          text: 'a\u0000b',
+          content: [{ type: 'text', text: 'a\u0000b' }],
+          messageId: 'm',
+          requestId: null,
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        }
+      },
+    }
+    const saved: unknown[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        saved.push(body.output)
+        return { costed: true }
+      },
+    })
+    const out: { text: string }[] = []
+    await runOne(core, reply, toolsRequest(5), out)
+    expect(typeof saved[0]).toBe('string')
+    // The core refuses a U+0000 character; JSON text carries it escaped.
+    expect((saved[0] as string).includes('\u0000')).toBe(false)
+    const replay = fakeCore({
+      async registerModelCall() {
+        return { outcome: 'use_checkpoint', output: JSON.parse(JSON.stringify(saved[0])) }
+      },
+    })
+    const again: { text: string }[] = []
+    await runOne(replay, model, toolsRequest(5), again)
+    expect(again[0]!.text).toBe('a\u0000b')
+  })
+
+  it('a tools reply without content is costed and then an error, never an empty assistant turn', async () => {
+    const noContent: ModelClient = {
+      async send() {
+        return {
+          text: 't',
+          messageId: 'm',
+          requestId: null,
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        }
+      },
+    }
+    const bodies: Record<string, unknown>[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        bodies.push(body as unknown as Record<string, unknown>)
+        return { costed: true }
+      },
+    })
+    await expect(runOne(core, noContent, toolsRequest(5), [])).rejects.toThrow(/no content/)
+    expect(bodies[0]).toMatchObject({ stopped: true, output: null })
+  })
+
+  it('replays every saved turn of a tool request after a failed attempt, with no new provider request', async () => {
+    const saved = new Map<string, { hash: string; output: unknown }>()
+    const hashes = new Map<string, string>()
+    const outcomes: string[] = []
+    const core = fakeCore({
+      async registerModelCall(_j, _t, input) {
+        const found = saved.get(input.step)
+        if (found && found.hash === input.requestHash) {
+          outcomes.push(`${input.step}:replay`)
+          return { outcome: 'use_checkpoint', output: found.output }
+        }
+        outcomes.push(`${input.step}:send`)
+        hashes.set(input.step, input.requestHash)
+        return { outcome: 'send', callId: `c-${input.step}`, possibleDuplicate: false }
+      },
+      async checkpoint(_j, _t, _c, body) {
+        saved.set(body.step, {
+          hash: hashes.get(body.step)!,
+          output: body.output === null ? null : JSON.parse(JSON.stringify(body.output)),
+        })
+        return { costed: true }
+      },
+    })
+    const u = (searches: number) => ({
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      serverToolSearches: searches,
+      serverToolFetches: 0,
+    })
+    const reply = (stopReason: string, content: unknown[], searches: number) => ({
+      text: 't',
+      content,
+      messageId: 'm',
+      requestId: null,
+      stopReason,
+      usage: u(searches),
+    })
+    // Two search blocks, but the provider billed one (the other search errored).
+    const searchBlocks = [
+      { type: 'server_tool_use', name: 'web_search' },
+      { type: 'server_tool_use', name: 'web_search' },
+    ]
+    const sent1: string[] = []
+    const first: ModelClient = {
+      async send() {
+        sent1.push('x')
+        if (sent1.length === 1) return reply('pause_turn', searchBlocks, 1)
+        if (sent1.length === 2) return reply('pause_turn', [{ type: 'text', text: 'a' }], 0)
+        throw new Error('boom')
+      },
+    }
+    const run = (modelClient: ModelClient) =>
+      runJob(
+        {
+          ...deps(core),
+          model: modelClient,
+          handlers: {
+            'test.echo': plain(async (ctx) => {
+              await modelTurns(ctx, 'dig', toolsRequest(10), {
+                searches: 10,
+                fetches: 5,
+                maxContinuations: 6,
+              })
+              return { type: 'test.echo', result: null }
+            }),
+          },
+        },
+        { id: 'jr', jobClass: 'interactive' },
+      )
+    await expect(run(first)).rejects.toThrow('boom')
+    expect(outcomes).toEqual(['dig#0:send', 'dig#1:send', 'dig#2:send'])
+
+    const sent2: ModelRequest[] = []
+    const second: ModelClient = {
+      async send(request) {
+        sent2.push(request)
+        return reply('end_turn', [{ type: 'text', text: 'done' }], 0)
+      },
+    }
+    await run(second)
+    expect(outcomes.slice(3)).toEqual(['dig#0:replay', 'dig#1:replay', 'dig#2:send'])
+    expect(sent2).toHaveLength(1)
   })
 })

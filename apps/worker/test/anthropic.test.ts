@@ -35,22 +35,31 @@ describe('anthropicModel', () => {
 
   function recording(reply: Record<string, unknown> = {}) {
     const bodies: Record<string, unknown>[] = []
+    const calls: string[] = []
+    const answer = async (body: Record<string, unknown>) => {
+      bodies.push(body)
+      return {
+        id: 'msg_1',
+        content: [{ type: 'text', text: 'hi' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+        ...reply,
+      }
+    }
     const makeClient = () =>
       ({
         messages: {
           create: async (body: Record<string, unknown>) => {
-            bodies.push(body)
-            return {
-              id: 'msg_1',
-              content: [{ type: 'text', text: 'hi' }],
-              stop_reason: 'end_turn',
-              usage: { input_tokens: 1, output_tokens: 1 },
-              ...reply,
-            }
+            calls.push('create')
+            return answer(body)
+          },
+          stream: (body: Record<string, unknown>) => {
+            calls.push('stream')
+            return { finalMessage: () => answer(body) }
           },
         },
       }) as unknown as Anthropic
-    return { bodies, makeClient }
+    return { bodies, calls, makeClient }
   }
   const base = { model: 'm', maxTokens: 5, messages: [{ role: 'user' as const, content: 'x' }] }
 
@@ -90,7 +99,7 @@ describe('anthropicModel', () => {
   })
 
   it('sends web tools with names and max_uses', async () => {
-    const { bodies, makeClient } = recording()
+    const { bodies, calls, makeClient } = recording()
     await anthropicModel('key', { makeClient }).send({
       ...base,
       tools: [
@@ -102,6 +111,32 @@ describe('anthropicModel', () => {
       { type: 'web_search_20260209', name: 'web_search', max_uses: 12 },
       { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 },
     ])
+    // Tools: streamed, and read as the final message.
+    expect(calls).toEqual(['stream'])
+  })
+
+  it('sends a request without tools as a plain create call', async () => {
+    const { calls, makeClient } = recording()
+    await anthropicModel('key', { makeClient }).send(base)
+    expect(calls).toEqual(['create'])
+  })
+
+  it('turns an HTTP error thrown by the stream into a refusal', async () => {
+    const makeClient = () =>
+      ({
+        messages: {
+          stream: () => ({
+            finalMessage: async () => {
+              throw new Anthropic.APIError(429, { type: 'error' }, 'slow down', new Headers())
+            },
+          }),
+        },
+      }) as unknown as Anthropic
+    const error = await anthropicModel('key', { makeClient })
+      .send({ ...base, tools: [{ type: 'web_search_20260209', maxUses: 1 }] })
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ModelRefusedError)
+    expect((error as ModelRefusedError).status).toBe(429)
   })
 
   it('maps server_tool_use counts into usage, 0 when absent', async () => {
