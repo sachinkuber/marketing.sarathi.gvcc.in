@@ -524,3 +524,51 @@ The full run for test 39 on the development server, 2026-11-19 (the tree of this
   - Object lock for the audit bucket `mkt-audit-prod` (A5), if the owner wants write-once storage.
   - The minors parked in task 11 and the final review (R25): an orphaned partial monthly backup set, a key left in `/dev/shm` after an aborted restore, and the load README's prompt-less `read -rs`.
   - A lifecycle rule for the R2 prefix `staging/` used by the staging rehearsal.
+
+## Phase 2, milestone 8: Knowledge base
+
+Built 2026-11-20. Plan: `docs/plans/2026-11-20-m8-knowledge-base.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 19 to 30, tests 42 to 54). This milestone builds the database tables, the permission, the agent definition format, the suggest-then-decide framework, the evaluation harness and the release step. Nothing here runs a research or onboarding agent: those are milestones 9 to 11.
+
+| Package | State | Evidence |
+|---|---|---|
+| 19 Data model, migrations and isolation tests; `onboard_brand` permission | Done | Migrations `0023_brand_knowledge.sql` (commit ef38c95) and `0024_evaluation.sql` (dc57ab8); `packages/db/test/brand-knowledge.test.ts` (brand-scoped tables, 10 MB and type limits on documents, a fact's statement cannot change, one onboarding row per brand), `packages/db/test/evaluation-schema.test.ts`; the permission in 7ab806e, platform owner only (`apps/core/test/permissions.test.ts`). The Phase 1 isolation suites cover the new tables (test 52 below) |
+| 20 Agent definition format and the release step | Done | Format and hashes (`agentFilesHash`, `setsHash`) in 02d1d7e: `packages/shared/test/agent-definition.test.ts`, `packages/db/test/agent-files.test.ts`; the release step in 54c54b4, b768399 and 3940415: `apps/ops/test/release.test.ts` (20 cases, listed under test 48) |
+| 21 Evaluation harness | Done | 0249aae and d1daabc: cases and checks in the worker (`apps/worker/test/eval.test.ts`), recording and the `eval` command in ops (`apps/ops/test/eval.test.ts`, `apps/ops/test/eval-cli.test.ts`); the shared hostile set in `agents/summary/eval/shared/` |
+| 22, 23, 25 to 30 | Not started | Milestones 9 to 11 |
+| 24 Suggestion framework | Done | 76fc631 and cf4627a: `apps/core/src/onboarding/suggestions.ts`, routes in `apps/core/src/routes/onboarding.ts`; `apps/core/test/suggestions.test.ts` (18 cases: store, decide, supersede, audit) |
+
+| # | Test (short) | State | Evidence |
+|---|---|---|---|
+| 43 | No suggestion becomes a profile item, fact or rule without the owner's decision | Proven here, for the decision path | `apps/core/test/suggestions.test.ts`: accepting writes the item, fact or rule only on a decision; a second decision is refused; a brand admin gets 403 and the platform owner 200; `apps/core/test/permissions.test.ts` (`onboard_brand`). The half "an agent result that tries is refused" belongs to the agent result schema in M9 |
+| 44 | Every suggestion and fact links to a source; an owner statement records who, when and the wording; a third-party-only fact is refused | Proven here | `apps/core/test/suggestions.test.ts`: an edited fact records an `owner_statement` source with the exact wording and the deciding user; a fact whose only sources are social, search or competitor is refused and nothing is written; a site source is accepted; sources of another brand or unknown are refused |
+| 45 | A re-run after a decision keeps the decision and supersedes only undecided suggestions | Proven here | `apps/core/test/suggestions.test.ts` ("a re-run supersedes only undecided suggestions") |
+| 48 | The release step refuses a version without a passing run on the current sets, and makes it live with one | Proven here | `apps/ops/test/release.test.ts`: refused with no passing run, after a file change, after a set change, for an unreadable definition, for a non-owner, for a folder with no cases; released with a passing run (one live row, `released_by`, audited); refused when already live; every brand folder needs its own passing run, a shared-only run does not stand in, a folder with no brand is refused; two concurrent releases, one wins |
+| 52 | Every new table passes the isolation tests 1 to 6 | Proven here | The Phase 1 suites find brand-scoped tables from the catalog and so include the new ones: `packages/db/test/isolation-catalog.test.ts` and `isolation-behaviour.test.ts`; `seedProbeBrand` (`packages/db/src/isolation-probes.ts`) now seeds a suggestion, a verified fact (with its owner-statement source) and a safety rule; `apps/core/test/cross-brand.test.ts` walks the new brand routes (the `:suggestionId` parameter); `packages/db/test/brand-knowledge.test.ts` (brand-scoped). The evaluation tables carry no brand column on purpose (global, written by ops) |
+
+Tests 42, 46, 47, 49 to 51, 53 and 54 belong to milestones 9 to 11.
+
+Full run on the development server, 2026-11-20, from the tree of this pull request:
+
+- `npm ci && npm run verify`: 154 test files passed, 2 skipped (156); 1386 tests passed, 2 skipped (1388), the live model checks; 932.75 s; gitleaks found no leaks.
+- `npm ci && npm run e2e` in the browser image: 6 passed (2.1m): agent flow, overdue pop-up, three sign-in checks, and the phone check.
+
+How to run an evaluation and a release on production, with the exit codes and refusals: `docs/operations.md`, "Agent evaluation and release". Neither has been run on production yet: `agents/summary` has no brand folder, and its release waits for the owner.
+
+## Findings
+
+- Rulings in milestone 8 (each cheap to change):
+  - R4: the harness's database recording and the `eval` command live in `apps/ops`, not the worker, so the worker keeps its Phase 1 rule of no database. Cases, checks and the runners stay in the worker. Cost if wrong: a file move.
+  - R5: an evaluation's cost columns are empty (null) when no price or exchange-rate row exists, rather than a made-up number. Cost if wrong: one migration line.
+  - R6: the release needs a passing run for each brand folder under `eval/` (a run without `--brand` tests only `eval/shared`), or one shared run when there are none. Cost if wrong: a stricter gate, more evaluation runs.
+  - R7: there is no `--version` flag on `release`; the version released is the one in `definition.json`, which the files hash pins. Cost if wrong: add a flag later.
+  - Also: a run with no cases, or no hostile case, is refused and never passes.
+- Image note: the ops image's ignore patterns (`**/test`, `**/.env*`, `**/.DS_Store`) would drop matching files from the image's `agents/`; the release would be refused (it fails safe). Recorded in `docs/operations.md`.
+- The test title in `packages/db/test/content-tables.test.ts` that said "eleven" now describes the list correctly; nothing else in that test changed.
+- Carried to M9 (minor, deferred from the reviews):
+  - Upload route: enforce `brand_document.size_bytes` against the stored bytes, and the 20-document limit (spec 13).
+  - Optional tests: a down-migration, a delete refusal; a comment on the seed dependency in `brand-knowledge.test.ts`.
+  - An index on `evaluation_run (agent, version)` when a dashboard lists runs.
+  - Agent definition: read errors for `system.md` and the JSON could name the fix; the caps integers have no minimum.
+  - Evaluation: the judge's cost is not in the per-result rows; `recordedReplies` is unused; the `flags_source` and `no_third_party_fact` checks are placeholders to pin; no test for a missing judge price or exchange rate, or for a judge failure; a redundant `existsSync` in `eval-cli.ts`.
+  - Release: the failed cases are fetched only for the first brand missing a run.
+  - Suggestions: an edited profile item keeps the suggestion's confidence (decide in the UI); the owner-statement "who" lives in `confirmed_by` and `decided_by`; concurrent `addSuggestions` for one brand (research runs per brand do not overlap, so note it for the research job); a non-UUID source id gives a 500 (tighten in the agent result schema).

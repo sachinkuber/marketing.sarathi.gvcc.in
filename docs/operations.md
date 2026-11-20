@@ -480,3 +480,70 @@ docker run --rm -v /opt/mkt/marketing:/src:ro -v mkt-drill-work:/work -w /work $
 4. **Clean up**: `docker rm -f -v mkt-drill-target; docker volume rm mkt-drill-work; unset PGPASSWORD`. Keep `/opt/mkt/drill/drill.env` for later drills.
 
 **If the drill file is lost** (the seed then refuses: the drill user exists without it), remove the drill user and seed again: the same container as `cancel-live`, with `unseed` in its place. It cancels the drill's open jobs, removes the drill user (its sessions, password and second factor go with it) and prints `{"event":"restore_drill_unseeded","removed":true,...}`; the drill brands and their rows stay, and the next seed reuses them.
+
+## Agent evaluation and release
+
+An agent version goes live only through the release step, and the release step needs a passing evaluation run for the version's current files and its current evaluation set (milestone 8; spec `docs/specs/2026-11-20-phase-2-onboarding-strategy.md`, section 11). Both commands write to the production database as the superuser (`ADMIN_DATABASE_URL`), so run them as root on the production host.
+
+**Files that must not be in `agents/`.** The ops image is built with `infra/prod/Dockerfile.dockerignore`. Its patterns `**/test`, `**/.env*` and `**/.DS_Store` would leave a matching file out of the image's `agents/`. The image's files hash would then differ from the checkout's, and a release would be refused. That fails safe, but it is confusing, so never put a file or folder matching those patterns in `agents/`.
+
+### Evaluate
+
+```sh
+npm run eval -- --agent <name> [--brand <slug>]
+```
+
+| Part | Meaning |
+|---|---|
+| `--agent <name>` | The folder under `agents/` (for example `summary`). It must have an evaluation runner and at least one case; a folder with no cases is refused |
+| `--brand <slug>` | Also runs the cases in `agents/<name>/eval/<slug>/`, recorded against that brand. Without it only `eval/shared` runs. A release needs one run per brand folder (below) |
+| `ADMIN_DATABASE_URL` | The superuser address of the live database (the `postgres` host on `mkt_data`) |
+| `ANTHROPIC_API_KEY` | The provider key, the worker's value from `/opt/mkt/secrets/worker.env` |
+
+**An evaluation makes paid model calls**: each case calls the model, and some cases are scored by a second (judge) call. Cost is recorded in the run's rows as USD and INR, or left empty when no price or rate row exists. Run it when the files or cases changed, not as a habit.
+
+Each case prints one `PASS` or `FAIL` line with its id, then a final JSON line (`evaluation_done`, with the run id and the counts). The judge's reason is stored in the database only. Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | The run passed |
+| 1 | The run finished and failed (a case failed); the run is recorded as failed |
+| 2 | Refused: bad arguments, unknown agent, no cases, or a variable not set. Nothing was recorded |
+| 3 | Unexpected error (for example the database is down) |
+
+The command runs from the release's checkout with its locked dependencies, in the pinned Node image, like the restore drill (`NODE` and the `mkt-drill-work` volume are made in "Restore drill"; recreate them the same way for a new release). It needs the database on `mkt_data` and the provider through the firewalled `worker_egress` network, which `mkt_data` alone cannot reach. This command has not yet been rehearsed on a host:
+
+```sh
+cd /opt/mkt/marketing
+NODE=node:24.20.0@sha256:be23f54a88d34e8824c741b19b91064094f92c1c97b194144bfc8b50d67258e2
+PGPASSWORD=$(sed -n 's/^POSTGRES_PASSWORD=//p' /opt/mkt/secrets/postgres.env)
+KEY=$(sed -n 's/^ANTHROPIC_API_KEY=//p' /opt/mkt/secrets/worker.env)
+ID=$(docker create --network mkt_data -v mkt-drill-work:/work -w /work \
+  -e ADMIN_DATABASE_URL="postgres://postgres:$PGPASSWORD@postgres:5432/mkt" -e ANTHROPIC_API_KEY="$KEY" \
+  $NODE npm run eval -- --agent <name> [--brand <slug>])
+docker network connect mkt_worker_egress $ID
+docker start -a $ID; echo "exit $?"
+docker rm -f $ID; unset PGPASSWORD KEY
+```
+
+(Refresh the volume from the checkout first, as in the drill: the files hash and the evaluation set hash are taken from this copy.)
+
+### Release
+
+```sh
+docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops \
+  run --rm ops release --agent <name> --by <owner email>
+```
+
+`docker compose run --rm ops release --agent <name> --by <owner email>` is the whole command; the file and profile options above are those of every other ops command in this runbook. `--by` is the platform owner's sign-in email (any letter case). There is no version flag: the version released is the `version` in `agents/<name>/definition.json`. The image holds the same `agents/` as the checkout it was built from, so build the ops image from the release being released.
+
+It makes that version live (turning the earlier live version off), records the passing run on it, and writes an `agent.released` audit entry. Exit 0 prints one `agent_released` line. Exit 2 is a refusal, and the message says what to do; exit 3 is an unexpected error. It refuses when:
+
+- the email is not a platform owner's;
+- `definition.json` cannot be read, or names another agent than the folder;
+- there is no passing run for the current files and the current evaluation set: a file or a case changed after the run. If the newest such run failed, the message names its failed case ids (never their content);
+- `eval/` has brand folders and any of them lacks a passing run of its own. A run without `--brand` does not stand in for them. The message names each missing brand and the `npm run eval` command for it;
+- an `eval/<slug>/` folder names no brand with that slug;
+- the agent has no evaluation cases;
+- that version is already live;
+- another release of the same agent is running or has just changed the live version (try again after checking).

@@ -10,7 +10,7 @@ describe('content and approval tables', () => {
   })
   afterAll(async () => db.drop())
 
-  it('has the eleven content and approval tables as well as the six tenancy tables', async () => {
+  it('has every application table: tenancy, content, approval, knowledge and evaluation', async () => {
     const result = await db.admin.query("select tablename from pg_tables where schemaname = 'app' order by 1")
     expect(result.rows.map((r) => r.tablename)).toEqual([
       'agent_definition_version',
