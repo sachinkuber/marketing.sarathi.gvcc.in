@@ -108,7 +108,7 @@ export function createApi(
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
-  registerOnboardingRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerOnboardingRoutes(table, { pool: deps.pool, audit: deps.audit, jobs: deps.jobs })
   registerDocumentRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerKillSwitchRoutes(table, {
     auth: deps.auth,

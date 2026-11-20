@@ -99,6 +99,16 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       ).toBe(true)
     }
     expect(scoped.some((r) => r.method === 'post' && r.path === '/brands/:brandId/audit/verify')).toBe(true)
+    for (const [method, path] of [
+      ['get', 'onboarding'],
+      ['put', 'onboarding/intake'],
+      ['post', 'onboarding/research'],
+    ] as const) {
+      expect(
+        scoped.some((r) => r.method === method && r.path === `/brands/:brandId/${path}`),
+        path,
+      ).toBe(true)
+    }
   })
 
   // The probes are shared with the restore drill (apps/ops/src/restore-check.ts).
