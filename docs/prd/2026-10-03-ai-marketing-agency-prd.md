@@ -524,6 +524,7 @@ Every requirement in this section is P0 unless it is marked otherwise. Figures m
 | View lead personal data | Yes | Yes | No | Own leads | No | Routed lead only |
 | Export or delete data | Yes | Yes | No | No | No | No |
 | Use the kill switch | Yes | Yes | No | No | No | No |
+| Onboard a brand | Yes | No | No | No | No | No |
 
 Brand admin is the main user of a self-serve or managed customer (section 5). Viewer is a read-only user a brand can add. The partner has no account; access is through a single-purpose link.
 
@@ -767,3 +768,4 @@ Answers given by the owner on 2026-10-03.
 | Agent structure | One agent for each of the 22 agency roles |
 | Paid tools | Acceptable |
 | AI presenter videos | Approved 2026-11-19: agent 9 makes presenter videos; P1-8, AI-21 and section 15.9 added (PRD v4) |
+| Onboarding permission | 2026-11-20: Onboard a brand added, Phase 2 spec version 1 (platform owner only; section 16.1) |

@@ -25,6 +25,7 @@ export const PERMISSION_KEYS = [
   'view_lead_data',
   'export_delete_data',
   'use_kill_switch',
+  'onboard_brand',
 ] as const
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number]
@@ -125,6 +126,16 @@ export const PERMISSIONS: Record<PermissionKey, PermissionDefinition> = {
     grants: {
       platform_owner: 'all',
       brand_admin: 'all',
+      approver: false,
+      sales_contact: false,
+      viewer: false,
+    },
+  },
+  onboard_brand: {
+    label: 'Onboard a brand',
+    grants: {
+      platform_owner: 'all',
+      brand_admin: false,
       approver: false,
       sales_contact: false,
       viewer: false,

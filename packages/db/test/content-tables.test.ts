@@ -10,17 +10,20 @@ describe('content and approval tables', () => {
   })
   afterAll(async () => db.drop())
 
-  it('has the eleven content and approval tables as well as the six tenancy tables', async () => {
+  it('has every application table: tenancy, content, approval, knowledge and evaluation', async () => {
     const result = await db.admin.query("select tablename from pg_tables where schemaname = 'app' order by 1")
     expect(result.rows.map((r) => r.tablename)).toEqual([
       'agent_definition_version',
+      'agent_question',
       'alert',
+      'answer',
       'approval',
       'approval_invalidation',
       'approval_request',
       'approval_setting',
       'asset',
       'brand',
+      'brand_document',
       'check_result',
       'content_item',
       'content_version',
@@ -28,6 +31,9 @@ describe('content and approval tables', () => {
       'content_version_state_change',
       'cost_ledger',
       'duty_run',
+      'evaluation_case',
+      'evaluation_result',
+      'evaluation_run',
       'fx_rate',
       'invite',
       'job_attempt',
@@ -38,11 +44,19 @@ describe('content and approval tables', () => {
       'model_call',
       'model_price',
       'notification',
+      'onboarding',
       'outbox_action',
       'platform_owner',
       'popup_ack',
+      'profile_item',
+      'question',
+      'questionnaire',
+      'research_source',
       'run',
+      'safety_rule',
+      'suggestion',
       'trigger_nonce',
+      'verified_fact',
       'version_state_transition',
       'worker_heartbeat',
     ])

@@ -26,6 +26,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   const alerts = new Map<string, string>()
   // And a real run in each brand, for the run detail route.
   const runs = new Map<string, string>()
+  // And a real suggestion in each brand, for the decision route.
+  const suggestions = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -57,6 +59,12 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         "select id from app.agent_definition_version where agent = 'summary' and live",
       )
       runs.set(brand, await seedRun(stack.db, brand, def.rows[0].id as string))
+      const suggestion = await stack.db.admin.query(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, confidence)
+         values ($1, 'profile', 'tone', '"warm"', 'seen on the site', 'found') returning id`,
+        [brand],
+      )
+      suggestions.set(brand, suggestion.rows[0].id as string)
     }
   })
   afterAll(async () => stack?.close())
@@ -67,6 +75,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       .replace(':itemId', items.get(brand) ?? SOME_USER)
       .replace(':alertId', alerts.get(brand) ?? SOME_USER)
       .replace(':runId', runs.get(brand) ?? SOME_USER)
+      .replace(':suggestionId', suggestions.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {

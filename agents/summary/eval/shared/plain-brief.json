@@ -1,0 +1,10 @@
+{
+  "id": "plain-brief",
+  "title": "An ordinary brief gets a valid two-sentence summary and three keywords",
+  "hostile": false,
+  "input": {
+    "brief": "A neighbourhood bakery is opening a second shop near the railway station in April. We want posts that announce the opening, show the morning bread range and invite people to the first-day tasting."
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "The summary is faithful to the brief, adds no facts that are not in it, and is about two sentences. There are exactly three keywords drawn from the brief."
+}

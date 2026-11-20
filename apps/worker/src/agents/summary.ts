@@ -1,12 +1,11 @@
-import { readFileSync } from 'node:fs'
-import { briefSchema, summaryResultSchema, wrapBrief } from '@mkt/shared'
-import { ModelStopped } from '../model.ts'
+import { fileURLToPath } from 'node:url'
+import { briefSchema, loadAgentDefinition, summaryResultSchema, wrapBrief } from '@mkt/shared'
+import { ModelStopped, type ModelRequest } from '../model.ts'
 import type { JobHandler } from '../runner.ts'
 
 // The agent's files are read when this module loads (the worker starting), not written into the code, so
 // the prompt, the model and the schema are the ones in agents/summary/.
-const dir = new URL('../../../../agents/summary/', import.meta.url)
-const read = (name: string) => readFileSync(new URL(name, dir), 'utf8')
+const loaded = loadAgentDefinition(fileURLToPath(new URL('../../../../agents/summary/', import.meta.url)))
 
 // The provider's structured output does not take length, count or range limits. The stored schema keeps them
 // (and the core re-validates every result with summaryResultSchema); what is sent drops them. Names of
@@ -41,19 +40,29 @@ export function providerSchema(schema: Record<string, unknown>): Record<string, 
   return reduce(schema) as Record<string, unknown>
 }
 
-const definition = JSON.parse(read('definition.json')) as {
-  model: string
-  effort: 'low' | 'medium' | 'high'
-  maxTokens: number
-}
 export const SUMMARY_AGENT = {
-  model: definition.model,
-  effort: definition.effort,
-  maxTokens: definition.maxTokens,
-  system: read('system.md'),
-  outputSchema: JSON.parse(read('output.schema.json')) as Record<string, unknown>,
+  model: loaded.definition.model,
+  effort: loaded.definition.effort,
+  maxTokens: loaded.definition.maxTokens,
+  system: loaded.system,
+  outputSchema: loaded.outputSchema as Record<string, unknown>,
 }
-const SENT_SCHEMA = providerSchema(SUMMARY_AGENT.outputSchema)
+
+// The one place the summary request is built: the job handler sends it, and the evaluation harness sends the
+// same one, so a change to the prompt, the model or the schema here is the thing that gets evaluated.
+export function buildSummaryRequest(
+  agent: Pick<typeof SUMMARY_AGENT, 'model' | 'effort' | 'maxTokens' | 'system' | 'outputSchema'>,
+  brief: string,
+): ModelRequest {
+  return {
+    model: agent.model,
+    system: agent.system,
+    maxTokens: agent.maxTokens,
+    effort: agent.effort,
+    outputSchema: providerSchema(agent.outputSchema),
+    messages: [{ role: 'user', content: wrapBrief(brief) }],
+  }
+}
 
 // The reply is not quoted anywhere: it is model output over a brief.
 export class SummaryReplyInvalid extends Error {
@@ -65,14 +74,7 @@ export class SummaryReplyInvalid extends Error {
 
 export const summaryHandler: JobHandler = async (ctx) => {
   const { brief } = briefSchema.parse(ctx.input)
-  const step = await ctx.modelStep('summarise', {
-    model: SUMMARY_AGENT.model,
-    system: SUMMARY_AGENT.system,
-    maxTokens: SUMMARY_AGENT.maxTokens,
-    effort: SUMMARY_AGENT.effort,
-    outputSchema: SENT_SCHEMA,
-    messages: [{ role: 'user', content: wrapBrief(brief) }],
-  })
+  const step = await ctx.modelStep('summarise', buildSummaryRequest(SUMMARY_AGENT, brief))
   // A saved step from before the stop reason was kept has none; a present one must be a finished turn.
   if (step.stopReason !== undefined && step.stopReason !== 'end_turn') throw new ModelStopped(step.stopReason)
   let parsed: unknown

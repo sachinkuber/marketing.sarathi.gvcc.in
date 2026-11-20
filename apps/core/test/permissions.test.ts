@@ -50,7 +50,7 @@ describe('the permission matrix', () => {
 
   it('has exactly the PRD rows, by their exact labels', () => {
     const labels = prdTable().rows.map((row) => row.label)
-    expect(labels).toHaveLength(10)
+    expect(labels).toHaveLength(11)
     expect(PERMISSION_KEYS.map((key) => PERMISSIONS[key].label)).toEqual(labels)
   })
 
@@ -67,6 +67,10 @@ describe('the permission matrix', () => {
         expect(grantFor(actor, key!), `${row.label} / ${actor}`).toBe(FROM_PRD[cell])
       })
     }
+  })
+
+  it('lets only the platform owner onboard a brand', () => {
+    expect(ACTORS.filter((actor) => grantFor(actor, 'onboard_brand'))).toEqual(['platform_owner'])
   })
 
   it('lets only the platform owner see other brands, and a sales contact see only their own leads', () => {

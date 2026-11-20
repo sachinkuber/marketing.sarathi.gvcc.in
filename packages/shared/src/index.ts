@@ -17,3 +17,9 @@ export {
   wrapBrief,
   type SummaryResult,
 } from './summary.ts'
+export {
+  agentDefinitionSchema,
+  loadAgentDefinition,
+  type AgentDefinition,
+  type LoadedAgent,
+} from './agent-definition.ts'
