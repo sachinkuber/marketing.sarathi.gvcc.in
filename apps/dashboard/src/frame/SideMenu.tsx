@@ -24,6 +24,8 @@ const MENU: Entry[] = [
   { id: 'agents', label: 'Agents', path: (b) => `/b/${b}/agents`, roles: ADMIN },
   { id: 'alerts', label: 'Alerts and incidents', path: () => '/alerts', roles: ADMIN },
   { id: 'settings', label: 'Settings', path: (b) => `/b/${b}/settings`, roles: ADMIN },
+  // Onboarding needs the core permission onboard_brand, which only the platform owner holds.
+  { id: 'onboarding', label: 'Onboarding', path: (b) => `/b/${b}/onboarding`, roles: ['owner'] },
 ]
 
 export function menuFor(role: MenuRole): Entry[] {

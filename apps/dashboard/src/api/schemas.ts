@@ -448,3 +448,70 @@ export const overdueAllReply = z.strictObject({
     }),
   ),
 })
+
+// --- onboarding (M9) --------------------------------------------------------------------------------------
+// A cost the core could not price yet is null, never zero. `why` text is not capped here: grading notes can push
+// it past 300 characters.
+
+const maybeMoney = z.strictObject({ usdMicros: micros.nullable(), inrMicros: micros.nullable() })
+const groupState = z.enum(['waiting', 'running', 'done', 'failed'])
+
+export const intakeShape = z.strictObject({
+  website: z.string(),
+  socials: z.strictObject({
+    instagram: z.string().optional(),
+    facebook: z.string().optional(),
+    linkedin: z.string().optional(),
+    youtube: z.string().optional(),
+  }),
+  competitors: z.array(z.strictObject({ name: z.string(), website: z.string().optional() })),
+})
+
+export const researchSource = z.strictObject({
+  id: z.string(),
+  kind: z.string(),
+  address: z.string().nullable(),
+  documentName: z.string().nullable(),
+  result: z.string(),
+  flagged: z.boolean(),
+})
+
+export const researchGroup = z.strictObject({
+  group: z.string(),
+  state: groupState,
+  searches: z.number().int().nonnegative(),
+  fetches: z.number().int().nonnegative(),
+  cost: maybeMoney,
+  sources: z.array(researchSource),
+})
+
+export const onboardingReply = z.strictObject({
+  step: z.string(),
+  intake: intakeShape.nullable(),
+  documents: z.number().int().nonnegative(),
+  research: z
+    .strictObject({
+      runId: z.string(),
+      state: z.string(),
+      groups: z.array(researchGroup),
+      merge: groupState,
+    })
+    .nullable(),
+  openSuggestions: z.number().int().nonnegative(),
+  cost: maybeMoney,
+})
+
+export const intakeSavedReply = z.strictObject({ intake: intakeShape })
+export const researchStartedReply = z.strictObject({ runId: z.string(), jobIds: z.array(z.string()) })
+
+export const documentSummary = z.strictObject({
+  id: z.string(),
+  fileName: z.string(),
+  mediaType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  sha256: z.string(),
+  parts: z.number().int().nonnegative(),
+  uploadedAt: z.string().optional(),
+})
+export const documentsReply = z.strictObject({ documents: z.array(documentSummary) })
+export const deletedReply = z.null()

@@ -216,3 +216,59 @@ export async function publicApi<T>(
   }
   return parsed.data
 }
+
+// Sends a file as the raw body, with its own type and its name (percent-encoded: a header cannot carry every
+// character) and the request token. A `fetch` cannot report how much of an upload has gone, so this uses an
+// XMLHttpRequest; errors have the same shape as `api`'s.
+export async function upload<T>(
+  schema: z.ZodType<T>,
+  path: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<T> {
+  const attempt = (token: string): Promise<RawReply> =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${API}${path}`)
+      xhr.withCredentials = true
+      xhr.setRequestHeader('accept', 'application/json')
+      xhr.setRequestHeader('content-type', file.type)
+      xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name))
+      xhr.setRequestHeader('x-csrf-token', token)
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total)
+      }
+      xhr.onload = () => {
+        let json: unknown
+        try {
+          json = xhr.responseText ? JSON.parse(xhr.responseText) : null
+        } catch {
+          json = null
+        }
+        resolve({ status: xhr.status, json })
+      }
+      const failed = () => reject(new ApiError(0, 'network', 'The platform could not be reached.'))
+      xhr.onerror = failed
+      xhr.onabort = failed
+      xhr.send(file)
+    })
+  let reply = await attempt(await tokenForWrite())
+  if (reply.status === 403 && errorOf(reply.json).code === 'bad_csrf_token') {
+    csrfToken = null
+    reply = await attempt(await tokenForWrite())
+  }
+  if (reply.status === 401) {
+    const { code, message } = errorOf(reply.json)
+    navigate(signInAddress())
+    throw new ApiError(401, code, message)
+  }
+  if (reply.status < 200 || reply.status >= 300) {
+    const { code, message, details } = errorOf(reply.json)
+    throw new ApiError(reply.status, code, message, details)
+  }
+  const parsed = schema.safeParse(reply.json)
+  if (!parsed.success) {
+    throw new ApiError(reply.status, 'bad_reply', 'The platform sent a reply this page cannot read.')
+  }
+  return parsed.data
+}

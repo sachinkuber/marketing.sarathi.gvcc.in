@@ -143,6 +143,7 @@ describe('the side menu', () => {
       'Agents',
       'Alerts and incidents',
       'Settings',
+      'Onboarding',
     ])
     expect(labels('brand_admin')).toEqual([
       'Home',
