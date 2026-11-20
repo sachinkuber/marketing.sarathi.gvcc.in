@@ -7,7 +7,7 @@ import type { AuditSink } from '../ports.ts'
 // Owner intake (spec 4) and starting research (spec 8.1).
 const httpsUrl = z
   .string()
-  .max(300, 'Use a shorter address: at most 300 characters.')
+  .max(300, 'This address is too long: use at most 300 characters.')
   .refine((value) => {
     try {
       return new URL(value).protocol === 'https:'
@@ -25,13 +25,25 @@ export const intakeSchema = z.strictObject({
     youtube: httpsUrl.optional(),
   }),
   competitors: z
-    .array(z.strictObject({ name: z.string().trim().min(1).max(120), website: httpsUrl.optional() }))
-    .max(5),
+    .array(
+      z.strictObject({
+        name: z
+          .string()
+          .trim()
+          .min(1, 'Give each competitor a name.')
+          .max(120, 'A competitor name can be at most 120 characters.'),
+        website: httpsUrl.optional(),
+      }),
+    )
+    .max(5, 'List at most 5 competitors.'),
 })
 export type Intake = z.infer<typeof intakeSchema>
 
 export const GROUPS = ['site', 'social', 'visibility', 'competitors'] as const
-const AGENTS = ['research', 'research_merge'] as const
+// Both agents must have a live release before research starts.
+const START_AGENTS = ['research', 'research_merge'] as const
+// The agents whose model calls count in the onboarding cost; a later onboarding agent widens only this list.
+const COST_AGENTS = ['research', 'research_merge'] as const
 export const GROUP_RESULT_TYPE = 'research_group.v1'
 export const MERGE_RESULT_TYPE = 'research.v1'
 
@@ -81,7 +93,15 @@ export async function startResearch(
       const run = await client.query<{ state: string }>('select state from app.run where id = $1', [
         onboarding.research_run_id,
       ])
-      if (run.rows[0]?.state === 'running' || run.rows[0]?.state === 'created') {
+      // A dead job fails its run while its siblings keep going, so the run's state alone is not enough:
+      // any job still alive (not finished, cancelled or dead) also means research is running.
+      const alive = await client.query(
+        `select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
+          where i.run_id = $1 and i.finished_at is null and not c.cancel_requested and c.dead_at is null
+          limit 1`,
+        [onboarding.research_run_id],
+      )
+      if (run.rows[0]?.state === 'running' || run.rows[0]?.state === 'created' || alive.rows.length > 0) {
         throw new AppError(
           409,
           'research_running',
@@ -92,11 +112,15 @@ export async function startResearch(
     // Both releases are checked before anything is written, so a refusal leaves nothing behind.
     const live = await client.query<{ id: string; agent: string }>(
       'select id, agent from app.agent_definition_version where live and agent = any($1::text[])',
-      [AGENTS],
+      [START_AGENTS],
     )
     const research = live.rows.find((r) => r.agent === 'research')
     if (!research || !live.rows.some((r) => r.agent === 'research_merge')) {
-      throw new AppError(503, 'agent_unavailable', 'The research agents have no live release yet.')
+      throw new AppError(
+        503,
+        'agent_unavailable',
+        'The research agents have no live release yet. Release both research agents, then start research again.',
+      )
     }
     const documents = await client.query<{ id: string }>(
       'select id from app.brand_document where brand_id = $1 order by uploaded_at, id',
@@ -196,10 +220,10 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
     )
     const total = await client.query<{ usd: string | null; inr: string | null; uncosted: number }>(
       `select sum(m.usd_micros)::text as usd, sum(m.inr_micros)::text as inr,
-              count(*) filter (where m.status = 'succeeded' and m.usd_micros is null)::int as uncosted
+              count(*) filter (where m.status in ('succeeded', 'unknown') and m.usd_micros is null)::int as uncosted
          from app.model_call m join app.run r on r.id = m.run_id
         where m.brand_id = $1 and r.agent = any($2::text[])`,
-      [brandId, AGENTS],
+      [brandId, COST_AGENTS],
     )
     const t = total.rows[0]!
     const overview: Overview = {
@@ -235,7 +259,7 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
               coalesce(sum(m.server_tool_searches), 0)::int as searches,
               coalesce(sum(m.server_tool_fetches), 0)::int as fetches,
               sum(m.usd_micros)::text as usd, sum(m.inr_micros)::text as inr,
-              count(m) filter (where m.status = 'succeeded' and m.usd_micros is null)::int as uncosted
+              count(m) filter (where m.status in ('succeeded', 'unknown') and m.usd_micros is null)::int as uncosted
          from app.job_input i
          left join app.job_control c on c.job_id = i.job_id
          left join app.model_call m on m.job_id = i.job_id

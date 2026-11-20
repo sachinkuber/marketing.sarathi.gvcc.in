@@ -96,7 +96,7 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
       access: { kind: 'permission', permission: 'onboard_brand' },
       summary: 'Start research: one job per source group, from the saved intake and the uploaded documents',
       handlers: [
-        validate({ params: brandParams, body: z.strictObject({}) }),
+        validate({ params: brandParams }),
         async (_req, res) => {
           res.json(
             await startResearch(deps.pool, jobs, {

@@ -17,7 +17,7 @@ let owner: TestClient
 let admin: TestClient
 let n = 0
 
-const base = () => `/api/v1/brands/${brandId}/onboarding`
+const base = (b = brandId) => `/api/v1/brands/${b}/onboarding`
 const INTAKE = {
   website: 'https://aztek.example/',
   socials: { instagram: 'https://instagram.com/aztek' },
@@ -43,14 +43,15 @@ async function addDocument(name: string): Promise<string> {
   return made.rows[0].id as string
 }
 
-const start = () => owner.request('POST', `${base()}/research`, { body: {} })
+const start = (b = brandId) => owner.request('POST', `${base(b)}/research`, { body: {} })
+const ORDER = ['site', 'social', 'visibility', 'competitors', 'documents']
+// Jobs of one run, in group order: they are created in one transaction, so their creation times tie.
 const jobRows = async (runId: string) =>
   (
-    await q(
-      `select job_id, input, class, agent, files_hash from app.job_input where run_id = $1 order by created_at`,
-      [runId],
-    )
-  ).rows
+    await q(`select job_id, input, class, agent, files_hash from app.job_input where run_id = $1`, [runId])
+  ).rows.sort((a, b) => ORDER.indexOf(a.input.group) - ORDER.indexOf(b.input.group))
+const jobOf = async (runId: string, group: string) =>
+  (await jobRows(runId)).find((r) => r.input.group === group)!
 
 beforeAll(async () => {
   stack = await createStack({ withQueue: true, realAudit: true })
@@ -64,6 +65,11 @@ beforeAll(async () => {
   await q(
     `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, search_micros, source)
      values ('claude-sonnet-5-5', current_date - 30, 4000000, 20000000, 200000, 5000000, 10000, 'test')
+     on conflict do nothing`,
+  )
+  await q(
+    `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, search_micros, source)
+     values ('nosearch-model', current_date - 30, 4000000, 20000000, 200000, 5000000, null, 'test')
      on conflict do nothing`,
   )
   await q(`select app.record_fx_rate(current_date - 1, 83500000, 'test')`)
@@ -88,8 +94,20 @@ describe('intake', () => {
     const got = await owner.request('GET', base())
     expect(got.status).toBe(200)
     expect(got.json).toMatchObject({ step: 'intake', intake: INTAKE, research: null, documents: 0 })
-    const audit = await q(`select detail from audit.log where action = 'onboarding.intake_saved'`)
-    expect(audit.rows[0].detail).toEqual({ socials: 1, competitors: 1 })
+    const audit = await q(
+      `select detail from audit.log where action = 'onboarding.intake_saved' and brand_id = $1 order by seq`,
+      [brandId],
+    )
+    expect(audit.rows.at(-1).detail).toEqual({ socials: 1, competitors: 1 })
+  })
+
+  it('saving the intake creates the onboarding row when there is none', async () => {
+    const fresh = await addBrand(stack, 'research-start-put')
+    expect((await q('select 1 from app.onboarding where brand_id = $1', [fresh])).rowCount).toBe(0)
+    expect((await owner.request('PUT', `${base(fresh)}/intake`, { body: INTAKE })).status).toBe(200)
+    expect((await q('select step from app.onboarding where brand_id = $1', [fresh])).rows).toEqual([
+      { step: 'intake' },
+    ])
   })
 
   it('a non-https website is refused 400 naming website', async () => {
@@ -132,6 +150,10 @@ describe('starting research', () => {
       'research',
     )
     // A re-run once the first run is no longer running; now with two documents.
+    // The first run ends the way a real one does: its jobs finish, then the run.
+    await q(`update app.job_input set finished_at = now(), outcome = 'null'::jsonb where run_id = $1`, [
+      first.json.runId,
+    ])
     await q(`update app.run set state = 'succeeded' where id = $1`, [first.json.runId])
     const a = await addDocument('b.pdf')
     const b = await addDocument('a.pdf')
@@ -139,16 +161,60 @@ describe('starting research', () => {
     const again = await jobRows(second.json.runId)
     expect(again).toHaveLength(5)
     expect(again[4].input).toMatchObject({ group: 'documents', documentIds: [a, b] })
-    const audit = await q(`select detail from audit.log where action = 'onboarding.research_started'`)
-    expect(audit.rows.map((r) => r.detail.groups).sort()).toEqual([4, 5])
+    const audit = await q(
+      `select detail from audit.log where action = 'onboarding.research_started' and brand_id = $1 order by seq`,
+      [brandId],
+    )
+    expect(audit.rows.map((r) => r.detail.groups)).toEqual([4, 5])
+  })
+
+  it('a start with no body is accepted', async () => {
+    await owner.request('PUT', `${base()}/intake`, { body: INTAKE })
+    const reply = await owner.request('POST', `${base()}/research`)
+    expect(reply.status).toBe(200)
+  })
+
+  it('a second start is refused while a group of the first run still runs, even with the run failed', async () => {
+    await owner.request('PUT', `${base()}/intake`, { body: INTAKE })
+    const first = await start()
+    // What markDead does: one job dies and its run fails, while the siblings carry on.
+    const site = await jobOf(first.json.runId, 'site')
+    await q(`update app.job_control set dead_at = now() where job_id = $1`, [site.job_id])
+    await q(`update app.run set state = 'failed', finished_at = now() where id = $1`, [first.json.runId])
+    const before = (await q(`select count(*)::int as n from app.run where brand_id = $1`, [brandId])).rows[0]
+      .n
+    const second = await start()
+    expect(second.status).toBe(409)
+    expect(second.json.error.code).toBe('research_running')
+    expect((await q(`select count(*)::int as n from app.run where brand_id = $1`, [brandId])).rows[0].n).toBe(
+      before,
+    )
+  })
+
+  it('too long, too many and misnamed intake fields get plain messages', async () => {
+    const long = await owner.request('PUT', `${base()}/intake`, {
+      body: { ...INTAKE, website: `https://a.example/${'x'.repeat(300)}` },
+    })
+    expect(JSON.stringify(long.json)).toContain('at most 300 characters')
+    const many = await owner.request('PUT', `${base()}/intake`, {
+      body: { ...INTAKE, competitors: Array.from({ length: 6 }, (_, i) => ({ name: `c${i}` })) },
+    })
+    expect(JSON.stringify(many.json)).toContain('List at most 5 competitors.')
+    const name = await owner.request('PUT', `${base()}/intake`, {
+      body: { ...INTAKE, competitors: [{ name: 'n'.repeat(121) }] },
+    })
+    expect(JSON.stringify(name.json)).toContain('at most 120 characters')
   })
 
   it('a second start while running is refused', async () => {
     await owner.request('PUT', `${base()}/intake`, { body: INTAKE })
+    const runs = () => q(`select count(*)::int as n from app.run where brand_id = $1`, [brandId])
+    const before = (await runs()).rows[0].n
     expect((await start()).status).toBe(200)
     const second = await start()
     expect(second.status).toBe(409)
     expect(second.json.error.code).toBe('research_running')
+    expect((await runs()).rows[0].n).toBe(before + 1)
   })
 
   it('without a live research_merge release nothing is created', async () => {
@@ -166,7 +232,11 @@ describe('starting research', () => {
   })
 })
 
-async function claimedCall(jobId: string, usage: { searches: number; fetches: number }) {
+async function claimedCall(
+  jobId: string,
+  usage: { searches: number; fetches: number },
+  model = 'claude-sonnet-5-5',
+) {
   await q(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [jobId])
   const started = await startAttempt(jobs, jobId, 'w1')
   if (started.finished || 'outcome' in started) throw new Error('unexpected')
@@ -180,14 +250,14 @@ async function claimedCall(jobId: string, usage: { searches: number; fetches: nu
   const reg = await registerModelCall(jobs, check.claims, {
     step,
     requestHash: 'h',
-    model: 'claude-sonnet-5-5',
+    model,
   })
   if (reg.outcome !== 'send') throw new Error('unexpected')
   await saveCheckpoint(jobs, check.claims, {
     callId: reg.callId,
     step,
     output: { text: 'x' },
-    model: 'claude-sonnet-5-5',
+    model,
     providerMessageId: 'm',
     providerRequestId: null,
     usage: {
@@ -205,14 +275,16 @@ describe('the overview', () => {
   it("the overview shows each group's state and the running cost", async () => {
     await owner.request('PUT', `${base()}/intake`, { body: INTAKE })
     const { json } = await start()
-    const rows = await jobRows(json.runId)
+    const site = await jobOf(json.runId, 'site')
+    const social = await jobOf(json.runId, 'social')
+    const visibility = await jobOf(json.runId, 'visibility')
     // site: running (attempt started); social: done; visibility: dead; competitors: waiting.
-    await claimedCall(rows[0].job_id, { searches: 1, fetches: 0 })
+    await claimedCall(site.job_id, { searches: 1, fetches: 0 })
     await q(
       `update app.job_input set finished_at = now(), outcome = '{"group":"social","sources":[],"findings":[]}' where job_id = $1`,
-      [rows[1].job_id],
+      [social.job_id],
     )
-    await q(`update app.job_control set dead_at = now() where job_id = $1`, [rows[2].job_id])
+    await q(`update app.job_control set dead_at = now() where job_id = $1`, [visibility.job_id])
     const got = (await owner.request('GET', base())).json
     expect(got.research.runId).toBe(json.runId)
     expect(got.research.groups.map((g: { group: string; state: string }) => [g.group, g.state])).toEqual([
@@ -229,8 +301,7 @@ describe('the overview', () => {
   it('a group shows its searches, fetches and cost while running, and its sources once done', async () => {
     await owner.request('PUT', `${base()}/intake`, { body: INTAKE })
     const { json } = await start()
-    const rows = await jobRows(json.runId)
-    const jobId = rows[0].job_id as string
+    const jobId = (await jobOf(json.runId, 'site')).job_id as string
     await claimedCall(jobId, { searches: 7, fetches: 3 })
     let group = (await owner.request('GET', base())).json.research.groups[0]
     expect(group).toMatchObject({ group: 'site', state: 'running', searches: 7, fetches: 3, sources: [] })
@@ -280,6 +351,35 @@ describe('the overview', () => {
       },
     ])
     expect(JSON.stringify(group)).not.toContain('About us')
+  })
+})
+
+describe('cost that cannot be known', () => {
+  it('is null for a group and for the total when a call has searches but no search price', async () => {
+    const fresh = await addBrand(stack, 'research-start-cost')
+    await owner.request('PUT', `${base(fresh)}/intake`, { body: INTAKE })
+    const { json } = await start(fresh)
+    const site = await jobOf(json.runId, 'site')
+    await claimedCall(site.job_id, { searches: 2, fetches: 0 }, 'nosearch-model')
+    const got = (await owner.request('GET', base(fresh))).json
+    expect(got.research.groups[0].cost).toEqual({ usdMicros: null, inrMicros: null })
+    expect(got.cost).toEqual({ usdMicros: null, inrMicros: null })
+  })
+
+  it('is null while a call is unknown, because it may have been billed', async () => {
+    const fresh = await addBrand(stack, 'research-start-unknown')
+    await owner.request('PUT', `${base(fresh)}/intake`, { body: INTAKE })
+    const { json } = await start(fresh)
+    const site = await jobOf(json.runId, 'site')
+    await claimedCall(site.job_id, { searches: 1, fetches: 0 })
+    expect((await owner.request('GET', base(fresh))).json.cost.usdMicros).not.toBeNull()
+    await q(
+      `update app.model_call set status = 'unknown', usd_micros = null, inr_micros = null where job_id = $1`,
+      [site.job_id],
+    )
+    const got = (await owner.request('GET', base(fresh))).json
+    expect(got.research.groups[0].cost.usdMicros).toBeNull()
+    expect(got.cost.usdMicros).toBeNull()
   })
 })
 
