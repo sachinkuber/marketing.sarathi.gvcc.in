@@ -148,10 +148,10 @@ describe('upload and list', () => {
     expect(none.status).toBe(400)
     expect(none.json.error.code).toBe('file_name')
     expect(
-      (await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(256) })).json.error.code,
+      (await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(201) })).json.error.code,
     ).toBe('file_name')
     expect((await upload(brandId, file('application/pdf', 64), { name: ' ' })).status).toBe(400)
-    expect((await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(255) })).status).toBe(201)
+    expect((await upload(brandId, file('application/pdf', 64), { name: 'a'.repeat(200) })).status).toBe(201)
     expect(await count(brandId)).toBe(1)
   })
 })

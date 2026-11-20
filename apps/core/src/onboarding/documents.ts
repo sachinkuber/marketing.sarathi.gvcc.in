@@ -13,7 +13,7 @@ export const PDF_LIMIT = 100 * MB
 export const IMAGE_LIMIT = 5 * MB
 export const MAX_DOCUMENTS = 20
 export const BRAND_STORAGE_LIMIT = 500 * MB
-export const MAX_FILE_NAME = 255
+export const MAX_FILE_NAME = 200
 
 export const isDocumentType = (value: string): value is DocumentType =>
   (MEDIA_TYPES as readonly string[]).includes(value)
