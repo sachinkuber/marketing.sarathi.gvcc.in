@@ -67,38 +67,50 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
       throw new Refused('that email is not a platform owner; release with the owner sign-in email (--by)')
     }
 
-    // subject_brand_id is the id of the brand the slug names, as `eval --brand` records it.
-    const targets: (string | null)[] = brandSlugs.length > 0 ? brandSlugs : [null]
-    const missing: string[] = []
+    // subject_brand_id is the id of the brand the slug names, as `eval --brand` records it. A folder whose
+    // slug names no brand can never have a run of its own, so it is refused before any run is looked at.
+    const targets: { slug: string | null; brandId: string | null }[] = []
+    for (const slug of brandSlugs) {
+      const brand = await client.query<{ id: string }>('select id from app.brand where slug = $1', [slug])
+      const brandId = brand.rows[0]?.id
+      if (!brandId) {
+        throw new Refused(
+          `eval/${slug}/ has no brand with the slug "${slug}"; rename the folder or create the brand`,
+        )
+      }
+      targets.push({ slug, brandId })
+    }
+    if (targets.length === 0) targets.push({ slug: null, brandId: null })
+    // brandId null means the no-brand run (subject_brand_id is null); otherwise it must be exactly that brand.
+    const subjectMatches = `(($5::uuid is null and r.subject_brand_id is null) or r.subject_brand_id = $5::uuid)`
+
+    const missing: (string | null)[] = []
     let runId: string | undefined
     let failedCases: string[] = []
-    for (const slug of targets) {
+    for (const { slug, brandId } of targets) {
       const run = await client.query<{ id: string }>(
         `select r.id from app.evaluation_run r
           where r.agent = $1 and r.version = $2 and r.files_hash = $3 and r.sets_hash = $4 and r.passed = true
-            and r.subject_brand_id is not distinct from
-                (select b.id from app.brand b where b.slug = $5 and $5::text is not null)
+            and ${subjectMatches}
           order by r.finished_at desc nulls last limit 1`,
-        [agent, version, filesHash, sets, slug],
+        [agent, version, filesHash, sets, brandId],
       )
       if (run.rows[0]) {
         runId ??= run.rows[0].id
         continue
       }
-      missing.push(slug ?? '')
+      missing.push(slug)
       if (failedCases.length === 0) {
         const failed = await client.query<{ case_id: string }>(
           `select x.case_id from app.evaluation_result x
             where x.run_id = (
               select r.id from app.evaluation_run r
                where r.agent = $1 and r.version = $2 and r.files_hash = $3 and r.sets_hash = $4
-                 and r.passed is not null
-                 and r.subject_brand_id is not distinct from
-                     (select b.id from app.brand b where b.slug = $5 and $5::text is not null)
+                 and r.passed is not null and ${subjectMatches}
                order by r.finished_at desc nulls last limit 1)
               and not x.passed
             order by x.case_id limit 10`,
-          [agent, version, filesHash, sets, slug],
+          [agent, version, filesHash, sets, brandId],
         )
         failedCases = failed.rows.map((r) => r.case_id)
       }
@@ -107,7 +119,7 @@ export async function releaseAgent(input: ReleaseInput): Promise<ReleaseResult> 
       const fixes = missing
         .map((slug) => `npm run eval -- --agent ${agent}${slug ? ` --brand ${slug}` : ''}`)
         .join(' ; ')
-      const brands = missing.filter((slug) => slug !== '')
+      const brands = missing.filter((slug): slug is string => slug !== null)
       throw new Refused(
         `no passing evaluation run for ${agent} v${version} with the current files` +
           (brands.length > 0 ? ` and cases for brand ${brands.join(', ')}` : '') +

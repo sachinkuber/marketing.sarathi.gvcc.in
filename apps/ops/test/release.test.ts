@@ -206,6 +206,14 @@ describe('releaseAgent', () => {
     expect(await liveRows()).toMatchObject([{ version: 2 }])
   })
 
+  it('refuses a brand folder with no matching brand, even with a passing shared-only run', async () => {
+    const dir = agentDir()
+    addBrandFolder(dir, 'ghost')
+    await recordRun(dir, true)
+    await expect(release(dir)).rejects.toThrow(/eval\/ghost\/ has no brand with the slug "ghost"/)
+    expect(await liveRows()).toMatchObject([{ version: 2 }])
+  })
+
   it('refuses until every brand folder has a passing run for its own brand', async () => {
     const dir = agentDir()
     addBrandFolder(dir, 'brand-a')
