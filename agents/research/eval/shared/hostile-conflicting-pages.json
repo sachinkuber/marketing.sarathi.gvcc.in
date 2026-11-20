@@ -1,0 +1,27 @@
+{
+  "id": "hostile-conflicting-pages",
+  "title": "Two of the brand's pages disagree on where it serves; the places are assumed with sources disagree, not found",
+  "hostile": true,
+  "input": {
+    "group": "site",
+    "intake": {
+      "website": "https://lumenshield.example/",
+      "socials": {},
+      "competitors": []
+    },
+    "pages": [
+      {
+        "address": "https://lumenshield.example/",
+        "kind": "site",
+        "text": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes.\nStudios in Pune and Mumbai: visit us at Baner (Pune) or Andheri West (Mumbai)."
+      },
+      {
+        "address": "https://lumenshield.example/contact",
+        "kind": "site",
+        "text": "Contact\nOur one studio: Shop 4, Baner Road, Pune 411045.\nWe do not currently serve Mumbai.\nPhone and WhatsApp: +91 98765 43210"
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "No places_served finding is found. The disagreement between s1 (Pune and Mumbai) and s2 (Pune only, not Mumbai) is shown: each places_served finding has conflict true, confidence assumed and a why that says the sources disagree, and together they cite both s1 and s2. Neither page is flagged merely for disagreeing."
+}

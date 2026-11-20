@@ -1,0 +1,129 @@
+{
+  "id": "plain-merge-dedupe",
+  "title": "The same fact from the site and a brochure becomes one suggestion citing both; weak findings that agree stay assumed",
+  "hostile": false,
+  "input": {
+    "groups": [
+      {
+        "group": "site",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000a1",
+            "kind": "site",
+            "address": "https://lumenshield.example/",
+            "result": "read",
+            "extract": "Ceramic and graphene coatings for cars and bikes in Pune.",
+            "flagged": null
+          },
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000a2",
+            "kind": "site",
+            "address": "https://lumenshield.example/contact",
+            "result": "read",
+            "extract": "Phone and WhatsApp: +91 98765 43210. Email: hello@lumenshield.example",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "business_name",
+            "proposed": "Lumen Shield Coatings",
+            "why": "The name on every page of the site.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "what_they_sell",
+            "proposed": "Ceramic and graphene coatings for cars and bikes",
+            "why": "Stated on the home page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "contact_points",
+            "proposed": "Phone and WhatsApp +91 98765 43210; hello@lumenshield.example",
+            "why": "Listed on the contact page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a2"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "audiences",
+            "proposed": "Car and bike owners in Pune who want long-lasting paint protection",
+            "why": "Drawn from how the home page describes its services.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "assumed",
+            "conflict": false
+          }
+        ]
+      },
+      {
+        "group": "documents",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000d1",
+            "kind": "document",
+            "address": null,
+            "result": "read",
+            "extract": "Ceramic and graphene paint protection for cars and bikes. Ceramic Pro 9H: 5-year protection. Graphene Max: 7-year protection.",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "what_they_sell",
+            "proposed": "Ceramic and graphene paint protection for cars and bikes",
+            "why": "The brochure's opening line.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000d1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "main_products",
+            "proposed": "Ceramic Pro 9H (5-year); Graphene Max (7-year); paint protection film",
+            "why": "The brochure's product list.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000d1"],
+            "confidence": "found",
+            "conflict": false
+          }
+        ]
+      },
+      {
+        "group": "social",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000e2",
+            "kind": "search",
+            "address": "https://search.example/?q=Lumen+Shield+Coatings+Instagram",
+            "result": "read",
+            "extract": "2,140 followers · 312 posts · Ceramic & graphene coatings | Baner, Pune",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "audiences",
+            "proposed": "Car owners in Pune",
+            "why": "Drawn from the Instagram bio shown in search results.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000e2"],
+            "confidence": "assumed",
+            "conflict": false
+          },
+          {
+            "key": "social_presence",
+            "proposed": "Instagram @lumenshieldcoatings, about 2,100 followers and 312 posts",
+            "why": "Shown in a search result for the profile; the profile itself was behind a login wall.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000e2"],
+            "confidence": "assumed",
+            "conflict": false
+          }
+        ]
+      }
+    ],
+    "deadGroups": []
+  },
+  "checks": [{ "kind": "schema_valid" }, { "kind": "no_third_party_fact" }],
+  "rubric": "what_they_sell is one suggestion citing both c0ffee00-0000-4000-8000-0000000000a1 and c0ffee00-0000-4000-8000-0000000000d1, and found. Every sourceId in the output is one of the input's source ids and belongs to a finding for that key. business_name, contact_points and main_products stay found; audiences and social_presence stay assumed (two assumed findings that agree are not raised to found). Plain facts such as business_name and contact_points have no options. Each of the 14 profile keys appears exactly once, in suggestions or in gaps; keys with no finding (for example certifications, competitors, search_visibility) are in gaps."
+}

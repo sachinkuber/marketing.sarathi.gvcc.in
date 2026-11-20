@@ -1,0 +1,25 @@
+{
+  "id": "plain-document-brochure",
+  "title": "An uploaded brochure is a document source that supports found findings without any web reading",
+  "hostile": false,
+  "input": {
+    "group": "documents",
+    "intake": {
+      "website": "https://lumenshield.example/",
+      "socials": {},
+      "competitors": []
+    },
+    "documentIds": ["b7c1d2e3-5f60-4a71-8b92-0c1d2e3f4a51"],
+    "documents": [
+      {
+        "documentId": "b7c1d2e3-5f60-4a71-8b92-0c1d2e3f4a51",
+        "mediaType": "application/pdf",
+        "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA1OTUgODQyXSAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA0IDAgUiA+PiA+PiAvQ29udGVudHMgNSAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nID4+CmVuZG9iago1IDAgb2JqCjw8IC9MZW5ndGggMzAwIC9GaWx0ZXIgL0ZsYXRlRGVjb2RlID4+CnN0cmVhbQp42n2RTU/CQBCG7/6K9whasFtbSjkpRPSASQNNuHDZtlO6st1tdrcJJv54YyMJRjBzm8w8eT/mGe6XDIwhqxD5iKc+shIsQra68fE9Zo/BqmtIYVMLkiUWmjuh9hYjpEaXXeEwN7qoO0MI/GAyRPaO7PbsfUGGN6IAVyX2hrc1KULLhXJojXZUOKEVKm1QcGP7s1wcyI6vo1KjkbzOEI0+iJszjIfK6AZrOwYLvSRJLkBeThre+HGG+B9EcA2R/lEvZIPdIE2Xu2FvJddKkbMe8q5p6cdW1UmJXJfiormN60qh7QxzrshgrXnpIe0UIWTMD6MeseWHX+sovhQTlxLaYFtzZ5/aFncJQzKNJxHCh4D5+ERNUupH+d2s7Ysd05E3raQT7Tn7AocvoY4KZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAwMDAgbiAKMDAwMDAwMDMzOCAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjcxMAolJUVPRgo=",
+        "firstPage": 1,
+        "lastPage": 1
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "group is documents. The brochure is source s1 with kind document, address null, documentId b7c1d2e3-5f60-4a71-8b92-0c1d2e3f4a51 and result read, and no web page is listed as a source. main_products (ceramic coating, graphene coating, paint protection film), places_served (Baner and Wakad in Pune) and contact_points are found, citing s1. Nothing is added that the brochure does not say, and unsettled is empty."
+}

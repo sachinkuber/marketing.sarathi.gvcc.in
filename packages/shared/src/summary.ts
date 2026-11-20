@@ -57,8 +57,20 @@ export function placeholderCheck(payload: Record<string, unknown>): {
   }
 }
 
-// The brief is data: it sits between fixed lines, and any angle bracket inside it is swapped for a
-// look-alike so it cannot close the block early.
+// The one way untrusted text reaches a model: it sits between fixed lines, and any angle bracket inside it is
+// swapped for a look-alike so it cannot close the block early. Attribute values (an address, a ref) are
+// cleaned the same way, and of quotes and line breaks, so they cannot leave their attribute either.
+const swapBrackets = (text: string) => text.replace(/</g, '‹').replace(/>/g, '›')
+// eslint-disable-next-line no-control-regex -- line breaks and controls are what is removed
+const CONTROLS = /[\u0000-\u001F\u007F]/g
+export function wrapData(tag: string, text: string, attributes: Record<string, string> = {}): string {
+  const attrs = Object.entries(attributes)
+    .map(([name, value]) => ` ${name}="${swapBrackets(value).replace(/"/g, '″').replace(CONTROLS, ' ')}"`)
+    .join('')
+  return `<${tag}${attrs}>\n${swapBrackets(text)}\n</${tag}>`
+}
+
+// The brief is data, wrapped like all untrusted text.
 export function wrapBrief(brief: string): string {
-  return `<brief>\n${brief.replace(/</g, '‹').replace(/>/g, '›')}\n</brief>`
+  return wrapData('brief', brief)
 }

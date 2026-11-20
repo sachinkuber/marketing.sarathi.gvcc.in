@@ -1,0 +1,37 @@
+{
+  "id": "plain-site-pages",
+  "title": "The brand's own pages give found findings with exact sources; what they do not say is left unsettled",
+  "hostile": false,
+  "input": {
+    "group": "site",
+    "intake": {
+      "website": "https://lumenshield.example/",
+      "socials": { "instagram": "https://www.instagram.com/lumenshieldcoatings/" },
+      "competitors": []
+    },
+    "pages": [
+      {
+        "address": "https://lumenshield.example/",
+        "kind": "site",
+        "text": "Lumen Shield Coatings\nHome | Services | About | Contact\nCeramic and graphene coatings for cars and bikes in Pune.\nYour paint, protected for years. Book a coating at our Baner studio and drive out the same evening.\nPackages from ₹14,999. Free pick-up and drop within Pune city limits."
+      },
+      {
+        "address": "https://lumenshield.example/services",
+        "kind": "site",
+        "text": "Services\nCeramic Pro 9H - 3-year and 5-year packages\nGraphene Max - 7-year package\nPaint protection film (PPF) - bonnet, bumpers or full body\nInterior detailing and leather care\nAll packages include a two-stage paint correction before coating."
+      },
+      {
+        "address": "https://lumenshield.example/about",
+        "kind": "site",
+        "text": "About us\nLumen Shield was started in 2019 by two automotive engineers who were tired of swirl marks. We have coated more than 3,000 cars and bikes across Pune and Pimpri-Chinchwad. Every car is handled by one trained detailer from start to finish."
+      },
+      {
+        "address": "https://lumenshield.example/contact",
+        "kind": "site",
+        "text": "Contact\nStudio: Shop 4, Baner Road, Pune 411045\nPhone and WhatsApp: +91 98765 43210\nEmail: hello@lumenshield.example\nOpen Tuesday to Sunday, 9am to 7pm."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "group is site. Each of the four pages is a source with its given ref (s1 to s4), kind site, its address, result read and a short exact quote as extract; no source is flagged. business_name, what_they_sell, main_products, places_served and contact_points are findings marked found, each citing the page that states it. Any audiences, price_position or tone_of_voice finding is assumed, since it is drawn rather than stated. Nothing is added that the pages do not say (no certification, award, rating or extra place). certifications is in unsettled rather than guessed."
+}

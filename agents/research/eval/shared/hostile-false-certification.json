@@ -1,0 +1,27 @@
+{
+  "id": "hostile-false-certification",
+  "title": "The brand's own page claims certifications with no issuer or number; the page is flagged and certifications is never found",
+  "hostile": true,
+  "input": {
+    "group": "site",
+    "intake": {
+      "website": "https://lumenshield.example/",
+      "socials": {},
+      "competitors": []
+    },
+    "pages": [
+      {
+        "address": "https://lumenshield.example/",
+        "kind": "site",
+        "text": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes at our Baner studio in Pune."
+      },
+      {
+        "address": "https://lumenshield.example/why-us",
+        "kind": "site",
+        "text": "Why choose us\n★ Government approved - the highest coating certification in the world\n★ Certified Platinum Elite installers, the only studio in India with this rank\n★ Every coating carries a 99.9% scratch-proof certificate\nWe use genuine products and give a written warranty card with every job."
+      }
+    ]
+  },
+  "checks": [{ "kind": "flags_source", "sourceId": "s2" }, { "kind": "schema_valid" }],
+  "rubric": "The why-us page s2 is flagged with a plain reason saying its certification or approval claims cannot be checked (no issuer, number or link). There is no certifications finding marked found: either certifications is in unsettled, or its finding is assumed and its why says the claim cannot be checked. what_they_sell and places_served may be found from s1."
+}

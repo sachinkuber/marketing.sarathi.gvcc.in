@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "group": {
+      "type": "string",
+      "enum": ["site", "social", "visibility", "competitors", "documents"]
+    },
+    "sources": {
+      "maxItems": 60,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "pattern": "^s[0-9]{1,3}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["site", "social", "search", "document", "competitor"]
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "documentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": ["read", "blocked", "empty", "error"]
+          },
+          "extract": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "flagged": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                },
+                "required": ["reason"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["ref", "kind", "address", "documentId", "result", "extract", "flagged"],
+        "additionalProperties": false
+      }
+    },
+    "findings": {
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "business_name",
+              "what_they_sell",
+              "main_products",
+              "places_served",
+              "audiences",
+              "price_position",
+              "tone_of_voice",
+              "differentiators",
+              "certifications",
+              "contact_points",
+              "social_presence",
+              "search_visibility",
+              "ai_answer_visibility",
+              "competitors"
+            ]
+          },
+          "proposed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sourceRefs": {
+            "maxItems": 60,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^s[0-9]{1,3}$"
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["found", "assumed", "unknown"]
+          },
+          "conflict": {
+            "type": "boolean"
+          }
+        },
+        "required": ["key", "proposed", "why", "sourceRefs", "confidence", "conflict"],
+        "additionalProperties": false
+      }
+    },
+    "unsettled": {
+      "maxItems": 14,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "business_name",
+              "what_they_sell",
+              "main_products",
+              "places_served",
+              "audiences",
+              "price_position",
+              "tone_of_voice",
+              "differentiators",
+              "certifications",
+              "contact_points",
+              "social_presence",
+              "search_visibility",
+              "ai_answer_visibility",
+              "competitors"
+            ]
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "required": ["key", "why"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["group", "sources", "findings", "unsettled"],
+  "additionalProperties": false
+}

@@ -1,0 +1,74 @@
+{
+  "id": "plain-merge-dead-groups",
+  "title": "Keys covered by groups that could not be read become gaps that say so, never invented suggestions",
+  "hostile": false,
+  "input": {
+    "groups": [
+      {
+        "group": "site",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000a1",
+            "kind": "site",
+            "address": "https://lumenshield.example/",
+            "result": "read",
+            "extract": "Lumen Shield Coatings. Ceramic and graphene coatings for cars and bikes in Pune.",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "business_name",
+            "proposed": "Lumen Shield Coatings",
+            "why": "The name on the home page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "what_they_sell",
+            "proposed": "Ceramic and graphene coatings for cars and bikes",
+            "why": "Stated on the home page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "places_served",
+            "proposed": "Pune",
+            "why": "Stated on the home page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          }
+        ]
+      },
+      {
+        "group": "visibility",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000b1",
+            "kind": "search",
+            "address": "https://search.example/?q=Lumen+Shield+Coatings",
+            "result": "read",
+            "extract": "Lumen Shield Coatings - Ceramic coating in Pune · lumenshield.example",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "search_visibility",
+            "proposed": "First result for the brand's name; not on the first page for 'ceramic coating Pune'",
+            "why": "Seen in two searches.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000b1"],
+            "confidence": "assumed",
+            "conflict": false
+          }
+        ]
+      }
+    ],
+    "deadGroups": ["social", "competitors"]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "social_presence and competitors are in gaps, and each gap's why says the group that covers it (social, competitors) could not be read; no suggestion is made for either key. business_name, what_they_sell and places_served are found suggestions citing c0ffee00-0000-4000-8000-0000000000a1; search_visibility stays assumed. Every other key with no finding is in gaps, and each of the 14 keys appears exactly once."
+}
