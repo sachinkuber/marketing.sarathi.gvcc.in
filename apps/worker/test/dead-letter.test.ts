@@ -29,10 +29,14 @@ beforeAll(async () => {
     core: httpCoreClient(stack.server.url, jobs.workerSecret),
     model: standInModel({ logFile: '/dev/null' }),
     handlers: {
-      'test.flaky': async () => {
-        handlerRuns += 1
-        if (shouldFail) throw new Error('boom')
-        return { type: 'test.flaky', result: {} }
+      'test.flaky': {
+        handler: async () => {
+          handlerRuns += 1
+          if (shouldFail) throw new Error('boom')
+          return { type: 'test.flaky', result: {} }
+        },
+        agent: null,
+        filesHash: null,
       },
     },
     queueUrl: stack.db.urlFor('queue'),

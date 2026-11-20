@@ -39,6 +39,10 @@ export interface NewJob {
   jobClass: JobClass
   input: unknown
   expectedResultType: string
+  // The agent whose files the worker loads to run this job. Its live release is read here and its files hash
+  // stored, so the worker can refuse to run files that differ from the release (ruling R9). A job that makes
+  // no model call from agent files passes none.
+  agent?: string
 }
 
 // Backpressure applies to production and bulk work only (architecture 7.1): interactive and publishing
@@ -65,11 +69,31 @@ export async function createJob(
   )
   const scheduleKey = brand.rows[0]?.schedule_key
   if (!scheduleKey) throw new AppError(404, 'brand_not_found', 'No such brand.')
+  let filesHash: string | null = null
+  if (job.agent !== undefined) {
+    const live = await client.query<{ files_hash: string }>(
+      'select files_hash from app.agent_definition_version where agent = $1 and live',
+      [job.agent],
+    )
+    if (!live.rows[0]) {
+      throw new AppError(503, 'agent_unavailable', `The ${job.agent} agent has no live release.`)
+    }
+    filesHash = live.rows[0].files_hash
+  }
   const jobId = randomUUID()
   await client.query(
-    `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type)
-     values ($1, $2, $3, $4, $5::jsonb, $6)`,
-    [jobId, brandId, job.runId, job.jobClass, JSON.stringify(job.input), job.expectedResultType],
+    `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type, agent, files_hash)
+     values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)`,
+    [
+      jobId,
+      brandId,
+      job.runId,
+      job.jobClass,
+      JSON.stringify(job.input),
+      job.expectedResultType,
+      job.agent ?? null,
+      filesHash,
+    ],
   )
   // Born held when an active kill switch covers the brand or the run's agent, so release finds it by its flag.
   const covered = await client.query<{ covered: boolean }>(
@@ -97,6 +121,9 @@ export interface StartedAttempt {
   savedSteps: unknown[]
   expectedResultType: string
   jobClass: JobClass
+  // The agent files the job must run (null: none, or a job made before they were recorded).
+  agent: string | null
+  filesHash: string | null
 }
 export interface FinishedJob {
   finished: true
@@ -139,8 +166,10 @@ export async function startAttempt(
       expected_result_type: string
       outcome: unknown
       finished_at: Date | null
+      agent: string | null
+      files_hash: string | null
     }>(
-      `select class, run_id, input, saved_steps, expected_result_type, outcome, finished_at
+      `select class, run_id, input, saved_steps, expected_result_type, outcome, finished_at, agent, files_hash
          from app.job_input where job_id = $1 for update`,
       [jobId],
     )
@@ -217,6 +246,8 @@ export async function startAttempt(
       savedSteps: row.saved_steps,
       expectedResultType: row.expected_result_type,
       jobClass: row.class,
+      agent: row.agent,
+      filesHash: row.files_hash,
     }
   })
 }

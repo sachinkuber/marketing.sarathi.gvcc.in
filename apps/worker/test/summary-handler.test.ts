@@ -127,7 +127,12 @@ describe('the summary handler through the runner', () => {
       },
     }
     const done = runJob(
-      { core, model, handlers: { 'summary.v1': summaryHandler }, workerId: 'w' },
+      {
+        core,
+        model,
+        handlers: { 'summary.v1': { handler: summaryHandler, agent: null, filesHash: null } },
+        workerId: 'w',
+      },
       { id: 'j', jobClass: 'interactive' },
     )
     return { done, posted, calls }

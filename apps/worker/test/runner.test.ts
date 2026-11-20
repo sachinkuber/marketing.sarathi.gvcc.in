@@ -20,6 +20,8 @@ function fakeCore(
         savedSteps: [],
         expectedResultType: 'test.echo',
         jobClass: 'interactive',
+        agent: null,
+        filesHash: null,
       }
     },
     async control() {
@@ -72,6 +74,9 @@ const model: ModelClient & { sent: ModelRequest[] } = {
   },
 }
 
+// A registry entry for a handler that loads no agent files.
+const plain = (handler: JobHandler) => ({ handler, agent: null, filesHash: null })
+
 const handler: JobHandler = async (ctx) => {
   const a = await ctx.modelStep('one', {
     model: 'm',
@@ -89,7 +94,7 @@ const handler: JobHandler = async (ctx) => {
 const deps = (core: CoreClient) => ({
   core,
   model,
-  handlers: { 'test.echo': handler },
+  handlers: { 'test.echo': plain(handler) },
   workerId: 'w',
   checkpointRetryDelayMs: 1,
 })
@@ -309,7 +314,7 @@ describe('running a job', () => {
         {
           ...deps(core),
           handlers: {
-            'test.echo': async (ctx) => {
+            'test.echo': plain(async (ctx) => {
               await ctx.modelStep('s', {
                 model: 'm',
                 ...(system === undefined ? {} : { system }),
@@ -317,7 +322,7 @@ describe('running a job', () => {
                 maxTokens: 10,
               })
               return { type: 'test.echo', result: null }
-            },
+            }),
           },
         },
         { id: 'j14', jobClass: 'interactive' },
@@ -338,7 +343,7 @@ describe('running a job', () => {
       {
         ...deps(core),
         handlers: {
-          'test.echo': async (ctx) => {
+          'test.echo': plain(async (ctx) => {
             await ctx.modelStep('s', {
               model: 'm',
               system: '',
@@ -346,7 +351,7 @@ describe('running a job', () => {
               maxTokens: 10,
             })
             return { type: 'test.echo', result: null }
-          },
+          }),
         },
       },
       { id: 'j15', jobClass: 'interactive' },
@@ -376,6 +381,8 @@ describe('running a job', () => {
           savedSteps: [],
           expectedResultType: 'unknown.type',
           jobClass: 'interactive',
+          agent: null,
+          filesHash: null,
         }
       },
     })
@@ -484,7 +491,7 @@ describe('running a job', () => {
         {
           ...deps(core),
           handlers: {
-            'test.echo': async (ctx) => {
+            'test.echo': plain(async (ctx) => {
               await ctx.modelStep('s', {
                 model: 'm',
                 ...(outputSchema ? { outputSchema } : {}),
@@ -492,7 +499,7 @@ describe('running a job', () => {
                 maxTokens: 10,
               })
               return { type: 'test.echo', result: null }
-            },
+            }),
           },
         },
         { id: 'jx', jobClass: 'interactive' },

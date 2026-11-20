@@ -6,10 +6,8 @@ import type { JobsDeps } from '../../core/src/jobs/service.ts'
 import { checkInjectOptions, injectLoad, parseInjectArgs, sendOffsets } from '../../core/src/load-inject.ts'
 import { GOOD_RESULT } from '../../core/test/summary-support.ts'
 import { createStack, type Stack } from '../../core/test/support.ts'
-import { checkHandler } from '../src/agents/check.ts'
-import { summaryHandler } from '../src/agents/summary.ts'
 import { httpCoreClient } from '../src/core-client.ts'
-import { startWorker } from '../src/main.ts'
+import { defaultHandlers, startWorker } from '../src/main.ts'
 import { standInModel } from '../src/standin.ts'
 
 // Test 41 (spec 17) needs production-class load: the load-test injector (apps/core/src/load-inject.ts) makes
@@ -96,7 +94,7 @@ describe('injected jobs', () => {
     worker = await startWorker({
       core: httpCoreClient(stack.server.url, jobs.workerSecret),
       model: standInModel({ logFile: '/dev/null', replyFor: () => JSON.stringify(GOOD_RESULT) }),
-      handlers: { 'summary.v1': summaryHandler, 'placeholder_check.v1': checkHandler },
+      handlers: defaultHandlers(),
       queueUrl: stack.db.urlFor('queue'),
       workerId: 'load-inject',
       classes: ['production', 'interactive'],

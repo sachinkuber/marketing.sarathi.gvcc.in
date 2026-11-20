@@ -79,7 +79,7 @@ async function startTestWorker(id: string): Promise<void> {
   worker = await startWorker({
     core: httpCoreClient(stack.server.url, jobs.workerSecret),
     model,
-    handlers: { [RESULT_TYPE]: oneStep },
+    handlers: { [RESULT_TYPE]: { handler: oneStep, agent: null, filesHash: null } },
     queueUrl: stack.db.urlFor('queue'),
     workerId: id,
     classes: ['interactive'],

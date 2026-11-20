@@ -23,3 +23,4 @@ export {
   type AgentDefinition,
   type LoadedAgent,
 } from './agent-definition.ts'
+export { agentFilesHash, setsHash } from './agent-files.ts'

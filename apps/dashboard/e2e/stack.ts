@@ -38,10 +38,8 @@ import type { Mailer, MailMessage, SendReceipt } from '../../core/src/ports.ts'
 import type { JobsDeps } from '../../core/src/jobs/service.ts'
 import type { ResultHandlers } from '../../core/src/jobs/results.ts'
 import { addBrand, addUser, enrol, TestClient, totp } from '../../core/test/support.ts'
-import { checkHandler } from '../../worker/src/agents/check.ts'
-import { summaryHandler } from '../../worker/src/agents/summary.ts'
 import { httpCoreClient } from '../../worker/src/core-client.ts'
-import { startWorker } from '../../worker/src/main.ts'
+import { defaultHandlers, startWorker } from '../../worker/src/main.ts'
 import { standInModel } from '../../worker/src/standin.ts'
 
 export const PASSWORD = 'correct horse battery'
@@ -235,7 +233,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
   const worker = await startWorker({
     core: httpCoreClient(coreUrl, config.workerSecret),
     model: standInModel({ logFile: '/dev/null', replyFor: () => MODEL_REPLY }),
-    handlers: { 'summary.v1': summaryHandler, 'placeholder_check.v1': checkHandler },
+    handlers: defaultHandlers(),
     queueUrl: db.urlFor('queue'),
     workerId: 'e2e',
     classes: ['interactive'],

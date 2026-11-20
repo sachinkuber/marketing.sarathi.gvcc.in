@@ -41,10 +41,16 @@ describe('the replies the worker accepts from the core', () => {
       savedSteps: [],
       expectedResultType: 'x',
       jobClass: 'interactive',
+      agent: 'summary',
+      filesHash: 'abc',
     }
     expect(replySchemas.startAttempt.safeParse(started).success).toBe(true)
     expect(replySchemas.startAttempt.safeParse({ ...started, token: undefined }).success).toBe(false)
     expect(replySchemas.startAttempt.safeParse({ ...started, jobClass: 'other' }).success).toBe(false)
+    expect(replySchemas.startAttempt.safeParse({ ...started, agent: null, filesHash: null }).success).toBe(
+      true,
+    )
+    expect(replySchemas.startAttempt.safeParse({ ...started, agent: undefined }).success).toBe(false)
   })
 
   it('rejects a checkpoint or result reply that is not understood', () => {

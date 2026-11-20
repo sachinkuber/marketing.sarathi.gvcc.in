@@ -53,6 +53,7 @@ export async function startSummaryRun(
       jobClass: input.jobClass ?? 'interactive',
       input: { brief },
       expectedResultType: SUMMARY_RESULT_TYPE,
+      agent: SUMMARY_AGENT,
     })
     await deps.audit.record(
       {

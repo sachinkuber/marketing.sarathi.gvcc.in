@@ -21,6 +21,8 @@ import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { inputOf, validate } from '../validate.ts'
 
 const jobParams = z.strictObject({ jobId: z.uuid() })
+// The reason a worker gives a job up itself; the dead-letter watcher sends none.
+const deadBody = z.strictObject({ reason: z.literal('agent_files_mismatch').optional() })
 // queueId: the queue row the worker claimed (optional, so an older worker is still understood).
 const startBody = z.strictObject({ workerId: z.string().min(1).max(200), queueId: z.uuid().optional() })
 
@@ -191,10 +193,13 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     access: { kind: 'worker' },
     summary: 'The dead-letter watcher reports a job the queue gave up on',
     handlers: [
-      validate({ params: jobParams }),
+      validate({ params: jobParams, body: deadBody }),
       async (_req, res) => {
-        const { params } = inputOf<{ params: z.infer<typeof jobParams> }>(res)
-        await markDead(deps, params.jobId)
+        const { params, body } = inputOf<{
+          params: z.infer<typeof jobParams>
+          body: z.infer<typeof deadBody>
+        }>(res)
+        await markDead(deps, params.jobId, body.reason)
         res.status(204).end()
       },
     ],

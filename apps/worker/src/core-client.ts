@@ -10,6 +10,8 @@ export interface StartedAttempt {
   savedSteps: unknown[]
   expectedResultType: string
   jobClass: JobClass
+  agent: string | null
+  filesHash: string | null
 }
 export type Registered =
   | { outcome: 'send'; callId: string; possibleDuplicate: boolean }
@@ -58,7 +60,8 @@ export interface CoreClient {
   // The attempt stopped because its job is held: the core ends it, so a release starts a fresh one.
   endAttempt(jobId: string, token: string, reason: 'held'): Promise<void>
   // Worker-level calls (no attempt token): the dead-letter watcher and the reconciliation timer (task 10).
-  jobDead(jobId: string): Promise<void>
+  // `reason` names why the worker itself gives the job up (agent_files_mismatch); the watcher sends none.
+  jobDead(jobId: string, reason?: string): Promise<void>
   reconcile(): Promise<{ marked: number }>
   // Of these failed job IDs, the ones the core has not yet marked dead.
   unmarkedDead(jobIds: string[]): Promise<string[]>
@@ -91,6 +94,8 @@ export const replySchemas = {
       savedSteps: z.array(z.unknown()),
       expectedResultType: z.string().min(1),
       jobClass: z.enum(JOB_CLASSES),
+      agent: z.string().nullable(),
+      filesHash: z.string().nullable(),
     }),
   ]),
   checkpoint: z.object({ costed: z.boolean() }),
@@ -177,7 +182,8 @@ export function httpCoreClient(baseUrl: string, workerSecret: string): CoreClien
     },
     endAttempt: (jobId, token, reason) =>
       call('POST', `/worker/jobs/${jobId}/attempt/end`, token, { reason }),
-    jobDead: (jobId) => call('POST', `/worker/jobs/${jobId}/dead`, null, {}),
+    jobDead: (jobId, reason) =>
+      call('POST', `/worker/jobs/${jobId}/dead`, null, reason === undefined ? {} : { reason }),
     async unmarkedDead(jobIds) {
       if (jobIds.length === 0) return []
       const found: string[] = []

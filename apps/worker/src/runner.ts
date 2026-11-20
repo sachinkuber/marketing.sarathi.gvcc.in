@@ -24,10 +24,18 @@ export interface JobContext {
 }
 export type JobHandler = (ctx: JobContext) => Promise<{ type: string; result: unknown }>
 
+// A registered handler and the agent files it runs on. `agent` is null for a handler that loads no agent files
+// (it makes no model call from them); `filesHash` is agentFilesHash of those files, computed once at startup.
+export interface HandlerEntry {
+  handler: JobHandler
+  agent: string | null
+  filesHash: string | null
+}
+
 export interface RunnerDeps {
   core: CoreClient
   model: ModelClient
-  handlers: Record<string, JobHandler>
+  handlers: Record<string, HandlerEntry>
   workerId: string
   // The pause before the first retry of a checkpoint post; it doubles each time. Tests shorten it.
   checkpointRetryDelayMs?: number
@@ -67,8 +75,22 @@ export async function runJob(
   // Held (by a kill switch or a hold), or a queue copy a release has replaced: no attempt was made; stop and
   // post nothing.
   if ('outcome' in started) return
-  const handler = deps.handlers[started.expectedResultType]
-  if (!handler) throw new Error(`no handler for ${started.expectedResultType}`)
+  const entry = deps.handlers[started.expectedResultType]
+  if (!entry) throw new Error(`no handler for ${started.expectedResultType}`)
+  const { handler } = entry
+
+  // Ruling R9: the worker runs only the released agent files. A handler that names an agent runs only a job
+  // that recorded the same agent and files hash (a job made before they were recorded carries neither and is
+  // refused). A handler that names none runs whatever the job carries. On a mismatch no model call is made:
+  // the core is told, and the error ends this delivery.
+  if (entry.agent !== null && (started.agent !== entry.agent || started.filesHash !== entry.filesHash)) {
+    await deps.core.jobDead(job.id, 'agent_files_mismatch')
+    throw new Error(
+      `agent_files_mismatch: job ${job.id} was released with ${started.agent ?? 'no agent'} files ${
+        started.filesHash ?? 'none'
+      }, this worker runs ${entry.agent} files ${entry.filesHash ?? 'none'}`,
+    )
+  }
 
   const ctx: JobContext = {
     jobId: job.id,
