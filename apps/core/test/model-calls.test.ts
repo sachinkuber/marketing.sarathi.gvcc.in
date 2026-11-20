@@ -18,7 +18,14 @@ let jobs: JobsDeps
 let brand: string
 let definitionId: string
 
-const USAGE = { inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0 }
+const USAGE = {
+  inputTokens: 1000,
+  outputTokens: 500,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  serverToolSearches: 0,
+  serverToolFetches: 0,
+}
 
 async function startedJob(): Promise<{ jobId: string; claims: AttemptClaims; token: string }> {
   const jobId = await withBrand(stack.appPool, brand, async (client) => {
@@ -597,7 +604,7 @@ describe('checkpoint rules and cost edge cases', () => {
       model: 'half-model',
       providerMessageId: 'm',
       providerRequestId: null,
-      usage: { inputTokens: 1, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      usage: { ...USAGE, inputTokens: 1, outputTokens: 0 },
     })
     const row = await stack.db.admin.query(
       'select usd_micros::text as usd, inr_micros::text as inr, charged_micros::text as charged from app.model_call where id = $1',

@@ -3,12 +3,16 @@ export interface Price {
   outputMicros: bigint
   cacheReadMicros: bigint
   cacheWriteMicros: bigint
+  // Micro-USD per web search; null or absent when no search price is recorded.
+  searchMicros?: bigint | null
 }
 export interface Usage {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  // Absent counts as 0 (evaluation runs make no searches).
+  serverToolSearches?: number
 }
 
 const MILLION = 1_000_000n
@@ -25,7 +29,8 @@ export function usdMicros(price: Price, usage: Usage): bigint {
     BigInt(usage.outputTokens) * price.outputMicros +
     BigInt(usage.cacheReadTokens) * price.cacheReadMicros +
     BigInt(usage.cacheWriteTokens) * price.cacheWriteMicros
-  return divideRound(total, MILLION)
+  // A search price is already micro-USD per search, so it is added after the per-million division.
+  return divideRound(total, MILLION) + BigInt(usage.serverToolSearches ?? 0) * (price.searchMicros ?? 0n)
 }
 
 // The rate is rupees per dollar in millionths.

@@ -50,7 +50,14 @@ const model: ModelClient = {
       messageId: `msg_${Math.random().toString(36).slice(2, 10)}`,
       requestId: null,
       stopReason: 'end_turn',
-      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        serverToolSearches: 0,
+        serverToolFetches: 0,
+      },
     }
   },
 }

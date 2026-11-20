@@ -252,8 +252,8 @@ export async function runJob(
             })
           : { text: reply.text, stopReason: reply.stopReason }
       }
-      // Ruling R1: the core's checkpoint schema is strict; only the four token counts go on the wire.
       const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = reply.usage
+      const counts = serverCounts(reply.usage)
       const body = {
         step,
         output,
@@ -261,7 +261,7 @@ export async function runJob(
         model: request.model,
         providerMessageId: reply.messageId,
         providerRequestId: reply.requestId,
-        usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens },
+        usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, ...counts },
       }
       let delay = deps.checkpointRetryDelayMs ?? 250
       for (let attempt = 1; ; attempt += 1) {

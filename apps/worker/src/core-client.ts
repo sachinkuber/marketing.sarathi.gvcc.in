@@ -28,7 +28,14 @@ export interface CheckpointBody {
   model: string
   providerMessageId: string
   providerRequestId: string | null
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    serverToolSearches: number
+    serverToolFetches: number
+  }
 }
 export interface CoreClient {
   // `queueId`: the queue row the worker claimed, so the core can turn away a copy a release has replaced.

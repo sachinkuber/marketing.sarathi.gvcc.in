@@ -54,6 +54,9 @@ const checkpointBody = z.strictObject({
     outputTokens: count,
     cacheReadTokens: count,
     cacheWriteTokens: count,
+    // Old workers do not send these; absent means none.
+    serverToolSearches: count.default(0),
+    serverToolFetches: count.default(0),
   }),
 })
 const resultBody = z.strictObject({

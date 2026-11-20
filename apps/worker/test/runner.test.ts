@@ -462,7 +462,14 @@ describe('running a job', () => {
         stopped: true,
         output: null,
         providerMessageId: 'm-stop',
-        usage: { inputTokens: 7, outputTokens: 1024, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 7,
+          outputTokens: 1024,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          serverToolSearches: 0,
+          serverToolFetches: 0,
+        },
       }),
     ])
   })
@@ -574,12 +581,14 @@ describe('running a job', () => {
       serverToolSearches: 2,
       serverToolFetches: 0,
     })
-    // R1: nothing new goes to the core.
+    // R1 (task 4): the live counts go to the core, which costs the searches.
     expect(bodies[0]!.usage).toEqual({
       inputTokens: 5,
       outputTokens: 6,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
+      serverToolSearches: 2,
+      serverToolFetches: 0,
     })
     expect(out[0]).toMatchObject({
       text: 'part',

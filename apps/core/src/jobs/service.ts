@@ -475,7 +475,14 @@ export interface CheckpointInput {
   model: string
   providerMessageId: string
   providerRequestId: string | null
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    serverToolSearches: number
+    serverToolFetches: number
+  }
 }
 
 // Spec 9.5, step 4: in one transaction the core saves the step, marks the call succeeded, stores the
@@ -532,8 +539,9 @@ export async function saveCheckpoint(
       output_micros: string
       cache_read_micros: string
       cache_write_micros: string
+      search_micros: string | null
     }>(
-      `select input_micros, output_micros, cache_read_micros, cache_write_micros from app.model_price
+      `select input_micros, output_micros, cache_read_micros, cache_write_micros, search_micros from app.model_price
         where model = $1 and effective_from <= $2::date order by effective_from desc limit 1`,
       [input.model, today],
     )
@@ -545,25 +553,30 @@ export async function saveCheckpoint(
     )
     const p = price.rows[0]
     const r = rate.rows[0]
-    const costed = Boolean(p && r)
-    const usd = p
-      ? usdMicros(
-          {
-            inputMicros: BigInt(p.input_micros),
-            outputMicros: BigInt(p.output_micros),
-            cacheReadMicros: BigInt(p.cache_read_micros),
-            cacheWriteMicros: BigInt(p.cache_write_micros),
-          },
-          input.usage,
-        )
-      : null
+    // Searches with no search price cannot be costed: leave the call uncosted rather than undercount.
+    const priced = Boolean(p) && !(input.usage.serverToolSearches > 0 && p!.search_micros === null)
+    const costed = priced && Boolean(r)
+    const usd =
+      p && priced
+        ? usdMicros(
+            {
+              inputMicros: BigInt(p.input_micros),
+              outputMicros: BigInt(p.output_micros),
+              cacheReadMicros: BigInt(p.cache_read_micros),
+              cacheWriteMicros: BigInt(p.cache_write_micros),
+              searchMicros: p.search_micros === null ? null : BigInt(p.search_micros),
+            },
+            input.usage,
+          )
+        : null
     const inr = usd !== null && r ? inrMicros(usd, BigInt(r.rate_micros)) : null
 
     await client.query(
       `update app.model_call set status = 'succeeded', finished_at = now(),
               provider_message_id = $2, provider_request_id = $3,
               input_tokens = $4, output_tokens = $5, cache_read_tokens = $6, cache_write_tokens = $7,
-              charged_micros = $8, charged_currency = $9, usd_micros = $10, inr_micros = $11, fx_rate_id = $12
+              charged_micros = $8, charged_currency = $9, usd_micros = $10, inr_micros = $11, fx_rate_id = $12,
+              server_tool_searches = $13, server_tool_fetches = $14
         where id = $1`,
       [
         input.callId,
@@ -578,6 +591,8 @@ export async function saveCheckpoint(
         costed ? usd!.toString() : null,
         costed ? inr!.toString() : null,
         costed ? r!.id : null,
+        input.usage.serverToolSearches,
+        input.usage.serverToolFetches,
       ],
     )
     if (costed) {
