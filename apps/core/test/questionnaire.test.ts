@@ -643,4 +643,14 @@ describe('a restart after finish', () => {
       (await q('select id from app.questionnaire where run_id = $1', [first.runId]))[0].id,
     )
   })
+
+  it('finishing a re-run questionnaire at a later step leaves the step where it is (R15)', async () => {
+    const { brandId } = await fresh('brief_choices')
+    const { ids } = await startAndResult(brandId)
+    await put(brandId, ids[0]!, 'Aztek')
+    expect((await finish(brandId)).status).toBe(200)
+    expect((await q('select step from app.onboarding where brand_id = $1', [brandId]))[0].step).toBe(
+      'brief_choices',
+    )
+  })
 })

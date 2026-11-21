@@ -11,7 +11,7 @@ type Source = z.infer<typeof suggestionSource>
 export function SourceRow({ source }: { source: Source }) {
   const where =
     source.kind === 'owner_statement'
-      ? 'Stated by you'
+      ? "Owner's statement"
       : source.kind === 'document'
         ? (source.documentName ?? source.address ?? 'A document')
         : (source.address ?? 'No address')

@@ -162,6 +162,8 @@ export interface SplitChildOptions {
 }
 
 const KILL_GRACE_MS = 5_000
+// How long an exited child's channel may take to close before the split gives up on its answer (M3).
+const EXIT_DRAIN_MS = 1_000
 // The heap of the child only; Buffers are outside it. The container's own limit stops the rest, and the core
 // outlives a child the container kills (the split then answers pdf_unreadable).
 const CHILD_ARGS = ['--max-old-space-size=512']
@@ -225,12 +227,15 @@ function splitInChild(bytes: Buffer, limits: PdfLimits, options: SplitChildOptio
       return
     }
     let done = false
+    let drain: ReturnType<typeof setTimeout> | undefined
     const finish = (settle: () => void): void => {
       if (done) return
       done = true
       clearTimeout(timer)
+      clearTimeout(drain)
       child.off('message', onMessage)
       child.off('exit', onExit)
+      child.off('disconnect', onDisconnect)
       child.off('error', onError)
       // A child that has not exited is killed; one that has is already reaped. A late error is swallowed.
       child.on('error', () => undefined)
@@ -251,14 +256,23 @@ function splitInChild(bytes: Buffer, limits: PdfLimits, options: SplitChildOptio
         else reject(new AppError(answer.error.status, answer.error.code, answer.error.message))
       })
     }
+    // The exit can be reported before the child's last message has been read from the channel. So an exit counts
+    // as a death only once the channel has closed (every message in it has been read by then), or after a short
+    // drain if the channel never says so.
+    const exitedNow = (): boolean => child.exitCode !== null || child.signalCode !== null
     function onExit(): void {
-      died(ended())
+      if (!child.connected) return died(ended())
+      drain = setTimeout(() => died(ended()), EXIT_DRAIN_MS)
+    }
+    function onDisconnect(): void {
+      if (exitedNow()) died(ended())
     }
     function onError(error: Error): void {
       died({ error: error.message })
     }
     child.on('message', onMessage)
     child.on('exit', onExit)
+    child.on('disconnect', onDisconnect)
     child.on('error', onError)
     const timer = setTimeout(
       () => finish(() => reject(tookTooLong())),

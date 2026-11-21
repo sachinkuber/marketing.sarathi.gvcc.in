@@ -1,9 +1,10 @@
 import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
+import { Agent, createServer, get } from 'node:http'
 import { describe, expect, it, vi } from 'vitest'
 import { UnconfiguredMailer } from '../src/adapters.ts'
 import { createLogger } from '../src/logger.ts'
-import { startServer } from '../src/server.ts'
+import { keepIdleConnections, startServer } from '../src/server.ts'
 import { MemoryAudit } from '../src/testing.ts'
 
 // Records the pools startServer builds so the test can emit an error on each one.
@@ -200,6 +201,40 @@ describe('startServer', () => {
       for (const pool of created) expect((pool as unknown as { ended: boolean }).ended).toBe(true)
     } finally {
       await first.stop()
+      await db.drop()
+    }
+  })
+
+  it('holds an idle connection longer than the proxy in front does (R42)', async () => {
+    // Caddy keeps an idle upstream connection for up to 2 minutes; Node's default closes it after 5 s, so a request
+    // sent on it as it closes would fail with a 502. Both stay under Node's 300 s request timeout.
+    const plain = createServer()
+    keepIdleConnections(plain)
+    expect(plain.keepAliveTimeout).toBe(125_000)
+    expect(plain.headersTimeout).toBe(126_000)
+    expect(plain.headersTimeout).toBeLessThan(plain.requestTimeout)
+    expect(plain.requestTimeout).toBe(300_000)
+
+    // The started server uses them: its reply on a kept connection says how long it stays open.
+    await requireDatabase()
+    const db = await createQueueTestDatabase()
+    const server = await startServer(configFor(db.urlFor('app'), db.urlFor('queue'), 0), {
+      logger: createLogger('silent'),
+      mailer: new UnconfiguredMailer(),
+      audit: new MemoryAudit(),
+    })
+    const agent = new Agent({ keepAlive: true })
+    try {
+      const keepAlive = await new Promise<unknown>((resolve, reject) => {
+        get(`${server.url}/health/live`, { agent }, (res) => {
+          res.resume()
+          resolve(res.headers['keep-alive'])
+        }).on('error', reject)
+      })
+      expect(keepAlive).toBe('timeout=125')
+    } finally {
+      agent.destroy()
+      await server.stop()
       await db.drop()
     }
   })

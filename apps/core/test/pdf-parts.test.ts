@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type ForkOptions } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { splitPdf, splitPdfOneAtATime, type SplitChildOptions } from '../src/onboarding/pdf-parts.ts'
 import { ENCRYPTED_PDF, pageCountOf, pdfOf } from './pdf-fixtures.ts'
@@ -122,6 +123,36 @@ const unpreparedMessage =
   'This PDF could not be prepared. It may be damaged, or too large to prepare at once. Export it again, or as smaller files.'
 const exited = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null
 
+// A stand-in child whose events the test puts in order by hand: the operating system may report a child's exit
+// before the parent has read the child's last message from the channel.
+class OrderedChild extends EventEmitter {
+  connected = true
+  exitCode: number | null = null
+  signalCode: NodeJS.Signals | null = null
+  send(_message: unknown, callback?: (error: Error | null) => void): boolean {
+    callback?.(null)
+    return true
+  }
+  kill(): boolean {
+    return true
+  }
+  asChild(): ChildProcess {
+    return this as unknown as ChildProcess
+  }
+  // Resolves once the split listens to this child.
+  async started(): Promise<void> {
+    while (this.listenerCount('exit') === 0) await new Promise((resolve) => setImmediate(resolve))
+  }
+  exit(code: number): void {
+    this.exitCode = code
+    this.emit('exit', code, null)
+  }
+  disconnect(): void {
+    this.connected = false
+    this.emit('disconnect')
+  }
+}
+
 describe('splitPdfOneAtATime (child process)', () => {
   it('a split runs outside the core process', async () => {
     const { fork } = await import('node:child_process')
@@ -233,6 +264,31 @@ describe('splitPdfOneAtATime (child process)', () => {
     ).rejects.toMatchObject({ code: 'pdf_unreadable' })
     expect(logger.warn).toHaveBeenCalledTimes(1)
     expect(logger.warn.mock.calls[0]![0]).toEqual({ exitCode: 137, signalCode: null })
+  })
+
+  it('an answer read after the exit was reported still counts: an exit waits for the channel to close (M3)', async () => {
+    const child = new OrderedChild()
+    const split = splitPdfOneAtATime(Buffer.from('x'), limits, { fork: () => child.asChild() })
+    await child.started()
+    // The exit is reported first; the answer still in the channel is read after it, then the channel closes.
+    child.exit(0)
+    child.emit('message', { parts: [] })
+    child.disconnect()
+    await expect(split).resolves.toEqual([])
+  })
+
+  it('a child that exits without an answer and whose channel never closes is given up after a short drain', async () => {
+    const child = new OrderedChild()
+    const started = Date.now()
+    const split = splitPdfOneAtATime(Buffer.from('x'), limits, { fork: () => child.asChild() })
+    await child.started()
+    child.exit(137)
+    await expect(split).rejects.toMatchObject({
+      status: 422,
+      code: 'pdf_unreadable',
+      message: unpreparedMessage,
+    })
+    expect(Date.now() - started).toBeLessThan(5000)
   })
 
   it('a fork that throws gives 503 pdf_split_unavailable and the queue carries on', async () => {

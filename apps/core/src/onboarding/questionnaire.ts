@@ -431,7 +431,12 @@ export async function finishQuestionnaire(
       'update app.questionnaire set finished_at = now(), finished_by = $3 where brand_id = $1 and id = $2',
       [input.brandId, questionnaire.id, input.actor.userId],
     )
-    await client.query(`update app.onboarding set step = 'facts_rules' where brand_id = $1`, [input.brandId])
+    // Never backward (ruling R15): finishing a re-run questionnaire after onboarding moved on keeps the step.
+    await client.query(
+      `update app.onboarding set step = 'facts_rules'
+        where brand_id = $1 and step in ('profile', 'questionnaire', 'facts_rules')`,
+      [input.brandId],
+    )
     await deps.audit.record(
       {
         action: 'onboarding.questionnaire_finished',

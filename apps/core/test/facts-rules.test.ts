@@ -63,12 +63,14 @@ async function source(
   return made[0].id as string
 }
 
-// A brand whose questionnaire is finished (or not), with a profile citing a site page and a competitor page.
+// A brand whose questionnaire is finished (or not), with a profile citing a site page and a competitor page. Its
+// intake website is aztek.example, so a site page there is the brand's own (ruling R41).
 async function fresh(answers = ANSWERS, finished = true): Promise<Fresh> {
   const brandId = await addBrand(stack, `facts-${(brands += 1)}`)
-  await q(`insert into app.onboarding (brand_id, step) values ($1, $2)`, [
+  await q(`insert into app.onboarding (brand_id, step, intake) values ($1, $2, $3::jsonb)`, [
     brandId,
     finished ? 'facts_rules' : 'questionnaire',
+    JSON.stringify({ website: 'https://aztek.example/', socials: {}, competitors: [] }),
   ])
   const site = await source(brandId, 'site', 'Aztek coats cars in Pune.', {
     address: 'https://aztek.example/about',
@@ -166,6 +168,9 @@ const rule = (kind: Rule['kind'], text: string, sourceIds: string[]): Rule => ({
 const result = (facts: Fact[] = [], rules: Rule[] = []): FactsRulesResult => ({ facts, rules, ask: null })
 const post = async (jobId: string, body: unknown) =>
   postResult(jobs, await claim(jobId), { type: TYPE, result: body })
+
+const ONE_AT_A_TIME =
+  'Only the draft profile can be accepted all at once. Facts and rules are confirmed one at a time: confirm, edit or drop each one.'
 
 const suggestionsOf = (brandId: string) =>
   q(
@@ -612,10 +617,12 @@ describe('the result', () => {
     const refused = await decide(f.brandId, weak!.id, { decision: 'accepted' })
     expect(refused.status).toBe(422)
     expect(refused.json).toMatchObject({ error: { code: 'fact_needs_source' } })
+    // Facts are confirmed one at a time: there is no bulk accept for them (M6).
     const bulk = await owner.request('POST', api(f.brandId, '/suggestions/accept-found'), {
       body: { step: 'fact' },
     })
-    expect(bulk.json).toEqual({ accepted: 0 })
+    expect(bulk.status).toBe(400)
+    expect(bulk.json).toMatchObject({ error: { code: 'one_at_a_time', message: ONE_AT_A_TIME } })
     expect((await q('select 1 from app.verified_fact where brand_id = $1', [f.brandId])).length).toBe(0)
     expect((await suggestionsOf(f.brandId))[0].decision).toBeNull()
   })
@@ -1025,6 +1032,69 @@ describe('changing what is confirmed', () => {
     }
     expect((await q('select status from app.verified_fact where id = $1', [theirs]))[0].status).toBe('active')
   })
+
+  it('a replace that keeps the wording moves only the review date: the sources stay and no statement is written', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    const wording = 'Aztek coats cars in Pune.'
+    await post(jobId, result([fact(wording, [f.site])]))
+    const [offered] = await suggestionsOf(f.brandId)
+    const confirmed = await decide(f.brandId, offered!.id, { decision: 'accepted' })
+    expect(confirmed.status, JSON.stringify(confirmed.json)).toBe(200)
+    const first = confirmed.json.createdId as string
+    const statements = async () =>
+      (
+        await q(
+          `select count(*)::int as n from app.research_source where brand_id = $1 and kind = 'owner_statement'`,
+          [f.brandId],
+        )
+      )[0].n as number
+    const before = await statements()
+    // The same wording in other spacing and case is the same fact.
+    const moved = await owner.request('POST', api(f.brandId, `/facts/${first}/replace`), {
+      body: { statement: '  aztek coats cars in  PUNE. ', reviewDate: day(400) },
+    })
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200)
+    const second = moved.json.factId as string
+    const fact2 = (
+      await q(
+        `select statement, status, source_ids, review_date::text as review_date from app.verified_fact where id = $1`,
+        [second],
+      )
+    )[0]
+    expect(fact2).toEqual({
+      statement: wording,
+      status: 'active',
+      source_ids: [f.site],
+      review_date: day(400),
+    })
+    expect(await statements()).toBe(before)
+    const audited = async () =>
+      (
+        await q(
+          `select detail from audit.log where action = 'onboarding.fact_changed' and brand_id = $1 order by seq`,
+          [f.brandId],
+        )
+      ).map((r) => r.detail)
+    expect(await audited()).toEqual([{ factId: first, newFactId: second, change: 'review_date_changed' }])
+
+    // A changed wording still rests on the owner's statement of it.
+    const reworded = await owner.request('POST', api(f.brandId, `/facts/${second}/replace`), {
+      body: { statement: 'Aztek coats cars and bikes in Pune.', reviewDate: day(400) },
+    })
+    expect(reworded.status).toBe(200)
+    const third = (
+      await q('select source_ids from app.verified_fact where id = $1', [reworded.json.factId])
+    )[0]
+    expect(third.source_ids).toHaveLength(1)
+    expect(third.source_ids[0]).not.toBe(f.site)
+    expect(await statements()).toBe(before + 1)
+    expect((await audited())[1]).toEqual({
+      factId: second,
+      newFactId: reworded.json.factId,
+      change: 'replaced',
+    })
+  })
 })
 
 describe('a re-run', () => {
@@ -1274,14 +1344,15 @@ describe('one fact or rule in force per wording (ruling R20)', () => {
         )
       )[0].n,
     ).toBe(statements)
-    // Accept all found leaves them open and confirms only the one that is new.
+    // There is no bulk accept for facts or rules (M6); the new fact is confirmed on its own.
     for (const step of ['fact', 'rule']) {
       const bulk = await owner.request('POST', api(f.brandId, '/suggestions/accept-found'), {
         body: { step },
       })
-      expect(bulk.status).toBe(200)
-      expect(bulk.json).toEqual({ accepted: step === 'fact' ? 1 : 0 })
+      expect(bulk.status, step).toBe(400)
+      expect(bulk.json).toMatchObject({ error: { code: 'one_at_a_time' } })
     }
+    expect((await decide(f.brandId, id('fact:other'), { decision: 'accepted' })).status).toBe(200)
     expect(
       (await q('select decision from app.suggestion where id = $1', [id('fact:raced')]))[0].decision,
     ).toBeNull()
@@ -1294,7 +1365,7 @@ describe('one fact or rule in force per wording (ruling R20)', () => {
 })
 
 describe('rules are graded by their sources (ruling R21)', () => {
-  it('a rule is found only when a cited source can stand behind it, so accept-all never confirms a third-party rule', async () => {
+  it('a rule is found only when a cited source can stand behind it, and rules have no bulk accept', async () => {
     const f = await fresh()
     const { jobId } = await started(f.brandId)
     const posted = await post(
@@ -1317,15 +1388,79 @@ describe('rules are graded by their sources (ruling R21)', () => {
       forbidden_claim: 'found',
       forbidden_word: 'found',
     })
+    // Rules are confirmed one at a time (M6): a bulk accept is refused and confirms nothing.
     const bulk = await owner.request('POST', api(f.brandId, '/suggestions/accept-found'), {
       body: { step: 'rule' },
     })
-    expect(bulk.json).toEqual({ accepted: 2 })
+    expect(bulk.status).toBe(400)
+    expect(bulk.json).toMatchObject({ error: { code: 'one_at_a_time', message: ONE_AT_A_TIME } })
+    expect((await q('select kind from app.safety_rule where brand_id = $1', [f.brandId])).length).toBe(0)
+  })
+})
+
+describe('a site source counts for a fact only on the brand own domain (ruling R41)', () => {
+  it('an off-domain page labelled site is assumed and cannot be confirmed; the brand site and its subdomains can', async () => {
+    const f = await fresh()
+    // The model labels the kind: a third party's page can arrive labelled site.
+    const offDomain = await source(f.brandId, 'site', 'Aztek is the best in India.', {
+      address: 'https://aztek-reviews.example/top-10',
+    })
+    const subdomain = await source(f.brandId, 'site', 'Aztek ships to Goa.', {
+      address: 'https://shop.aztek.example/delivery',
+    })
+    await q(
+      `update app.profile_item set source_ids = $2::uuid[] where brand_id = $1 and key = 'what_they_sell'`,
+      [f.brandId, [f.site, offDomain, subdomain]],
+    )
+    const { jobId } = await started(f.brandId)
+    const [third, own, shop] = [
+      'Aztek is the best in India.',
+      'Aztek coats cars in Pune.',
+      'Aztek ships to Goa.',
+    ]
+    const posted = await post(
+      jobId,
+      result([fact(third, [offDomain]), fact(own, [f.site]), fact(shop, [subdomain])]),
+    )
+    expect(posted).toMatchObject({ status: 'applied', outcome: { facts: 3, rules: 0 } })
+    const byStatement = Object.fromEntries(
+      (await suggestionsOf(f.brandId)).map((r) => [(r.proposed as { statement: string }).statement, r]),
+    )
+    expect(byStatement[third].confidence).toBe('assumed')
+    expect(byStatement[own].confidence).toBe('found')
+    expect(byStatement[shop].confidence).toBe('found')
+
+    // Test 44: a claim made only by a third party never becomes a verified fact without the owner's own words.
+    const refused = await decide(f.brandId, byStatement[third].id, { decision: 'accepted' })
+    expect(refused.status).toBe(422)
+    expect(refused.json).toMatchObject({ error: { code: 'fact_needs_source' } })
+    const dated = await decide(f.brandId, byStatement[third].id, {
+      decision: 'accepted',
+      reviewDate: day(200),
+    })
+    expect(dated.status).toBe(422)
+    expect(dated.json).toMatchObject({ error: { code: 'fact_needs_source' } })
+    for (const statement of [own, shop]) {
+      const ok = await decide(f.brandId, byStatement[statement].id, { decision: 'accepted' })
+      expect(ok.status, statement).toBe(200)
+    }
     expect(
-      (await q('select kind from app.safety_rule where brand_id = $1 order by kind', [f.brandId])).map(
-        (r) => r.kind,
-      ),
-    ).toEqual(['forbidden_claim', 'forbidden_word'])
+      (
+        await q(`select statement from app.verified_fact where brand_id = $1 order by statement`, [f.brandId])
+      ).map((r) => r.statement),
+    ).toEqual([own, shop])
+  })
+
+  it('with no intake website, no page labelled site can stand behind a fact', async () => {
+    const f = await fresh()
+    await q(`update app.onboarding set intake = null where brand_id = $1`, [f.brandId])
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([fact('Aztek coats cars in Pune.', [f.site])]))
+    const [only] = await suggestionsOf(f.brandId)
+    expect(only).toMatchObject({ confidence: 'assumed' })
+    const refused = await decide(f.brandId, only!.id, { decision: 'accepted' })
+    expect(refused.status).toBe(422)
+    expect(refused.json).toMatchObject({ error: { code: 'fact_needs_source' } })
   })
 })
 

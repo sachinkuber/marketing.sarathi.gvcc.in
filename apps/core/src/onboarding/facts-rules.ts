@@ -36,6 +36,7 @@ import {
   decideWithin,
   factHash,
   insertSuggestion,
+  intakeWebsite,
   listSuggestionsWithin,
   lockOnboarding,
   refuseActiveFactTwin,
@@ -256,8 +257,8 @@ export async function startFactsRules(
 // of one of this job's answered agent questions (ruling R11), and every review date after the input's today; any
 // later date is accepted (ruling R14). The facts and rules become open suggestions (an undecided one with the same
 // key is superseded, a decided one is kept); one the owner already confirmed and keeps in force is not suggested
-// again. A fact or a rule is `found` when one of its sources can stand behind it (the brand's site, a document or
-// the owner's statement), else `assumed` (ruling R21), so accept-all never confirms one resting on third parties.
+// again. A fact or a rule is `found` when one of its sources can stand behind it (a page on the brand's own site,
+// by the intake website's domain, a document or the owner's statement), else `assumed` (rulings R21, R41).
 export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHandler {
   return async (client, ctx) => {
     const parsed = factsRulesResultSchema.safeParse(ctx.result)
@@ -303,14 +304,15 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
       )
     }
     const cited = [...new Set([...result.facts, ...result.rules].flatMap((item) => item.sourceIds))]
-    const kinds = new Map(
+    const sources = new Map(
       (
-        await client.query<{ id: string; kind: SourceKind }>(
-          'select id, kind from app.research_source where brand_id = $1 and id = any($2::uuid[])',
+        await client.query<{ id: string; kind: SourceKind; address: string | null }>(
+          'select id, kind, address from app.research_source where brand_id = $1 and id = any($2::uuid[])',
           [ctx.brandId, cited],
         )
-      ).rows.map((r) => [r.id, r.kind]),
+      ).rows.map((r) => [r.id, r]),
     )
+    const website = await intakeWebsite(client, ctx.brandId)
     const confirmed = new Set([
       ...(
         await client.query<{ statement: string }>(
@@ -335,9 +337,10 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
     const graded = (sourceIds: string[]) =>
       qualifiesAsFactSource(
         sourceIds.flatMap((id) => {
-          const kind = kinds.get(id)
-          return kind ? [kind] : []
+          const source = sources.get(id)
+          return source ? [source] : []
         }),
+        website,
       )
         ? ('found' as const)
         : ('assumed' as const)
@@ -544,19 +547,31 @@ const factNotActive = () =>
     'This fact is no longer in force: it was replaced or retired. Change the fact that is in force instead.',
   )
 
-async function lockActiveFact(client: PoolClient, brandId: string, factId: string): Promise<void> {
-  const found = await client.query<{ status: string }>(
-    'select status from app.verified_fact where brand_id = $1 and id = $2 for update',
+async function lockActiveFact(
+  client: PoolClient,
+  brandId: string,
+  factId: string,
+): Promise<{ statement: string; fact_hash: string; source_ids: string[] }> {
+  const found = await client.query<{
+    status: string
+    statement: string
+    fact_hash: string
+    source_ids: string[]
+  }>(
+    'select status, statement, fact_hash, source_ids from app.verified_fact where brand_id = $1 and id = $2 for update',
     [brandId, factId],
   )
   if (!found.rows[0]) throw notFound()
   if (found.rows[0].status !== 'active') throw factNotActive()
+  return found.rows[0]
 }
 
 // The new fact rests on the owner's statement of it; the old one is kept, superseded by the new one. Another fact in
 // force with the new wording is refused (ruling R20); the fact's own wording is not, so its review date can move.
-// The old fact leaves force before the new one is written (one fact in force per statement, index
-// verified_fact_one_active), and then points at it.
+// A replace that keeps the wording (the same hash) changes only the review date: the fact keeps its statement and
+// its sources, and no owner statement is written, since the owner stated nothing new. The old fact leaves force
+// before the new one is written (one fact in force per statement, index verified_fact_one_active), and then points
+// at it.
 export async function replaceFact(
   pool: Pool,
   deps: { audit: AuditSink },
@@ -571,9 +586,13 @@ export async function replaceFact(
   try {
     return await withBrand(pool, input.brandId, async (client) => {
       await lockOnboarding(client, input.brandId)
-      await lockActiveFact(client, input.brandId, input.factId)
+      const old = await lockActiveFact(client, input.brandId, input.factId)
       await refuseActiveFactTwin(client, input.brandId, input.statement, input.factId)
-      const statementId = await ownerStatement(client, input.brandId, input.statement, input.actor.userId)
+      const dateOnly = factHash(input.statement) === old.fact_hash
+      const statement = dateOnly ? old.statement : input.statement
+      const sourceIds = dateOnly
+        ? old.source_ids
+        : [await ownerStatement(client, input.brandId, input.statement, input.actor.userId)]
       await client.query(
         `update app.verified_fact set status = 'superseded' where brand_id = $1 and id = $2`,
         [input.brandId, input.factId],
@@ -581,14 +600,7 @@ export async function replaceFact(
       const made = await client.query<{ id: string }>(
         `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
          values ($1, $2, $3, $4::uuid[], $5, $6) returning id`,
-        [
-          input.brandId,
-          input.statement,
-          factHash(input.statement),
-          [statementId],
-          input.actor.userId,
-          input.reviewDate,
-        ],
+        [input.brandId, statement, factHash(statement), sourceIds, input.actor.userId, input.reviewDate],
       )
       const newFactId = made.rows[0]!.id
       await client.query('update app.verified_fact set superseded_by = $3 where brand_id = $1 and id = $2', [
@@ -603,7 +615,7 @@ export async function replaceFact(
           brandId: input.brandId,
           subject: input.factId,
           outcome: 'success',
-          detail: { factId: input.factId, newFactId, change: 'replaced' },
+          detail: { factId: input.factId, newFactId, change: dateOnly ? 'review_date_changed' : 'replaced' },
         },
         client,
       )

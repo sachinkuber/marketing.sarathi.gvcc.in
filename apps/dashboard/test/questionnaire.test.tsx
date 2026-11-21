@@ -56,16 +56,20 @@ describe('the questionnaire screen, driven', () => {
     body: { value },
   })
 
-  it('the suggested answer is pre-selected and saving it is debounced', async () => {
+  it('a suggestion is shown but never pre-selected, and saving what the owner gives is debounced', async () => {
     await open(
       asking([
         question('q1', { options: ['Aztek', 'Aztek Labs'], suggestedAnswer: 'Aztek' }),
         question('q2', { position: 2, suggestedAnswer: 'Pune' }),
       ]),
     )
-    expect(radio('q1', 'Aztek').checked).toBe(true)
+    // Ruling R40: the suggested option is marked, not selected; the box starts empty, the suggestion beside it.
+    expect(radio('q1', 'Aztek').checked).toBe(false)
     expect(radio('q1', 'Aztek Labs').checked).toBe(false)
-    expect(dom.field('a-q2')?.value).toBe('Pune')
+    expect(radio('q1', 'Aztek').closest('label')?.textContent).toContain('suggested')
+    expect(radio('q1', 'Aztek Labs').closest('label')?.textContent).not.toContain('suggested')
+    expect(dom.field('a-q2')?.value).toBe('')
+    expect(dom.text()).toContain('Suggested: Pune')
     expect(dom.text()).toContain('Why we ask: Because of q1.')
     // Nothing is saved until the owner changes something.
     expect(dom.writes()).toEqual([])
@@ -121,12 +125,12 @@ describe('the questionnaire screen, driven', () => {
   it('finish shows answered and blank counts and is refused politely when already finished', async () => {
     await open(asking([question('q1', { answer: 'Aztek' }), question('q2', { position: 2 })]))
     await dom.click('Finish questionnaire')
-    expect(dom.text()).toContain('1 answered by you, 0 suggested answers kept, 1 left blank.')
+    expect(dom.text()).toContain('1 answered, 1 left blank. Finish now?')
     expect(dom.writes()).toEqual([])
 
     // A save still waiting is sent before the finish, and the counts follow what is typed.
     dom.type('a-q2', 'Pune')
-    expect(dom.text()).toContain('2 answered by you, 0 suggested answers kept, 0 left blank.')
+    expect(dom.text()).toContain('2 answered, 0 left blank. Finish now?')
     dom.replies.push(
       { status: 200, body: { answered: true } },
       { status: 200, body: { answered: 2, blank: 0 } },
@@ -162,31 +166,55 @@ describe('the questionnaire screen, driven', () => {
     expect(push).not.toHaveBeenCalled()
   })
 
-  it('finish states the owner answers, the kept suggestions and the blanks separately', async () => {
+  it('an untouched suggestion is not sent on Finish and counts as blank (R40)', async () => {
     await open(
       asking([
         question('q1', { answer: 'Aztek' }),
         question('q2', { position: 2, suggestedAnswer: 'Pune' }),
-        question('q3', { position: 3, suggestedAnswer: 'Goa' }),
-        question('q4', { position: 4 }),
+        question('q3', { position: 3, options: ['Goa', 'Pune'], suggestedAnswer: 'Goa' }),
+        question('q4', { position: 4, suggestedAnswer: 'Goa' }),
+        question('q5', { position: 5 }),
       ]),
     )
-    dom.type('a-q3', 'Goa, India')
+    dom.type('a-q4', 'Goa, India')
     await dom.click('Finish questionnaire')
-    expect(dom.text()).toContain(
-      '2 answered by you, 1 suggested answer kept, 1 left blank. The kept suggestions become your answers.',
-    )
+    expect(dom.text()).toContain('2 answered, 3 left blank. Finish now?')
+    expect(dom.text()).not.toContain('kept')
     dom.replies.push(
       { status: 200, body: { answered: true } },
-      { status: 200, body: { answered: true } },
-      { status: 200, body: { answered: 3, blank: 1 } },
+      { status: 200, body: { answered: 2, blank: 3 } },
     )
     await dom.click('Yes, finish')
-    expect(dom.writes().map((w) => w.url)).toEqual([
-      `${base}/questionnaire/answers/q2`,
-      `${base}/questionnaire/answers/q3`,
-      `${base}/questionnaire/finish`,
+    // Only what the owner typed is saved; the suggestions left alone are never sent as answers.
+    expect(dom.writes()).toEqual([
+      put('q4', 'Goa, India'),
+      { url: `${base}/questionnaire/finish`, method: 'POST', body: undefined },
     ])
+  })
+
+  it('"Use the suggestion" fills the box, and it saves as the owner\'s answer', async () => {
+    await open(asking([question('q1', { suggestedAnswer: 'Bike owners in Pune' })]))
+    expect(dom.field('a-q1')?.value).toBe('')
+    vi.useFakeTimers()
+    dom.replies.push({ status: 200, body: { answered: true } })
+    act(() => dom.button('Use the suggestion').click())
+    expect(dom.field('a-q1')?.value).toBe('Bike owners in Pune')
+    await tick(SAVE_MS)
+    expect(dom.writes()).toEqual([put('q1', 'Bike owners in Pune')])
+    expect(dom.text()).toContain('Saved')
+    vi.useRealTimers()
+    await dom.click('Finish questionnaire')
+    expect(dom.text()).toContain('1 answered, 0 left blank. Finish now?')
+  })
+
+  it('choosing the suggested option saves it', async () => {
+    await open(asking([question('q1', { options: ['Aztek', 'Aztek Labs'], suggestedAnswer: 'Aztek' })]))
+    vi.useFakeTimers()
+    dom.replies.push({ status: 200, body: { answered: true } })
+    pick(radio('q1', 'Aztek'))
+    await tick(SAVE_MS)
+    expect(radio('q1', 'Aztek').checked).toBe(true)
+    expect(dom.writes()).toEqual([put('q1', 'Aztek')])
   })
 
   it('the questionnaire is owner-only', async () => {
@@ -255,6 +283,37 @@ describe('the questionnaire screen, driven', () => {
     expect(dom.writes()).toEqual([
       { url: answerUrl, method: 'POST', body: { answer: '2012' } },
       { url: answerUrl, method: 'POST', body: { answer: 'In 2010' } },
+    ])
+  })
+
+  it('an agent question with no options shows its suggestion in the box, and Send sends what the box holds', async () => {
+    const asked = {
+      id: 'aq1',
+      jobId: 'j1',
+      runId: 'r1',
+      agent: 'questionnaire',
+      question: 'Which year did the business start?',
+      why: 'The site shows two years.',
+      options: [],
+      suggested: 'In 2012',
+      createdAt: '2026-11-21T08:00:00.000Z',
+      answer: null,
+      answeredAt: null,
+    }
+    dom.replies.push(
+      { status: 200, body: { questionnaire: null, job: { state: 'waiting_for_answer', questionId: 'aq1' } } },
+      { status: 200, body: { questions: [asked] } },
+    )
+    await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
+    // The suggestion is in the box the owner sees; nothing is held back to be sent unseen.
+    expect(dom.field('aq-own-aq1')?.value).toBe('In 2012')
+    dom.type('aq-own-aq1', '')
+    expect(dom.button('Send answer').disabled).toBe(true)
+    dom.type('aq-own-aq1', 'In 2010')
+    dom.replies.push({ status: 200, body: { questionId: 'aq1', requeued: true } })
+    await dom.click('Send answer')
+    expect(dom.writes()).toEqual([
+      { url: `${base}/agent-questions/aq1/answer`, method: 'POST', body: { answer: 'In 2010' } },
     ])
   })
 

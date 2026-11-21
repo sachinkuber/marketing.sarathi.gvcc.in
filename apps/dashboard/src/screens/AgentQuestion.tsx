@@ -11,7 +11,8 @@ export const SENT_WORDS = 'Sent. The job starts again with your answer.'
 const MAX_ANSWER = 2000
 
 // A question an agent asked the owner (spec 9): what it asks, why, the options with the suggested one
-// pre-selected, and a box for the owner's own words. The answer is sent once; the job then starts again.
+// pre-selected, and a box for the owner's own words. With no options the suggestion is in the box itself, so what
+// is sent is always what the owner sees. The answer is sent once; the job then starts again.
 export function AgentQuestion({
   brandId,
   question,
@@ -24,8 +25,9 @@ export function AgentQuestion({
   // Called when the core says the question is no longer open, so the screen reads again.
   onRefresh?: () => void
 }) {
-  const [choice, setChoice] = useState(question.suggested ?? '')
-  const [own, setOwn] = useState('')
+  const hasOptions = question.options.length > 0
+  const [choice, setChoice] = useState(hasOptions ? (question.suggested ?? '') : '')
+  const [own, setOwn] = useState(hasOptions ? '' : (question.suggested ?? ''))
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState<string | null>(null)

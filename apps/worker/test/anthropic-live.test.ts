@@ -32,6 +32,8 @@ describe('the summary request against the real provider', () => {
 // R13 probe: does the API accept a continuation whose history holds server-tool blocks when that tool is left
 // out (a), or listed with max_uses 0 (b)? Run by hand with LIVE_ANTHROPIC=1 and a key; it spends a few cents.
 // The outcome decides how modelTurns treats a spent tool budget.
+// Run 2026-11-21: (b) max_uses 0 was refused; (a) could not be tested, because the probe's completed turn counts as
+// a prefill. So modelTurns keeps the tool at max_uses 1 on a continuation.
 describe('spent tool budget forms against the real provider', () => {
   const live = process.env.LIVE_ANTHROPIC === '1' && !!process.env.ANTHROPIC_API_KEY
   const history = async (client: Anthropic) => {

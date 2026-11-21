@@ -8,8 +8,19 @@ export { SOURCE_KINDS, type SourceKind } from '@mkt/shared'
 // own word. Social posts, search results and competitor pages can suggest a fact but never support one alone.
 const QUALIFYING: readonly SourceKind[] = ['site', 'document', 'owner_statement']
 
-export function qualifiesAsFactSource(kinds: SourceKind[]): boolean {
-  return kinds.some((kind) => QUALIFYING.includes(kind))
+// Ruling R41: the model picks a source's kind, so a page labelled site is the brand's own only when its
+// registrable domain is the intake website's (a subdomain counts). With no intake website no site page qualifies.
+// The one check for "can this stand behind a fact": the facts result's grading and the owner's confirmation.
+export function qualifiesAsFactSource(
+  sources: readonly { kind: SourceKind; address: string | null }[],
+  website: string | null,
+): boolean {
+  const brand = registrableDomain(website)
+  return sources.some((source) =>
+    source.kind === 'site'
+      ? brand !== null && registrableDomain(source.address) === brand
+      : QUALIFYING.includes(source.kind),
+  )
 }
 
 // A source as the grading reads it: what it is, where it was read, and whether it could be read.
@@ -87,15 +98,10 @@ export function gradeConfidence(
   if (context.disagree) return { confidence: 'assumed', note: 'sources disagree' }
   if (claimed === 'assumed') return { confidence: 'assumed' }
   if (context.key === 'competitors') return { confidence: 'assumed', note: 'to confirm' }
-  const brand = registrableDomain(context.website ?? null)
   const counted = sources.filter(
     (source) => (source.result === 'read' || source.result === 'stated') && source.kind !== 'competitor',
   )
-  const own = counted.some((source) =>
-    source.kind === 'site'
-      ? brand !== null && registrableDomain(source.address) === brand
-      : QUALIFYING.includes(source.kind),
-  )
+  const own = qualifiesAsFactSource(counted, context.website ?? null)
   const hosts = new Set(
     counted.map((source) => registrableDomain(source.address)).filter((host) => host !== null),
   )

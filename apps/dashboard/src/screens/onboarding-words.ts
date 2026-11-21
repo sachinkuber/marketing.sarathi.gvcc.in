@@ -181,7 +181,7 @@ export const SOURCE_KIND_WORD: Record<string, string> = {
   social: 'Social',
   search: 'Search',
   competitor: 'Competitor page',
-  owner_statement: 'Stated by you',
+  owner_statement: "Owner's statement",
 }
 
 // failureWords, except that a refused field says what is wrong with it: the core's per-field messages.

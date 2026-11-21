@@ -132,6 +132,16 @@ export const factHash = (statement: string) => createHash('sha256').update(norma
 export const lockOnboarding = (client: PoolClient, brandId: string) =>
   client.query('select 1 from app.onboarding where brand_id = $1 for update', [brandId])
 
+// The brand's intake website, read as research reads it: a page labelled site stands behind a fact only on its
+// registrable domain (ruling R41). Null when the brand has no onboarding row or gave no website.
+export async function intakeWebsite(client: PoolClient, brandId: string): Promise<string | null> {
+  const found = await client.query<{ website: string | null }>(
+    `select intake->>'website' as website from app.onboarding where brand_id = $1`,
+    [brandId],
+  )
+  return found.rows[0]?.website ?? null
+}
+
 const FACT_CONFIRMED = 'This fact is already confirmed. Replace it to change its wording or review date.'
 const RULE_CONFIRMED = 'This rule is already confirmed. To change it, turn it off and add it again.'
 
@@ -349,21 +359,24 @@ async function writeFact(
   // Before anything is written, so a refusal leaves the transaction clean (accept-all carries on).
   await refuseActiveFactTwin(client, input.brandId, statement)
 
-  const kinds = row.source_ids.length
-    ? (
-        await client.query<{ kind: SourceKind }>(
-          `select kind from app.research_source where brand_id = $1 and id = any($2::uuid[])`,
-          [input.brandId, row.source_ids],
-        )
-      ).rows.map((r) => r.kind)
-    : []
-  // Only the owner's own wording can turn a weak source into a fact. Accepting as found does not.
-  if (input.decision !== 'edited' && !qualifiesAsFactSource(kinds))
-    throw new AppError(
-      422,
-      'fact_needs_source',
-      'A fact needs a source from the brand site or an uploaded document. Edit it to state it in your own words, or drop it.',
-    )
+  // Only the owner's own wording can turn a weak source into a fact. Accepting as found does not, and a page
+  // labelled site counts only on the brand's own domain (ruling R41).
+  if (input.decision !== 'edited') {
+    const cited = row.source_ids.length
+      ? (
+          await client.query<{ kind: SourceKind; address: string | null }>(
+            `select kind, address from app.research_source where brand_id = $1 and id = any($2::uuid[])`,
+            [input.brandId, row.source_ids],
+          )
+        ).rows
+      : []
+    if (!qualifiesAsFactSource(cited, await intakeWebsite(client, input.brandId)))
+      throw new AppError(
+        422,
+        'fact_needs_source',
+        'A fact needs a source from the brand site or an uploaded document. Edit it to state it in your own words, or drop it.',
+      )
+  }
 
   const sourceIds = [...row.source_ids]
   if (input.decision === 'edited') {

@@ -39,7 +39,9 @@ const JOB_WORDS: Record<string, string> = {
     'The questionnaire agent needs an answer from you before it can go on. Answer it below.',
 }
 
-const startValue = (q: Question) => q.answer ?? q.suggestedAnswer ?? ''
+// Ruling R40: a question starts from the owner's saved answer, else empty. The suggestion is shown beside it and
+// becomes an answer only when the owner chooses it or uses it, so nothing is saved that the owner did not give.
+const startValue = (q: Question) => q.answer ?? ''
 const rowStyle = { display: 'flex', gap: 8, alignItems: 'center' } as const
 const setStyle = { border: 0, padding: 0, margin: 0, minWidth: 0 } as const
 
@@ -64,8 +66,6 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const chains = useRef(new Map<string, Promise<boolean>>())
   const live = useRef(true)
-  // Questions the owner has changed; a suggestion left alone is not one of them.
-  const touched = useRef(new Set<string>())
 
   const [confirming, setConfirming] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -84,7 +84,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
       try {
         const fresh = await api(questionnaireReply, 'GET', `${base}/questionnaire`)
         if (!on) return
-        // New questions start from the saved answer or the suggestion; ones being typed in are left alone.
+        // New questions start from the saved answer, else empty; ones being typed in are left alone.
         const added: Record<string, string> = {}
         for (const q of fresh.questionnaire?.questions ?? []) {
           if (!(q.id in valuesRef.current)) {
@@ -187,7 +187,6 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   }, [save])
 
   function change(id: string, value: string) {
-    touched.current.add(id)
     valuesRef.current = { ...valuesRef.current, [id]: value }
     setValues(valuesRef.current)
     setStatus((s) => ({ ...s, [id]: { kind: 'pending' } }))
@@ -217,11 +216,9 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
 
   const questions = data?.questionnaire?.questions ?? []
   const shown = (q: Question) => valuesRef.current[q.id] ?? values[q.id] ?? startValue(q)
-  // Three kinds: the owner's own answers (typed, chosen, or saved before), suggestions left as they were, blanks.
-  const filled = questions.filter((q) => (values[q.id] ?? startValue(q)).trim() !== '')
-  const kept = filled.filter((q) => q.answer === null && !touched.current.has(q.id)).length
-  const answered = filled.length - kept
-  const blank = questions.length - filled.length
+  // Every answer is the owner's own (typed, chosen, or saved before); an untouched suggestion is a blank.
+  const answered = questions.filter((q) => (values[q.id] ?? startValue(q)).trim() !== '').length
+  const blank = questions.length - answered
 
   async function finish() {
     if (finishSending.current) return
@@ -229,8 +226,8 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
     setFinishing(true)
     setFinishError(null)
     try {
-      // Every pending save goes now. An answer still showing only as the suggestion is saved as the owner's
-      // answer too, so what the counts said is what gets finished.
+      // Every pending save goes now, so what the counts said is what gets finished. Only what the owner gave
+      // differs from what is saved; a suggestion the owner did not use is never sent.
       for (const [id, timer] of timers.current) {
         clearTimeout(timer)
         timers.current.delete(id)
@@ -376,7 +373,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
               ) : null}
               {confirming ? (
                 <>
-                  <p>{`${answered} answered by you, ${kept} suggested ${kept === 1 ? 'answer' : 'answers'} kept, ${blank} left blank. The kept suggestions become your answers. Finish now?`}</p>
+                  <p>{`${answered} answered, ${blank} left blank. Finish now?`}</p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <button
                       className="btn primary onb-touch"
@@ -430,6 +427,7 @@ function QuestionRow(props: {
   const { q, value, status } = props
   const inOptions = q.options.includes(value)
   const otherChosen = props.other || (value !== '' && !inOptions)
+  const suggested = q.suggestedAnswer
   const note =
     status?.kind === 'saved' ? (
       <span className="tag ok">Saved</span>
@@ -445,6 +443,7 @@ function QuestionRow(props: {
       <div>
         <b className="onb-wrap">{`${q.position}. ${q.text}`}</b>
         <p className="muted small onb-wrap">{`Why we ask: ${q.why}`}</p>
+        {suggested !== null ? <p className="small onb-wrap">{`Suggested: ${suggested}`}</p> : null}
       </div>
       {q.options.length > 0 ? (
         <fieldset className="field" style={setStyle} disabled={props.disabled}>
@@ -462,6 +461,7 @@ function QuestionRow(props: {
                 }}
               />
               <span className="onb-wrap">{option}</span>
+              {option === suggested ? <span className="tag plain">suggested</span> : null}
             </label>
           ))}
           <label className="onb-touch" style={rowStyle}>
@@ -502,6 +502,14 @@ function QuestionRow(props: {
             value={value}
             onChange={(event) => props.onChange(event.target.value)}
           />
+          {/* Using the suggestion is the owner's own act: it fills the box and saves like typing. */}
+          {suggested !== null && !props.disabled && value !== suggested ? (
+            <div>
+              <button className="btn onb-touch" type="button" onClick={() => props.onChange(suggested)}>
+                Use the suggestion
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
       <div aria-live="polite">{note}</div>

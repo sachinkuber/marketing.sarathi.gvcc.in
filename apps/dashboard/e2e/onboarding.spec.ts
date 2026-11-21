@@ -98,6 +98,9 @@ test('the platform owner runs research and decides the draft profile', async ({ 
   await page.getByRole('button', { name: 'Prepare the questionnaire' }).click()
   const goals = page.getByRole('listitem').filter({ hasText: 'What should the next three months bring?' })
   await expect(goals).toBeVisible({ timeout: 120_000 })
+  // The suggestion is shown, never chosen for the owner (R40).
+  await expect(goals.getByText('Suggested: More enquiries')).toBeVisible()
+  await expect(goals.getByRole('radio', { name: /^More enquiries/ })).not.toBeChecked()
   await goals.getByRole('radio', { name: 'More walk-ins' }).check()
   await expect(goals.getByText('Saved', { exact: true })).toBeVisible()
   const audience = page.getByRole('listitem').filter({ hasText: 'Who matters most to you?' })
@@ -108,9 +111,9 @@ test('the platform owner runs research and decides the draft profile', async ({ 
   await expect(goals.getByRole('radio', { name: 'More walk-ins' })).toBeChecked()
   await expect(audience.getByLabel('Your answer')).toHaveValue('Bike owners in Pune')
 
-  // 7. Finish: the suggestions that were left alone become answers, and the screen moves on.
+  // 7. Finish: only the two answers the owner gave count; the suggestions left alone stay blank.
   await page.getByRole('button', { name: 'Finish questionnaire' }).click()
-  await expect(page.getByText(/2 answered by you, \d+ suggested answers? kept/)).toBeVisible()
+  await expect(page.getByText('2 answered, 8 left blank. Finish now?')).toBeVisible()
   await page.getByRole('button', { name: 'Yes, finish' }).click()
   await expect(page).toHaveURL(new RegExp(`/b/${brandId}/onboarding/facts-rules$`))
   await expect(page.getByRole('heading', { name: 'Facts and rules', level: 1 })).toBeVisible()

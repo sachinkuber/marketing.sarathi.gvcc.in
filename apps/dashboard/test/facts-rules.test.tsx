@@ -170,7 +170,7 @@ describe('the facts and rules screen, driven', () => {
     })
   })
 
-  it('sources say what they are: a document by its name, an owner statement as stated by you', async () => {
+  it("sources say what they are: a document by its name, an owner statement as the owner's", async () => {
     await open(
       reply({
         facts: [
@@ -191,10 +191,20 @@ describe('the facts and rules screen, driven', () => {
     const text = dom.text()
     expect(text).toContain('brochure.pdf')
     expect(text).toContain('Document')
-    expect(text).toContain('Stated by you')
+    // Right whichever platform owner stated it (M5).
+    expect(text).toContain("Owner's statement")
+    expect(text).not.toContain('Stated by you')
     expect(text).not.toContain('No address')
     expect(text).toContain('Competitor page')
     expect(text).toContain('Read 20 Nov 2026')
+  })
+
+  it('the start-again words say a re-run replaces only the waiting suggestions it suggests again', async () => {
+    await open(reply({ facts: [fact('f1')] }))
+    expect(dom.text()).toContain(
+      'A waiting suggestion that the new run suggests again is replaced by the new one; the others stay waiting.',
+    )
+    expect(dom.text()).not.toContain('Suggestions still waiting for your decision are replaced')
   })
 
   it('a past date on Add fact shows the core date message', async () => {

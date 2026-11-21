@@ -727,7 +727,7 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
                 {job?.state === 'failed'
                   ? 'Facts and rules could not be written. Start them again. If they fail again, check that the facts and rules agent has a live release.'
                   : facts.length + rules.length > 0
-                    ? 'Start again to look for more facts and rules from the latest profile and answers. Suggestions still waiting for your decision are replaced by the new ones; what you confirmed stays.'
+                    ? 'Start again to look for more facts and rules from the latest profile and answers. A waiting suggestion that the new run suggests again is replaced by the new one; the others stay waiting. What you confirmed stays.'
                     : 'The platform reads the confirmed profile and your answers, and suggests facts and safety rules.'}
               </p>
               <Problem text={startError} />

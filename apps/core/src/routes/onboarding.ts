@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
 import { principalOf } from '../auth/session.ts'
+import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/suggestions.ts'
 import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
@@ -475,11 +476,20 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
     path: '/brands/:brandId/onboarding/suggestions/accept-found',
     access: { kind: 'permission', permission: 'onboard_brand' },
     summary:
-      'Accept every open suggestion of one step that the agent found, leaving assumed and unknown ones',
+      'Accept every open draft profile suggestion that the agent found, leaving assumed and unknown ones',
     handlers: [
       validate({ params: brandParams, body: acceptBody }),
       async (_req, res) => {
         const { body } = inputOf<{ body: z.infer<typeof acceptBody> }>(res)
+        // Only the draft profile has a bulk accept. Facts and rules are confirmed one at a time, so none is
+        // confirmed without the owner looking at it.
+        if (body.step !== 'profile') {
+          throw new AppError(
+            400,
+            'one_at_a_time',
+            'Only the draft profile can be accepted all at once. Facts and rules are confirmed one at a time: confirm, edit or drop each one.',
+          )
+        }
         res.json(
           await acceptFound(deps.pool, deps, {
             brandId: brandContextOf(res).brandId,

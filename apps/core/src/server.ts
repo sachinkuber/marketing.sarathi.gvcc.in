@@ -22,6 +22,15 @@ export interface RunningServer {
   stop(): Promise<void>
 }
 
+// Ruling R42: the proxy in front (Caddy) keeps an idle connection to the core for up to 2 minutes, but Node closes
+// one after 5 s by default, so a request sent on a connection the core is closing fails with a 502. The core keeps
+// idle connections for 125 s, longer than the proxy, with the header limit just above that. Both stay under Node's
+// 300 s request timeout.
+export function keepIdleConnections(server: Server): void {
+  server.keepAliveTimeout = 125_000
+  server.headersTimeout = 126_000
+}
+
 export async function startServer(
   config: Config,
   deps: { logger: Logger; mailer: Mailer; audit: AuditSink },
@@ -109,6 +118,7 @@ export async function startServer(
     ])
     throw error
   }
+  keepIdleConnections(server)
   const { port } = server.address() as AddressInfo
   // A second signal, or a second caller, waits for the same stop instead of closing twice.
   let stopping: Promise<void> | undefined
