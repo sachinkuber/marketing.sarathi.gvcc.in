@@ -151,3 +151,13 @@ export const KEY_LABEL: Record<string, string> = {
   ai_answer_visibility: 'AI answer visibility',
   competitors: 'Competitors',
 }
+
+// The safety rule kinds in plain words (M8's kinds, as the facts and rules screen shows and asks for them).
+export const RULE_KIND_WORD: Record<string, string> = {
+  forbidden_topic: 'topic never to discuss',
+  forbidden_claim: 'forbidden claim',
+  forbidden_word: 'word never to use',
+  competitor_not_named: 'competitor not to name',
+  tone_limit: 'tone limit',
+  pause_dates: 'pause dates',
+}

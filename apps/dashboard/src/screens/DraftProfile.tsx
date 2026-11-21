@@ -29,7 +29,7 @@ const readOn = (iso: string) =>
 const sourceCount = (n: number) => (n === 0 ? 'no sources' : `${n} ${n === 1 ? 'source' : 'sources'}`)
 const confidenceTag = (c: Item['confidence']) => (c === 'found' ? 'ok' : c === 'assumed' ? 'warn' : 'plain')
 
-function SourceRow({ source }: { source: Source }) {
+export function SourceRow({ source }: { source: Source }) {
   return (
     <li className="onb-group">
       <div className="wrap-row">
