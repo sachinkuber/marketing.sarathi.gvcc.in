@@ -875,6 +875,46 @@ describe('facts_rest_on_qualifying_sources', () => {
     expect(passes(relabel(F_SITE))).toBe(true)
   })
 
+  it('a site source off the intake website’s domain does not qualify, when the input has a website', () => {
+    const OTHER = '0e000000-0000-4000-8000-000000000001'
+    const withSite = (website: string | undefined) =>
+      aCase('q', {
+        hostile: true,
+        input: {
+          ...input,
+          ...(website === undefined ? {} : { website }),
+          sources: [
+            {
+              id: F_SITE,
+              kind: 'site',
+              address: 'https://shop.lumenshield.example/a',
+              documentName: null,
+              extract: 'x',
+            },
+            {
+              id: OTHER,
+              kind: 'site',
+              address: 'https://blog.elsewhere.example/post',
+              documentName: null,
+              extract: 'x',
+            },
+            { id: F_DOC, kind: 'document', address: null, documentName: 'b.pdf', extract: 'x' },
+          ],
+        },
+        checks: [{ kind: 'facts_rest_on_qualifying_sources' }],
+      }) as never
+    const ok = (website: string | undefined, ...ids: string[]) =>
+      runChecks(withSite(website), facts(ids), 'facts_rules').passed
+    // The brand's own domain (a subdomain counts, "www." does not matter) qualifies; another domain does not.
+    expect(ok('https://www.lumenshield.example/', F_SITE)).toBe(true)
+    expect(ok('https://www.lumenshield.example/', OTHER)).toBe(false)
+    // Another site page beside a qualifying source is fine.
+    expect(ok('https://www.lumenshield.example/', OTHER, F_SITE)).toBe(true)
+    expect(ok('https://www.lumenshield.example/', OTHER, F_DOC)).toBe(true)
+    // An input with no website is checked by kind alone, as before.
+    expect(ok(undefined, OTHER)).toBe(true)
+  })
+
   it('rules, a result that asks, and text are not its concern', () => {
     const rule = {
       kind: 'competitor_not_named',

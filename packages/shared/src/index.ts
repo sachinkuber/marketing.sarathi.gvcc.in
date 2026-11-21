@@ -96,3 +96,4 @@ export {
   type StrategyBrief,
   type StrategyBriefResult,
 } from './strategy-brief.ts'
+export { registrableDomain } from './registrable-domain.ts'

@@ -417,6 +417,22 @@ describe('the result', () => {
     expect((await q('select 1 from app.questionnaire where brand_id = $1', [brandId])).length).toBe(0)
   })
 
+  it('a result that asks is refused result_invalid by the handler, and stores nothing', async () => {
+    const { brandId } = await fresh()
+    const started = await start(brandId)
+    const claims = await claim(started.json.jobId)
+    await expect(
+      postResult(jobs, claims, {
+        type: 'questionnaire.v1',
+        result: {
+          questions: RESULT.questions,
+          ask: { text: 'Which city?', why: 'Two are named.', options: [], suggested: null },
+        },
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'result_invalid' })
+    expect((await q('select 1 from app.questionnaire where brand_id = $1', [brandId])).length).toBe(0)
+  })
+
   it('shows the job waiting for an answer, with its open question', async () => {
     const { brandId } = await fresh()
     const started = await start(brandId)

@@ -3,6 +3,7 @@ import {
   factsRulesAgainstInput,
   factsRulesResultSchema,
   questionnaireResultSchema,
+  registrableDomain,
   researchGroupResultSchema,
   researchResultSchema,
   strategistInputSchema,
@@ -111,7 +112,9 @@ function sourceKinds(...values: unknown[]): Map<string, unknown> {
 
 // True when the cited refs or ids name no known source other than social, search or competitor ones (AI-11):
 // citing nothing, or only sources the case does not list, rests on no known source.
-const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
+// A page labelled site that is not on the brand's domain is one too (facts and rules checks only).
+const OFF_DOMAIN_SITE = 'site_off_domain'
+const THIRD_PARTY = new Set(['social', 'search', 'competitor', OFF_DOMAIN_SITE])
 function restsOnThirdParty(field: unknown, kinds: Map<string, unknown>): boolean {
   const cited: unknown[] = Array.isArray(field) ? field : []
   const known = cited
@@ -145,6 +148,18 @@ function hasUnsupportedFact(output: unknown, input: unknown): boolean {
   const facts = (output as Record<string, unknown>)['facts']
   if (!Array.isArray(facts)) return false
   const kinds = sourceKinds(input)
+  // Ruling R41, as the core grades it: a page labelled site is the brand's own only when its registrable domain
+  // is the intake website's. When the case input has a website, any other site page counts as a third party.
+  const website =
+    input !== null && typeof input === 'object' ? (input as Record<string, unknown>)['website'] : undefined
+  if (typeof website === 'string') {
+    const brand = registrableDomain(website)
+    for (const source of sourceEntries(input)) {
+      if (source['kind'] !== 'site' || typeof source['id'] !== 'string') continue
+      const address = typeof source['address'] === 'string' ? source['address'] : null
+      if (brand === null || registrableDomain(address) !== brand) kinds.set(source['id'], OFF_DOMAIN_SITE)
+    }
+  }
   const answered = factsCaseInput.shape.agentAnswers.safeParse(
     input !== null && typeof input === 'object'
       ? (input as Record<string, unknown>)['agentAnswers']

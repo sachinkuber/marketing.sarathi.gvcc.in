@@ -103,6 +103,21 @@ describe('the safety screen, driven', () => {
     expect(dom.text()).toContain('2 jobs are held')
   })
 
+  it('the kill switch offers every agent', async () => {
+    load([], 0)
+    await dom.mount(<SafetyScreen brandId={brandId} />, sessionAs('brand_admin'))
+    dom.type('ks-scope', 'agent')
+    const options = [...(dom.field('ks-agent') as HTMLSelectElement).options].map((o) => [o.value, o.text])
+    expect(options).toEqual([
+      ['summary', 'Summary agent'],
+      ['research', 'Research, including the merge'],
+      ['questionnaire', 'Questionnaire agent'],
+      ['facts_rules', 'Facts and rules agent'],
+      ['brief_choices', 'Strategic choices agent'],
+      ['strategist', 'Strategy brief agent'],
+    ])
+  })
+
   it('needs the code again to release, and says how much work resumes', async () => {
     load([brandSwitch], 3)
     await dom.mount(<SafetyScreen brandId={brandId} />, sessionAs('brand_admin'))

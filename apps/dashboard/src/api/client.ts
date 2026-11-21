@@ -161,6 +161,35 @@ export async function api<T>(schema: z.ZodType<T>, method: string, path: string,
   return parsed.data
 }
 
+// Reads the request token now, so a write made while the page closes can carry it (a closing page cannot wait
+// for a token). A failure is ignored: the write then simply does not go.
+export async function warmCsrfToken(): Promise<void> {
+  try {
+    await tokenForWrite()
+  } catch {
+    // Nothing to do: `sendOnLeave` sends nothing without a token.
+  }
+}
+
+// A write made as the page closes (`pagehide`): `keepalive` lets the browser finish it after the page is gone.
+// It uses the cached request token, sends the same headers and credentials as `api`, and reads no reply. With no
+// cached token it sends nothing and says so, so the caller keeps the answer for its ordinary save.
+export function sendOnLeave(method: string, path: string, body: unknown): boolean {
+  if (!csrfToken) return false
+  try {
+    void fetch(`${API}${path}`, {
+      method: method.toUpperCase(),
+      headers: { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).catch(() => undefined)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // The request token for a call to the sign-in library: the cached one, else the one for the live session. With
 // no session there is no token to send (and no redirect: the call itself is how a person gets a session).
 async function tokenIfSession(): Promise<string | null> {

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
-import { ApiError, api } from '../api/client'
+import { ApiError, api, sendOnLeave, warmCsrfToken } from '../api/client'
 import {
   agentQuestionsReply,
   answerSavedReply,
@@ -185,6 +185,28 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
       pending.clear()
     }
   }, [save])
+
+  // Closing the tab does not run the cleanup above in time for a request to finish, so on `pagehide` each answer
+  // still waiting goes out with `keepalive`, which the browser completes after the page is gone. The request
+  // token is read once on arrival, because a closing page cannot wait for it.
+  useEffect(() => {
+    void warmCsrfToken()
+    const flush = () => {
+      for (const [id, timer] of [...timers.current]) {
+        const value = valuesRef.current[id] ?? ''
+        if (
+          savedRef.current[id] !== value &&
+          !sendOnLeave('PUT', `${base}/questionnaire/answers/${id}`, { value })
+        )
+          continue
+        clearTimeout(timer)
+        timers.current.delete(id)
+        savedRef.current[id] = value
+      }
+    }
+    window.addEventListener('pagehide', flush)
+    return () => window.removeEventListener('pagehide', flush)
+  }, [base])
 
   function change(id: string, value: string) {
     valuesRef.current = { ...valuesRef.current, [id]: value }

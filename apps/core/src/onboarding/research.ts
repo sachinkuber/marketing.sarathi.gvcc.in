@@ -47,8 +47,16 @@ export type Intake = z.infer<typeof intakeSchema>
 export const GROUPS = ['site', 'social', 'visibility', 'competitors'] as const
 // Both agents must have a live release before research starts.
 const START_AGENTS = ['research', 'research_merge'] as const
-// The agents whose model calls count in the onboarding cost; a later onboarding agent widens only this list.
-const COST_AGENTS = ['research', 'research_merge'] as const
+// The agents whose model calls count in the onboarding cost (spec 14); a later onboarding agent widens only this
+// list.
+const COST_AGENTS = [
+  'research',
+  'research_merge',
+  'questionnaire',
+  'facts_rules',
+  'brief_choices',
+  'strategist',
+] as const
 export const GROUP_RESULT_TYPE = 'research_group.v1'
 export const MERGE_RESULT_TYPE = 'research.v1'
 

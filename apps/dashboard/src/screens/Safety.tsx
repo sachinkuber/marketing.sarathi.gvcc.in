@@ -31,8 +31,16 @@ const CHANNELS = [
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'youtube', label: 'YouTube' },
 ]
-// Phase 1 has one agent.
-const AGENTS = [{ value: 'summary', label: 'Summary agent' }]
+// Every agent a switch may name. Research and its merge are one control: a switch on `research` holds both, so
+// it is offered once.
+const AGENTS = [
+  { value: 'summary', label: 'Summary agent' },
+  { value: 'research', label: 'Research, including the merge' },
+  { value: 'questionnaire', label: 'Questionnaire agent' },
+  { value: 'facts_rules', label: 'Facts and rules agent' },
+  { value: 'brief_choices', label: 'Strategic choices agent' },
+  { value: 'strategist', label: 'Strategy brief agent' },
+]
 
 function scopeLabel(sw: Pick<KillSwitch, 'scope' | 'target'>): string {
   if (sw.scope === 'brand') return 'Whole brand'

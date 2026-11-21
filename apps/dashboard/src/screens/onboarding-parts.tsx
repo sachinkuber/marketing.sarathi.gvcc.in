@@ -4,6 +4,7 @@ import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import { caseAddedReply, type suggestionSource } from '../api/schemas'
 import { SOURCE_KIND_WORD, dayOn, failureWords } from './onboarding-words'
+import { registrableDomain } from './registrable-domain'
 
 type Source = z.infer<typeof suggestionSource>
 
@@ -53,7 +54,17 @@ export function AddAsCase({ base, suggestionId }: { base: string; suggestionId: 
 
 // A source as the owner reads it: what kind it is, where it was read (an address, a document's name, or the
 // owner's own word), when, and what it said.
-export function SourceRow({ source }: { source: Source }) {
+//
+// The model picks a source's kind, so a page labelled site is the brand's own only when its registrable domain is
+// the intake website's (the core's rule, ruling R41); otherwise it is shown as "Web page". `website` is the intake
+// website: a string, null when the brand has none, and undefined while it is not known (the kind is then shown as
+// it came).
+export function SourceRow({ source, website }: { source: Source; website?: string | null }) {
+  const offDomain =
+    source.kind === 'site' &&
+    website !== undefined &&
+    (registrableDomain(website) === null || registrableDomain(source.address) !== registrableDomain(website))
+  const kindWord = offDomain ? 'Web page' : (SOURCE_KIND_WORD[source.kind] ?? source.kind)
   const where =
     source.kind === 'owner_statement'
       ? "Owner's statement"
@@ -64,9 +75,7 @@ export function SourceRow({ source }: { source: Source }) {
     <li className="onb-group">
       <div className="wrap-row">
         <div className="grow onb-wrap">{where}</div>
-        {source.kind !== 'owner_statement' ? (
-          <span className="tag plain">{SOURCE_KIND_WORD[source.kind] ?? source.kind}</span>
-        ) : null}
+        {source.kind !== 'owner_statement' ? <span className="tag plain">{kindWord}</span> : null}
         {source.flagged ? <span className="tag warn">{`Flagged: ${source.flagged.reason}`}</span> : null}
       </div>
       <div className="muted small">{`${source.kind === 'owner_statement' ? 'Stated' : 'Read'} ${dayOn(source.readAt)}`}</div>

@@ -8,6 +8,7 @@ import { failureWords } from './onboarding-words'
 type Question = z.infer<typeof agentQuestion>
 
 export const SENT_WORDS = 'Sent. The job starts again with your answer.'
+export const SUGGESTED_WORDS = 'Suggested by the agent; change it if it is wrong.'
 const MAX_ANSWER = 2000
 
 // A question an agent asked the owner (spec 9): what it asks, why, the options with the suggested one
@@ -34,6 +35,8 @@ export function AgentQuestion({
   // A second click before the first reply must not send again.
   const sending = useRef(false)
   const id = question.id
+  // The box holds the agent's suggestion (there are no options to pre-select), and says so until it is changed.
+  const prefilled = !hasOptions && question.suggested !== null && own === question.suggested
 
   // The owner's own words win over the option.
   const answer = (own.trim() !== '' ? own : choice).trim()
@@ -104,8 +107,14 @@ export function AgentQuestion({
               className="input"
               maxLength={MAX_ANSWER}
               value={own}
+              aria-describedby={prefilled ? `aq-hint-${id}` : undefined}
               onChange={(event) => setOwn(event.target.value)}
             />
+            {prefilled ? (
+              <p id={`aq-hint-${id}`} className="muted small">
+                {SUGGESTED_WORDS}
+              </p>
+            ) : null}
           </div>
           {error ? (
             <p className="errtext" role="alert">

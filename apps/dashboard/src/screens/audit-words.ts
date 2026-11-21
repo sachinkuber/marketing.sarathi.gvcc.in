@@ -8,6 +8,8 @@ export const ACTIONS: Record<string, string> = {
   'approval.rejected': 'Rejected an item',
   'approval.commented': 'Commented on an item',
   'approval.changes_requested': 'Asked for changes on an item',
+  'approval.overdue': 'An approval became overdue',
+  'approval.escalated': 'Sent an overdue approval to someone else',
   'approval.invalidated': 'Withdrew an approval because a fact changed',
   'onboarding.brief_choices_started': 'Started finding the open strategic choices',
   'onboarding.brief_started': 'Started writing the strategy brief',

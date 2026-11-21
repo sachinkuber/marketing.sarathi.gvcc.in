@@ -103,9 +103,20 @@ describe('audit words', () => {
   it('every action the core can record has a label', () => {
     const core = join(dirname(fileURLToPath(import.meta.url)), '../../core/src')
     const found = new Set<string>()
+    // An action is written as `action: 'x.y'` (any whitespace after the colon, either quote), as the first
+    // argument of `audit('x.y', ...)`, or after the dependencies in `auditRefusal(deps, 'x.y', ...)`.
+    const written = [
+      /\baction:\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+      /\baudit\(\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+      /\bauditRefusal\([^'"]*?,\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+    ]
     for (const file of sourceFiles(core)) {
-      for (const m of readFileSync(file, 'utf8').matchAll(/action: '([a-z_]+\.[a-z_]+)'/g)) found.add(m[1]!)
+      const text = readFileSync(file, 'utf8')
+      for (const pattern of written) for (const m of text.matchAll(pattern)) found.add(m[2]!)
     }
+    expect(found.has('approval.overdue')).toBe(true)
+    expect(found.has('approval.escalated')).toBe(true)
+    expect(found.has('approval.approved')).toBe(true)
     expect(found.size).toBeGreaterThan(40)
     expect([...found].filter((action) => !ACTIONS[action])).toEqual([])
   })

@@ -211,6 +211,40 @@ describe('the draft profile, driven', () => {
     expect(text).not.toContain('[flagged:')
   })
 
+  it('an off-domain site source shows as Web page', async () => {
+    dom.replies.push(
+      {
+        status: 200,
+        body: {
+          ...overview(),
+          intake: { website: 'https://www.aztek.example/', socials: {}, competitors: [] },
+        },
+      },
+      {
+        status: 200,
+        body: {
+          suggestions: [
+            item('business_name', {
+              sources: [
+                source({ id: 'own', address: 'https://shop.aztek.example/about' }),
+                source({ id: 'other', address: 'https://news.other.example/aztek' }),
+                source({ id: 'doc', kind: 'document', address: null, documentName: 'brochure.pdf' }),
+              ],
+            }),
+          ],
+        },
+      },
+    )
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+    await dom.click('Show sources')
+    const rows = [...dom.host.querySelectorAll('.onb-sources li')].map((li) => li.textContent ?? '')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toContain('Your site')
+    expect(rows[1]).toContain('Web page')
+    expect(rows[1]).not.toContain('Your site')
+    expect(rows[2]).toContain('Document')
+  })
+
   it('groups by topic, shows decisions, and a gap as not found yet', async () => {
     await open(
       [
