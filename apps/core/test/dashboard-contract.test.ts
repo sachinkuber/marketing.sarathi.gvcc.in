@@ -29,6 +29,7 @@ import {
   suggestionsReply,
   overdueAllReply,
   overdueReply,
+  agentQuestionsReply,
   questionnaireFinishedReply,
   questionnaireReply,
   questionnaireStartedReply,
@@ -504,6 +505,11 @@ describe('the dashboard schemas accept the core’s replies', () => {
       expect(finished.status).toBe(200)
       expect(questionnaireFinishedReply.parse(finished.json)).toEqual({ answered: 1, blank: 0 })
       expect(await overview()).toMatchObject({ step: 'facts_rules', questionnaire: { finished: true } })
+      expect(
+        agentQuestionsReply.parse((await owner.request('GET', `${base()}/agent-questions`)).json),
+      ).toEqual({
+        questions: [],
+      })
       expect(
         questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json).questionnaire
           ?.finishedAt,

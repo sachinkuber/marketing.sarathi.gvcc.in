@@ -11,17 +11,20 @@ const STEP_WORD: Record<string, string> = {
   intake: 'Intake: the website, social links, competitors and documents',
   research: 'Research: the agents are reading what you gave them',
   profile: 'Draft profile: suggestions wait for your decision',
+  questionnaire: 'Questionnaire: answer what the research could not find',
   question: 'Questions',
   fact: 'Facts',
   rule: 'Rules',
   choice: 'Choices',
 }
 
-// Where Continue leads: intake until research has started, progress while it runs, then the draft profile.
+// Where Continue leads: intake until research has started, progress while it runs, then the questionnaire (at
+// the profile and questionnaire steps). The draft profile stays one click away from the questionnaire's page.
 function nextPath(brandId: string, step: string): string {
   const base = `/b/${brandId}/onboarding`
   if (step === 'intake') return `${base}/intake`
   if (step === 'research') return `${base}/research`
+  if (step === 'profile' || step === 'questionnaire') return `${base}/questionnaire`
   return `${base}/profile`
 }
 

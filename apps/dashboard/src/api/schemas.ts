@@ -634,3 +634,24 @@ export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId:
 export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })
 export const factChangedReply = z.strictObject({ factId: z.string() })
 export const ruleChangedReply = z.strictObject({ ruleId: z.string() })
+
+// --- agent questions (M10, spec 9) -------------------------------------------------------------------------
+// A question an agent job asked the owner: open while `answer` is null.
+export const agentQuestion = z.strictObject({
+  id: z.string(),
+  jobId: z.string(),
+  runId: z.string(),
+  agent: z.string(),
+  question: z.string(),
+  why: z.string(),
+  options: z.array(z.string()),
+  suggested: z.string().nullable(),
+  createdAt: z.string(),
+  answer: z.string().nullable(),
+  answeredAt: z.string().nullable(),
+})
+export const agentQuestionsReply = z.strictObject({ questions: z.array(agentQuestion) })
+export const agentQuestionAnsweredReply = z.strictObject({
+  questionId: z.string(),
+  requeued: z.literal(true),
+})

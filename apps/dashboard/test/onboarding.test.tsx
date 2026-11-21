@@ -404,6 +404,18 @@ describe('onboarding screens, driven', () => {
     )
   })
 
+  it('Continue leads to the questionnaire at the profile and questionnaire steps', async () => {
+    for (const step of ['profile', 'questionnaire']) {
+      dom.replies.push({ status: 200, body: overview({ step }) })
+      await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/questionnaire"]`)?.textContent).toBe(
+        'Continue',
+      )
+      dom.stop()
+      dom.start()
+    }
+  })
+
   const loadIntake = async (intakeBody: unknown = null) => {
     dom.replies.push(
       { status: 200, body: overview({ intake: intakeBody }) },
