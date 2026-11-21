@@ -15,7 +15,12 @@ alter table app.agent_question no force row level security;
 do $$
 begin
   if exists (select 1 from app.agent_question where answer is null group by brand_id, job_id having count(*) > 1) then
-    raise exception '0028: app.agent_question has a job with more than one unanswered question; answer or remove the extra ones, then run the migration again';
+    raise exception '0028: app.agent_question has a job with more than one unanswered question; remove the extra ones, then run the migration again';
+  end if;
+  -- An answer needs the owner statement that records it (source_id, added below), and no answer from before this
+  -- migration has one.
+  if exists (select 1 from app.agent_question where answer is not null) then
+    raise exception '0028: app.agent_question has answered questions with no owner statement of the answer; clear those answers or remove the questions, then run the migration again';
   end if;
   if exists (select 1 from app.question group by brand_id, questionnaire_id, position having count(*) > 1) then
     raise exception '0028: app.question repeats a position within a questionnaire; renumber the repeated questions, then run the migration again';
@@ -80,11 +85,14 @@ alter table app.answer
   add column source_id uuid,
   add constraint answer_source_fk foreign key (brand_id, source_id) references app.research_source (brand_id, id);
 
+-- An answered question carries the owner statement of its answer, and an open one none: the answer route writes both
+-- in one update, and an agent cites the statement as a source (ruling R11).
 alter table app.agent_question
   add column suggested text,
   add column reminded_at timestamptz,
   add column source_id uuid,
-  add constraint agent_question_source_fk foreign key (brand_id, source_id) references app.research_source (brand_id, id);
+  add constraint agent_question_source_fk foreign key (brand_id, source_id) references app.research_source (brand_id, id),
+  add constraint agent_question_answer_source check ((answer is null) = (source_id is null));
 create unique index agent_question_one_open on app.agent_question (brand_id, job_id) where answer is null;
 
 alter table app.research_source force row level security;
@@ -99,6 +107,7 @@ alter table app.agent_question force row level security;
 -- (finished_at, finished_by) are no longer recorded.
 drop index app.agent_question_one_open;
 alter table app.agent_question
+  drop constraint agent_question_answer_source,
   drop constraint agent_question_source_fk,
   drop column source_id,
   drop column reminded_at,

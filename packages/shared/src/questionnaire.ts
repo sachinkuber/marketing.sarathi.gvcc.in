@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { askSchema } from './agent-question.ts'
+import { given, INPUT_ADDRESS_MAX, INPUT_NAME_MAX, INPUT_VALUE_MAX } from './input-text.ts'
 import {
   CONFIDENCES,
   MAX_FINDINGS,
@@ -39,43 +40,46 @@ export const MAX_QUESTIONS = 30
 const STRATEGY_REPEATS = 3
 const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS)
 const MAX_OPTIONS = 6
-const QUESTION_MAX = 300
+// A question's text: the facts and rules input carries the questions with their answers, at the same limit.
+export const QUESTION_MAX = 300
 const OPTION_MAX = 200
 const SUGGESTED_MAX = 500
-// The input's limits (the brief fixes none): an owner's edited profile value is at most 4,000 characters.
-const VALUE_MAX = 4000
-const NAME_MAX = 200
-const ADDRESS_MAX = 2000
 const MAX_COMPETITORS = 5
 
-// The input's text came from the owner, research and the web: it is only bounded here, and reaches the model
-// wrapped as data.
-const given = (max: number) => z.string().min(1).max(max)
 const profileKey = z.enum(PROFILE_KEYS)
 const confidence = z.enum(CONFIDENCES)
 
 // ---- The questionnaire job's input, built by the core from the draft profile (spec 4, 8.2). ----
 
 export const questionnaireInputSchema = z.strictObject({
-  brandName: given(NAME_MAX),
+  brandName: given(INPUT_NAME_MAX),
   // The profile the owner accepted: one current item per key.
   profile: z
-    .array(z.strictObject({ key: profileKey, value: given(VALUE_MAX), status: confidence }))
+    .array(z.strictObject({ key: profileKey, value: given(INPUT_VALUE_MAX), status: confidence }))
     .max(PROFILE_KEYS.length),
   // Profile suggestions the owner has not accepted: undecided, or rejected (ruling R9: a rejected value is
   // never pre-filled).
   open: z
-    .array(z.strictObject({ key: profileKey, proposed: given(VALUE_MAX), confidence, rejected: z.boolean() }))
+    .array(
+      z.strictObject({
+        key: profileKey,
+        proposed: given(INPUT_VALUE_MAX),
+        confidence,
+        rejected: z.boolean(),
+      }),
+    )
     .max(MAX_FINDINGS),
   // The keys the research merge could not settle, with why.
   gaps: z.array(z.strictObject({ key: profileKey, why: given(WHY_MAX) })).max(PROFILE_KEYS.length),
   // Research sources whose result is not `read`: the questionnaire asks what they would have covered.
   unreadable: z
-    .array(z.strictObject({ kind: z.enum(RESEARCH_SOURCE_KINDS), address: given(ADDRESS_MAX).nullable() }))
+    .array(
+      z.strictObject({ kind: z.enum(RESEARCH_SOURCE_KINDS), address: given(INPUT_ADDRESS_MAX).nullable() }),
+    )
     .max(MAX_SOURCES),
   // The competitors the owner named at intake.
   competitors: z
-    .array(z.strictObject({ name: given(NAME_MAX), website: given(ADDRESS_MAX).nullable() }))
+    .array(z.strictObject({ name: given(INPUT_NAME_MAX), website: given(INPUT_ADDRESS_MAX).nullable() }))
     .max(MAX_COMPETITORS),
 })
 export type QuestionnaireInput = z.infer<typeof questionnaireInputSchema>

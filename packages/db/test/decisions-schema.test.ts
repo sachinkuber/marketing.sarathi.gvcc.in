@@ -41,6 +41,15 @@ async function userId(c: pg.Client): Promise<string> {
   return r.rows[0].id as string
 }
 
+// An owner statement, as the answer route writes one for an answer.
+async function ownerStatement(c: pg.Client, uid: string): Promise<string> {
+  const r = await c.query(
+    "insert into app.research_source (brand_id, kind, result, extract, stated_by) values ($1, 'owner_statement', 'stated', 'a', $2) returning id",
+    [A, uid],
+  )
+  return r.rows[0].id as string
+}
+
 async function seedJob(target: TestDatabase, brand: string): Promise<{ runId: string; jobId: string }> {
   const def = await seedDefinition(target)
   const runId = await seedRun(target, brand, def)
@@ -93,10 +102,46 @@ describe('migration 0028: owner statements and question state', () => {
       expect(await code(ask)).toBe('23505')
       await c.query('rollback to savepoint s1')
       await c.query(
-        'update app.agent_question set answer = $2, answered_by = $3, answered_at = now() where id = $1',
-        [first.rows[0].id, 'a', uid],
+        'update app.agent_question set answer = $2, answered_by = $3, answered_at = now(), source_id = $4 where id = $1',
+        [first.rows[0].id, 'a', uid, await ownerStatement(c, uid)],
       )
       await ask()
+    })
+  })
+
+  it('an answered question carries the owner statement of its answer, and an open one carries none (ruling R11)', async () => {
+    const { runId, jobId } = await seedJob(db, A)
+    await asApp(async (c) => {
+      const uid = await userId(c)
+      const source = await ownerStatement(c, uid)
+      const id = (
+        await c.query(
+          `insert into app.agent_question (brand_id, run_id, job_id, question, why) values ($1, $2, $3, 'q', 'w') returning id`,
+          [A, runId, jobId],
+        )
+      ).rows[0].id as string
+      const set = (answer: string | null, sourceId: string | null) =>
+        c.query(
+          'update app.agent_question set answer = $2, answered_by = $3, answered_at = now(), source_id = $4 where id = $1',
+          [id, answer, answer === null ? null : uid, sourceId],
+        )
+      await c.query('savepoint s1')
+      // An answer with no statement, and a statement with no answer, are both refused.
+      expect(await code(() => set('a', null))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      expect(await code(() => set(null, source))).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      // An open question with a statement is refused when it is made, too.
+      expect(
+        await code(() =>
+          c.query(
+            `insert into app.agent_question (brand_id, run_id, job_id, question, why, source_id) values ($1, $2, $3, 'q', 'w', $4)`,
+            [A, runId, jobId, source],
+          ),
+        ),
+      ).toBe('23514')
+      await c.query('rollback to savepoint s1')
+      await set('a', source)
     })
   })
 
@@ -296,10 +341,15 @@ describe('migration 0028: owner statements and question state', () => {
       await expect(migrate(url)).rejects.toThrow(
         /0028: app\.agent_question has a job with more than one unanswered question/,
       )
+      // An answer from before 0028 has no owner statement to record it, so it is named too (ruling R11).
       await own.admin.query(
         'update app.agent_question set answer = $1, answered_by = $2, answered_at = now() where ctid = (select ctid from app.agent_question limit 1)',
         ['a', uid],
       )
+      await expect(migrate(url)).rejects.toThrow(
+        /0028: app\.agent_question has answered questions with no owner statement of the answer/,
+      )
+      await own.admin.query('delete from app.agent_question where answer is not null')
       const qn = (
         await own.admin.query('insert into app.questionnaire (brand_id) values ($1) returning id', [A])
       ).rows[0].id

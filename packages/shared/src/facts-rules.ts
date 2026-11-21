@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { askSchema } from './agent-question.ts'
-import { MAX_QUESTIONS, QUESTION_KEYS } from './questionnaire.ts'
+import { given, INPUT_ADDRESS_MAX, INPUT_NAME_MAX, INPUT_VALUE_MAX } from './input-text.ts'
+import { MAX_QUESTIONS, QUESTION_KEYS, QUESTION_MAX } from './questionnaire.ts'
 import { CONFIDENCES, MAX_SOURCES, PROFILE_KEYS, SOURCE_KINDS, WHY_MAX } from './research.ts'
 import { shown } from './visible-text.ts'
 
@@ -19,22 +20,14 @@ export const MAX_FACTS = 40
 export const MAX_RULES = 30
 const STATEMENT_MAX = 300
 const RULE_TEXT_MAX = 300
-// The input's limits (the brief fixes none). Sources: five research groups of at most 60 each, the answers'
-// owner statements and the brand's documents. An extract is research's (at most 500 characters) or an owner
-// statement's exact wording, which is never cut: an answer is at most 2,000 characters, an owner's edited
-// profile value at most 4,000.
+// The input's own limits (the brief fixes none; the name, address, value and question limits are shared with
+// the questionnaire). Sources: five research groups of at most 60 each, the answers' owner statements and the
+// brand's documents. An extract is research's (at most 500 characters) or an owner statement's exact wording,
+// which is never cut: an answer is at most 2,000 characters, an owner's edited profile value at most 4,000.
 const MAX_INPUT_SOURCES = 400
-const EXTRACT_MAX = 4000
-const VALUE_MAX = 4000
-const NAME_MAX = 200
-const ADDRESS_MAX = 2000
+const INPUT_EXTRACT_MAX = 4000
 const DOCUMENT_NAME_MAX = 255
-const QUESTION_MAX = 300
 const ANSWER_MAX = 2000
-
-// The input's text came from the owner, research and the web: it is only bounded here, and reaches the model
-// wrapped as data.
-const given = (max: number) => z.string().min(1).max(max)
 
 // ---- The facts and rules job's input, built by the core once the questionnaire is finished (spec 7, 8.2). ----
 
@@ -42,16 +35,16 @@ export const factsRulesInputSchema = z
   .strictObject({
     // The core's date: review dates count from it.
     today: z.iso.date(),
-    brandName: given(NAME_MAX),
+    brandName: given(INPUT_NAME_MAX),
     // Every source the profile items and the answers cite, and the brand's document sources.
     sources: z
       .array(
         z.strictObject({
           id: z.uuid(),
           kind: z.enum(SOURCE_KINDS),
-          address: given(ADDRESS_MAX).nullable(),
+          address: given(INPUT_ADDRESS_MAX).nullable(),
           documentName: given(DOCUMENT_NAME_MAX).nullable(),
-          extract: given(EXTRACT_MAX),
+          extract: given(INPUT_EXTRACT_MAX),
         }),
       )
       .max(MAX_INPUT_SOURCES),
@@ -60,7 +53,7 @@ export const factsRulesInputSchema = z
       .array(
         z.strictObject({
           key: z.enum(PROFILE_KEYS),
-          value: given(VALUE_MAX),
+          value: given(INPUT_VALUE_MAX),
           status: z.enum(CONFIDENCES),
           sourceIds: z.array(z.uuid()).max(MAX_SOURCES),
         }),
@@ -148,7 +141,8 @@ export type FactsRulesResult = z.infer<typeof factsRulesResultSchema>
 export function factsRulesAgainstInput(
   result: FactsRulesResult,
   input: { today: string; sources: { id: string }[] },
-  answers: { sourceId: string }[] = [],
+  // Required, so no caller can leave the job's answers out and refuse a fact that cites one.
+  answers: { sourceId: string }[],
 ): { path: (string | number)[]; message: string }[] {
   const listed = new Set([...input.sources.map((source) => source.id), ...answers.map((a) => a.sourceId)])
   const issues: { path: (string | number)[]; message: string }[] = []

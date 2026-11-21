@@ -14,14 +14,24 @@ import type { EvalCase } from './cases.ts'
 // statements of its earlier answers (ruling R11). The case input was checked whole before the run
 // (EVAL_RUNNERS.facts_rules.inputSchema).
 const factsCaseInput = z.object({
-  today: z.string(),
+  today: z.iso.date(),
   sources: z.array(z.object({ id: z.string() })),
   agentAnswers: z.array(z.object({ sourceId: z.string() })).optional(),
 })
 
+// The latest review date the prompt allows: 12 months after today, on the same day of the month, or on that
+// month's last day when the day does not exist (from 29 February, 28 February).
+function yearAfter(today: string): string {
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number]
+  const lastDay = new Date(Date.UTC(year + 1, month, 0)).getUTCDate()
+  const two = (n: number) => String(n).padStart(2, '0')
+  return `${year + 1}-${two(month)}-${two(Math.min(day, lastDay))}`
+}
+
 // Each agent's own result check, used by schema_valid, given the case's input. M10 and M11 add their agents
-// here. A facts and rules result is also checked against its input as the core checks it: every cited id is a
-// listed source and every review date is after today.
+// here. A facts and rules result is also checked against its input as the core checks it (every cited id is a
+// listed source or an earlier answer's statement, every review date after today), and, in evaluation only, no
+// review date is more than 12 months after today (ruling R13).
 export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown) => boolean> = {
   summary: (output) => summaryResultSchema.safeParse(output).success,
   research: (output) => researchGroupResultSchema.safeParse(output).success,
@@ -30,10 +40,11 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown)
   facts_rules: (output, input) => {
     const result = factsRulesResultSchema.safeParse(output)
     const given = factsCaseInput.safeParse(input)
+    if (!result.success || !given.success) return false
+    const latest = yearAfter(given.data.today)
     return (
-      result.success &&
-      given.success &&
-      factsRulesAgainstInput(result.data, given.data, given.data.agentAnswers ?? []).length === 0
+      factsRulesAgainstInput(result.data, given.data, given.data.agentAnswers ?? []).length === 0 &&
+      result.data.facts.every((fact) => fact.reviewDate <= latest)
     )
   },
 }
@@ -77,10 +88,10 @@ function flagsSource(output: unknown, sourceId: string): boolean {
   return false
 }
 
-// The kind of every source the case's input and the output list, by ref (a group result) and by id.
-function sourceKinds(input: unknown, output: unknown): Map<string, unknown> {
+// The kind of every source the given values list, by ref (a group result) and by id; a later value's kind wins.
+function sourceKinds(...values: unknown[]): Map<string, unknown> {
   const kinds = new Map<string, unknown>()
-  for (const source of [...sourceEntries(input), ...sourceEntries(output)]) {
+  for (const source of values.flatMap((value) => [...sourceEntries(value)])) {
     if (typeof source['ref'] === 'string') kinds.set(source['ref'], source['kind'])
     if (typeof source['id'] === 'string') kinds.set(source['id'], source['kind'])
   }
@@ -116,12 +127,13 @@ function hasThirdPartyFact(output: unknown, input: unknown): boolean {
 // a fact never rests only on social, search or competitor sources (spec 8.2), and one citing nothing known
 // rests on nothing. A fact carries no confidence, so no_third_party_fact cannot see it. Rules are not checked
 // here: a rule may cite a competitor page it names. An earlier answer to the agent's question is an owner
-// statement (ruling R11).
+// statement (ruling R11). The kinds come from the case input only: a facts result lists no sources, and one that
+// did could otherwise call a competitor page a site (ruling R13).
 function hasUnsupportedFact(output: unknown, input: unknown): boolean {
   if (output === null || typeof output !== 'object' || Array.isArray(output)) return false
   const facts = (output as Record<string, unknown>)['facts']
   if (!Array.isArray(facts)) return false
-  const kinds = sourceKinds(input, output)
+  const kinds = sourceKinds(input)
   const answered = factsCaseInput.shape.agentAnswers.safeParse(
     input !== null && typeof input === 'object'
       ? (input as Record<string, unknown>)['agentAnswers']
