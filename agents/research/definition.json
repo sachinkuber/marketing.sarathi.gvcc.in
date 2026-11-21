@@ -1,6 +1,6 @@
 {
   "agent": "research",
-  "version": 1,
+  "version": 2,
   "model": "claude-sonnet-5-5",
   "effort": "medium",
   "maxTokens": 16000,
