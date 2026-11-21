@@ -1,3 +1,5 @@
+import { fork as forkProcess, type ChildProcess, type ForkOptions } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { PDFDocument, PDFName } from 'pdf-lib'
 import { AppError } from '../errors.ts'
 
@@ -139,14 +141,124 @@ async function split(bytes: Buffer, limits: PdfLimits, options: SplitOptions): P
   return parts
 }
 
+export interface SplitChildOptions {
+  // For tests: how long the split may take, how long the parent waits after that before killing the child,
+  // and the function that starts the child.
+  deadlineMs?: number
+  killGraceMs?: number
+  fork?: (modulePath: string, args: string[], options: ForkOptions) => ChildProcess
+}
+
+const KILL_GRACE_MS = 5_000
+// The heap of the child only; Buffers are outside it. The container's own limit stops the rest, and the core
+// outlives a child the container kills (the split then answers pdf_unreadable).
+const CHILD_ARGS = ['--max-old-space-size=512']
+const CHILD_PATH = fileURLToPath(new URL('./pdf-split-child.ts', import.meta.url))
+
+type Answer = { parts: PdfPart[] } | { error: { status: number; code: string; message: string } }
+
+function asAnswer(value: unknown): Answer | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { parts, error } = value as { parts?: unknown; error?: unknown }
+  if (Array.isArray(parts)) {
+    const whole = parts.every(
+      (p: unknown) =>
+        typeof p === 'object' &&
+        p !== null &&
+        typeof (p as PdfPart).firstPage === 'number' &&
+        typeof (p as PdfPart).lastPage === 'number' &&
+        (p as PdfPart).bytes instanceof Uint8Array,
+    )
+    if (!whole) return null
+    return {
+      parts: (parts as PdfPart[]).map((p) => ({
+        firstPage: p.firstPage,
+        lastPage: p.lastPage,
+        bytes: Buffer.from(p.bytes.buffer, p.bytes.byteOffset, p.bytes.byteLength),
+      })),
+    }
+  }
+  if (typeof error === 'object' && error !== null) {
+    const e = error as { status?: unknown; code?: unknown; message?: unknown }
+    if (typeof e.status === 'number' && typeof e.code === 'string' && typeof e.message === 'string') {
+      return { error: { status: e.status, code: e.code, message: e.message } }
+    }
+  }
+  return null
+}
+
+// The split runs in a child process of its own, with a memory limit and a time limit, so a PDF that is hostile or
+// huge costs the child and not the core (R17, R19). One child per split.
+function splitInChild(bytes: Buffer, limits: PdfLimits, options: SplitChildOptions): Promise<PdfPart[]> {
+  const deadlineMs = options.deadlineMs ?? SPLIT_DEADLINE_MS
+  const start = options.fork ?? forkProcess
+  return new Promise<PdfPart[]>((resolve, reject) => {
+    const child = start(CHILD_PATH, [], {
+      execArgv: CHILD_ARGS,
+      serialization: 'advanced',
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    })
+    let done = false
+    const finish = (settle: () => void): void => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      child.off('message', onMessage)
+      child.off('exit', onExit)
+      child.off('error', onError)
+      // A child that has not exited is killed; one that has is already reaped. A late error is swallowed.
+      child.on('error', () => undefined)
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+      settle()
+    }
+    const died = (): void => finish(() => reject(unreadable()))
+    function onMessage(value: unknown): void {
+      const answer = asAnswer(value)
+      if (answer === null) return died()
+      finish(() => {
+        if ('parts' in answer) resolve(answer.parts)
+        else reject(new AppError(answer.error.status, answer.error.code, answer.error.message))
+      })
+    }
+    function onExit(): void {
+      died()
+    }
+    function onError(): void {
+      died()
+    }
+    child.on('message', onMessage)
+    child.on('exit', onExit)
+    child.on('error', onError)
+    const timer = setTimeout(
+      () =>
+        finish(() =>
+          reject(
+            tooComplex(
+              'This PDF took too long to prepare for the AI. Export it again with fewer or smaller images, or as smaller files.',
+            ),
+          ),
+        ),
+      deadlineMs + (options.killGraceMs ?? KILL_GRACE_MS),
+    )
+    // A child that is already gone makes send fail through the error event or the callback.
+    try {
+      child.send({ bytes, limits, deadlineMs }, (error) => {
+        if (error) died()
+      })
+    } catch {
+      died()
+    }
+  })
+}
+
 // One split at a time in this process: splitting holds a whole PDF and its parts in memory.
 let queue: Promise<unknown> = Promise.resolve()
 export function splitPdfOneAtATime(
   bytes: Buffer,
   limits: PdfLimits,
-  options?: SplitOptions,
+  options: SplitChildOptions = {},
 ): Promise<PdfPart[]> {
-  const run = queue.then(() => splitPdf(bytes, limits, options))
+  const run = queue.then(() => splitInChild(bytes, limits, options))
   queue = run.catch(() => undefined)
   return run
 }
