@@ -289,7 +289,7 @@ describe('the research runners', () => {
     // The job's request carries the definition's web tools; evaluation reads only the recorded inputs.
     expect(expected.tools).toEqual([
       { type: 'web_search_20260209', maxUses: 20 },
-      { type: 'web_fetch_20260209', maxUses: 30 },
+      { type: 'web_fetch_20260209', maxUses: 30, maxContentTokens: 40000 },
     ])
     delete expected.tools
     expect(s.requests[0]).toEqual(expected)

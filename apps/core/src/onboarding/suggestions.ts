@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
+import { RESEARCH_SOURCE_KINDS } from '@mkt/shared'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { readStoredExtract } from './research-results.ts'
 import { qualifiesAsFactSource, type SourceKind } from './sources.ts'
+
+// The kinds whose stored extract research wrote (with its flag marker and cut); an owner statement is not one.
+const RESEARCH_KINDS: readonly string[] = RESEARCH_SOURCE_KINDS
 
 export type SuggestionStep = 'profile' | 'question' | 'fact' | 'rule' | 'choice'
 export type Confidence = 'found' | 'assumed' | 'unknown'
@@ -406,7 +410,11 @@ export async function listSuggestions(
       ).map((source) => ({
         ...source,
         readAt: new Date(source.readAt).toISOString(),
-        ...readStoredExtract(source.extract),
+        // Only research extracts carry the stored flag marker and the 500-character cut. An owner statement is
+        // the owner's own words, returned exactly as stated and never read as flagged.
+        ...(RESEARCH_KINDS.includes(source.kind)
+          ? readStoredExtract(source.extract)
+          : { extract: source.extract, flagged: null }),
       })),
     }))
   })

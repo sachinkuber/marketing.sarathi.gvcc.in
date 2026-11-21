@@ -13,7 +13,7 @@ import { postResult, startAttempt, type JobsDeps } from '../src/jobs/service.ts'
 import { verifyAttemptToken, type AttemptClaims } from '../src/jobs/token.ts'
 import { readOverview, startResearch } from '../src/onboarding/research.ts'
 import { readStoredExtract, storedExtract } from '../src/onboarding/research-results.ts'
-import { gradeConfidence, type GradedSource } from '../src/onboarding/sources.ts'
+import { gradeConfidence, registrableDomain, type GradedSource } from '../src/onboarding/sources.ts'
 import { decideSuggestion } from '../src/onboarding/suggestions.ts'
 import { addBrand, addUser, createStack, type Stack } from './support.ts'
 
@@ -396,9 +396,71 @@ describe('gradeConfidence (spec 8.2, rulings R22, R22a, R33, R34, R35)', () => {
       { website: 'https://aztek.co.in/' },
       one,
     ],
+    // Shared hosting: each tenant of github.io and the like is its own domain.
+    [
+      'another tenant of github.io is not the brand site',
+      [read('site', 'https://other.github.io/about')],
+      'found',
+      { website: 'https://aztek.github.io/' },
+      one,
+    ],
+    [
+      "the brand's own github.io site is its own",
+      [read('site', 'https://www.aztek.github.io/about')],
+      'found',
+      { website: 'https://aztek.github.io/' },
+      found,
+    ],
+    [
+      'two tenants of one shared host are two hosts',
+      [read('search', 'https://a.blogspot.com/post'), read('social', 'https://b.blogspot.com/')],
+      'found',
+      W,
+      found,
+    ],
   ]
   it.each(cases)('%s', (_name, sources, claimed, context, expected) => {
     expect(gradeConfidence(sources, claimed, context)).toEqual(expected)
+  })
+})
+
+describe('registrable domains (R34)', () => {
+  it.each([
+    ['https://www.aztek.example/about', 'aztek.example'],
+    ['https://shop.aztek.example/', 'aztek.example'],
+    ['https://news.aztek.co.in/', 'aztek.co.in'],
+    ['https://a.example.com.au/', 'example.com.au'],
+    // Shared-hosting suffixes keep one more label: each tenant is its own domain.
+    ['https://aztek.github.io/', 'aztek.github.io'],
+    ['https://other.github.io/x', 'other.github.io'],
+    ['https://www.aztek.github.io/', 'aztek.github.io'],
+    ['https://blog.aztek.github.io/', 'aztek.github.io'],
+    ['https://aztek.gitlab.io/', 'aztek.gitlab.io'],
+    ['https://aztek.blogspot.com/', 'aztek.blogspot.com'],
+    ['https://aztek.wordpress.com/', 'aztek.wordpress.com'],
+    ['https://aztek.wixsite.com/site', 'aztek.wixsite.com'],
+    ['https://aztek.weebly.com/', 'aztek.weebly.com'],
+    ['https://aztek.netlify.app/', 'aztek.netlify.app'],
+    ['https://aztek.vercel.app/', 'aztek.vercel.app'],
+    ['https://aztek.pages.dev/', 'aztek.pages.dev'],
+    ['https://aztek.web.app/', 'aztek.web.app'],
+    ['https://aztek.firebaseapp.com/', 'aztek.firebaseapp.com'],
+    ['https://aztek.herokuapp.com/', 'aztek.herokuapp.com'],
+    ['https://aztek.myshopify.com/', 'aztek.myshopify.com'],
+    ['https://aztek.square.site/', 'aztek.square.site'],
+    // The shared host itself, and a look-alike that only ends in the same letters.
+    ['https://github.io/', 'github.io'],
+    ['https://www.github.io/', 'github.io'],
+    ['https://shop.notgithub.io/', 'notgithub.io'],
+    ['https://Aztek.GitHub.IO/', 'aztek.github.io'],
+  ])('%s is %s', (address, domain) => {
+    expect(registrableDomain(address)).toBe(domain)
+  })
+
+  it('aztek.github.io and other.github.io are different domains', () => {
+    expect(registrableDomain('https://aztek.github.io/')).not.toBe(
+      registrableDomain('https://other.github.io/'),
+    )
   })
 })
 
@@ -628,7 +690,17 @@ describe('dead groups', () => {
     await kill(run.group.competitors!)
     expect(await mergeJobs(run.runId)).toHaveLength(0)
     expect(await runState(run.runId)).toBe('failed')
-    expect((await readOverview(stack.appPool, brandId)).research?.state).toBe('failed')
+    const overview = await readOverview(stack.appPool, brandId)
+    expect(overview.research?.state).toBe('failed')
+    // No merge job will ever come: the overview says the merge failed, so the screens stop waiting for it.
+    expect(overview.research?.merge).toBe('failed')
+  })
+
+  it('while groups still run and no merge job exists yet, the merge is waiting', async () => {
+    const brandId = await newBrand()
+    const run = await begin(brandId)
+    await kill(run.group.site!)
+    expect((await readOverview(stack.appPool, brandId)).research?.merge).toBe('waiting')
   })
 
   it('a merge job that dies fails the run', async () => {

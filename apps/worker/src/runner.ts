@@ -35,6 +35,22 @@ export const TIMEOUT_MS_BY_CLASS: Partial<Record<JobClass, number>> = {
   production: 900_000,
 }
 
+// The most a checkpoint body may be: the core reads it with an 8 MB parser (8 * 1024 * 1024 bytes). A larger
+// body would be refused after it was sent, so it is refused here instead (StepTooLarge).
+export const CHECKPOINT_MAX_BYTES = 8 * 1024 * 1024
+
+// A reply too large to save as its step (a tool step carries the search results and fetched pages). The paid
+// call is costed with a cost-only checkpoint, as a stop is, and the attempt then fails with this error.
+export class StepTooLarge extends Error {
+  constructor(step: string, bytes: number) {
+    super(
+      `The reply to step ${step} is ${(bytes / 1_048_576).toFixed(1)} MB with its search results and fetched ` +
+        'pages, too large to save (a step saves at most 8 MB). The call was costed; nothing was saved.',
+    )
+    this.name = 'StepTooLarge'
+  }
+}
+
 const NO_USAGE = {
   inputTokens: 0,
   outputTokens: 0,
@@ -264,7 +280,7 @@ export async function runJob(
       }
       const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = reply.usage
       const counts = serverCounts(reply.usage)
-      const body = {
+      const full = {
         step,
         output,
         ...(stopped ? { stopped: true as const } : {}),
@@ -273,6 +289,10 @@ export async function runJob(
         providerRequestId: reply.requestId,
         usage: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, ...counts },
       }
+      // Measured as it will be sent. Too large: costed without its output, then StepTooLarge below.
+      const bytes = stopped ? 0 : Buffer.byteLength(JSON.stringify(full))
+      const tooLarge = bytes > CHECKPOINT_MAX_BYTES
+      const body = tooLarge ? { ...full, output: null, stopped: true as const } : full
       let delay = deps.checkpointRetryDelayMs ?? 250
       for (let attempt = 1; ; attempt += 1) {
         try {
@@ -287,6 +307,7 @@ export async function runJob(
       if (missingContent)
         throw new Error('the model reply carried no content blocks for a request with tools')
       if (stopped) throw new ModelStopped(reply.stopReason)
+      if (tooLarge) throw new StepTooLarge(step, bytes)
       return {
         text: reply.text,
         stopReason: reply.stopReason,

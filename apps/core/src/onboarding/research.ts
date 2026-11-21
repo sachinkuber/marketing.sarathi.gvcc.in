@@ -1,4 +1,4 @@
-import { withBrand, type Pool } from '@mkt/db'
+import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { z } from 'zod'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
@@ -75,6 +75,21 @@ export async function saveIntake(
   })
 }
 
+// Whether a research run is still going: its state says so, or any of its jobs is still alive (not finished,
+// cancelled or dead). A dead job can fail its run while its siblings keep going, so the state alone is not
+// enough. Starting research and deleting a document both refuse while this is true.
+export async function researchRunIsOpen(client: PoolClient, runId: string): Promise<boolean> {
+  const run = await client.query<{ state: string }>('select state from app.run where id = $1', [runId])
+  if (run.rows[0]?.state === 'running' || run.rows[0]?.state === 'created') return true
+  const alive = await client.query(
+    `select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
+      where i.run_id = $1 and i.finished_at is null and not c.cancel_requested and c.dead_at is null
+      limit 1`,
+    [runId],
+  )
+  return alive.rows.length > 0
+}
+
 export async function startResearch(
   pool: Pool,
   deps: Pick<JobsDeps, 'queue' | 'backlogLimit' | 'audit'>,
@@ -89,25 +104,12 @@ export async function startResearch(
     if (!onboarding?.intake?.website) {
       throw new AppError(409, 'intake_needed', 'Save the website address first, then start research.')
     }
-    if (onboarding.research_run_id) {
-      const run = await client.query<{ state: string }>('select state from app.run where id = $1', [
-        onboarding.research_run_id,
-      ])
-      // A dead job fails its run while its siblings keep going, so the run's state alone is not enough:
-      // any job still alive (not finished, cancelled or dead) also means research is running.
-      const alive = await client.query(
-        `select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-          where i.run_id = $1 and i.finished_at is null and not c.cancel_requested and c.dead_at is null
-          limit 1`,
-        [onboarding.research_run_id],
+    if (onboarding.research_run_id && (await researchRunIsOpen(client, onboarding.research_run_id))) {
+      throw new AppError(
+        409,
+        'research_running',
+        'Research is already running for this brand. Wait for it to finish.',
       )
-      if (run.rows[0]?.state === 'running' || run.rows[0]?.state === 'created' || alive.rows.length > 0) {
-        throw new AppError(
-          409,
-          'research_running',
-          'Research is already running for this brand. Wait for it to finish.',
-        )
-      }
     }
     // Both releases are checked before anything is written, so a refusal leaves nothing behind.
     const live = await client.query<{ id: string; agent: string }>(
@@ -323,11 +325,15 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       })
     }
     const merge = jobs.rows.find((r) => r.type === MERGE_RESULT_TYPE)
+    const state = run.rows[0]?.state ?? 'failed'
+    // With no merge job, the merge waits only while the run is still going: a run that ended without one (every
+    // group died) will never make it, so it reads as failed and the screens stop waiting.
+    const going = state === 'created' || state === 'running'
     overview.research = {
       runId,
-      state: run.rows[0]?.state ?? 'failed',
+      state,
       groups,
-      merge: merge ? stateOf(merge) : 'waiting',
+      merge: merge ? stateOf(merge) : going ? 'waiting' : 'failed',
       gaps: merge?.finished && Array.isArray(merge.outcome?.gaps) ? merge.outcome.gaps : [],
     }
     return overview

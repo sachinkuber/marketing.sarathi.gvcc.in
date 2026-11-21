@@ -232,8 +232,14 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
   }
 
   // The topics in their fixed order, each with its items in the profile's key order; an item already replaced
-  // is not sent by the core, so nothing hidden needs filtering here.
-  const byKey = new Map((items ?? []).map((item) => [item.key, item]))
+  // is not sent by the core, so nothing hidden needs filtering here. A key can still have several items: a
+  // re-run adds a new suggestion beside one the owner already decided. The items come newest first; per key the
+  // one still waiting for a decision is shown, otherwise the newest.
+  const byKey = new Map<string, Item>()
+  for (const item of items ?? []) {
+    const shown = byKey.get(item.key)
+    if (!shown || (shown.decision !== null && item.decision === null)) byKey.set(item.key, item)
+  }
   const topics = TOPICS.map((topic) => ({
     heading: topic.heading,
     items: topic.keys.map((k) => byKey.get(k)).filter((i): i is Item => i !== undefined),

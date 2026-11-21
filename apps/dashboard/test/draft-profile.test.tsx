@@ -77,6 +77,45 @@ describe('the draft profile, driven', () => {
     ])
   })
 
+  it('after a re-run, the open suggestion for a key already decided is shown and counted by accept-all', async () => {
+    // The core sends items newest first. The older one was accepted; the re-run's newer one waits.
+    const fresh = item('business_name', {
+      id: 'id-new',
+      proposed: 'Aztek Pumps Pvt Ltd',
+      createdAt: '2026-11-21T09:00:00.000Z',
+    })
+    const decided = item('business_name', {
+      id: 'id-old',
+      proposed: 'Aztek',
+      decision: 'accepted',
+      decidedAt: '2026-11-20T10:00:00.000Z',
+    })
+    await open([fresh, decided])
+    expect(dom.text()).toContain('Aztek Pumps Pvt Ltd')
+    expect(dom.button('Accept all found items (1)')).toBeTruthy()
+    dom.replies.push(
+      { status: 200, body: { createdId: 'p1' } },
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [] } },
+    )
+    await dom.click('Accept all found items (1)')
+    expect(dom.writes()).toEqual([
+      {
+        url: `/api/v1/brands/${brandId}/onboarding/suggestions/id-new/decision`,
+        method: 'POST',
+        body: { decision: 'accepted' },
+      },
+    ])
+  })
+
+  it('with no open item for a key, the newest decided one is shown', async () => {
+    const newer = item('business_name', { id: 'id-b', proposed: 'Second wording', decision: 'rejected' })
+    const older = item('business_name', { id: 'id-a', proposed: 'First wording', decision: 'accepted' })
+    await open([newer, older])
+    expect(dom.text()).toContain('Second wording')
+    expect(dom.text()).not.toContain('First wording')
+  })
+
   it('accept-all stops at the first error and says which item failed and how to retry', async () => {
     await open([item('business_name'), item('tone_of_voice'), item('audiences')])
     dom.replies.push(

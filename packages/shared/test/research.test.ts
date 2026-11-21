@@ -302,6 +302,9 @@ describe('research schemas', () => {
 
 describe('the research agents', () => {
   it('5 groups × searchesPerJob ≤ searchesPerBrandStep for the research definition', () => {
+    // This bounds each group's first attempt only. A retry after a lost reply sends a turn with its full budget
+    // again, so the runtime worst case is about 312 searches (4 web groups × 3 attempts × 26); a runtime per-run
+    // cap is planned for milestone 10.
     const { caps } = loadAgentDefinition(RESEARCH).definition
     expect(SOURCE_GROUPS).toHaveLength(5)
     expect(caps?.searchesPerJob).toBeDefined()
@@ -318,12 +321,13 @@ describe('the research agents', () => {
       resultType: 'research_group.v1',
       maxTokens: 16000,
       effort: 'medium',
-      tools: [
-        { type: 'web_search_20260209', maxUses: 20 },
-        { type: 'web_fetch_20260209', maxUses: 30 },
-      ],
       caps: { searchesPerJob: 20, fetchesPerJob: 30, searchesPerBrandStep: 150 },
     })
+    // R42: a fetched page is cut at 40,000 tokens, so one page cannot fill a step's 8 MB checkpoint.
+    expect(research.definition.tools).toEqual([
+      { type: 'web_search_20260209', maxUses: 20 },
+      { type: 'web_fetch_20260209', maxUses: 30, maxContentTokens: 40000 },
+    ])
     expect(research.system.length).toBeGreaterThan(0)
     const merge = loadAgentDefinition(MERGE)
     expect(merge.definition).toMatchObject({

@@ -22,6 +22,9 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
   return {
     async send(request: ModelRequest): Promise<ModelReply> {
       let response
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let timedOut = false
       try {
         const body = {
           model: request.model,
@@ -42,13 +45,30 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
                 tools: request.tools.map((tool) =>
                   tool.type === 'web_search_20260209'
                     ? { type: tool.type, name: 'web_search' as const, max_uses: tool.maxUses }
-                    : { type: tool.type, name: 'web_fetch' as const, max_uses: tool.maxUses },
+                    : {
+                        type: tool.type,
+                        name: 'web_fetch' as const,
+                        max_uses: tool.maxUses,
+                        ...(tool.maxContentTokens === undefined
+                          ? {}
+                          : { max_content_tokens: tool.maxContentTokens }),
+                      },
                 ),
               }
             : {}),
           messages: request.messages as Anthropic.MessageParam[],
         }
-        const requestOptions = request.timeoutMs === undefined ? undefined : { timeout: request.timeoutMs }
+        // The SDK's timeout covers only the wait for the response headers: its timer is cleared once they
+        // arrive, so a stream that then stalls would never end. The adapter bounds the whole request with its
+        // own timer and abort signal, and clears the timer when the request ends.
+        timer = setTimeout(() => {
+          timedOut = true
+          controller.abort()
+        }, request.timeoutMs ?? clientOptions.timeout)
+        const requestOptions = {
+          ...(request.timeoutMs === undefined ? {} : { timeout: request.timeoutMs }),
+          signal: controller.signal,
+        }
         // A request with tools can run for many minutes: it is streamed and read as its final message, because
         // a non-streaming call that long is cut off by the HTTP client's own header timeout. A request without
         // tools (summary) is sent as before.
@@ -57,11 +77,16 @@ export function anthropicModel(apiKey: string, options: AnthropicOptions = {}): 
             ? await client.messages.stream(body, requestOptions).finalMessage()
             : await client.messages.create(body, requestOptions)
       } catch (error) {
+        // Cut by the adapter's own timer: the same error as the SDK's header timeout, so the runner treats both
+        // alike (not a refusal; the call stays started for reconciliation and the job retries).
+        if (timedOut) throw new Anthropic.APIConnectionTimeoutError()
         // An HTTP error status carries its code to the runner; a connection error or timeout passes as is.
         if (error instanceof Anthropic.APIError && typeof error.status === 'number') {
           throw new ModelRefusedError(error.status, error.message)
         }
         throw error
+      } finally {
+        clearTimeout(timer)
       }
       const text = response.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
       return {

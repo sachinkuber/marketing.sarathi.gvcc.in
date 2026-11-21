@@ -3,6 +3,7 @@ import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { splitPdfOneAtATime, type PdfPart } from './pdf-parts.ts'
+import { researchRunIsOpen } from './research.ts'
 
 // Brand documents (spec 13, test 51). The size limits are the owner's decision (a PDF up to 100 MB, which
 // supersedes the spec's 10 MB) and match migration 0026's check.
@@ -199,6 +200,20 @@ export async function deleteDocument(
 ): Promise<void> {
   try {
     await withBrand(pool, input.brandId, async (client) => {
+      // The documents group reads the brand's files while research runs: a file deleted under it would fail the
+      // group. The onboarding row is locked as starting research locks it, so a start and a delete do not cross.
+      const onboarding = await client.query<{ research_run_id: string | null }>(
+        'select research_run_id from app.onboarding where brand_id = $1 for update',
+        [input.brandId],
+      )
+      const runId = onboarding.rows[0]?.research_run_id
+      if (runId && (await researchRunIsOpen(client, runId))) {
+        throw new AppError(
+          409,
+          'research_running',
+          'Research is reading the brand’s documents. Wait for it to finish, then delete the file.',
+        )
+      }
       const gone = await client.query('delete from app.brand_document where brand_id = $1 and id = $2', [
         input.brandId,
         input.documentId,

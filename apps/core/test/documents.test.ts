@@ -295,6 +295,45 @@ describe('delete', () => {
     )
     expect(await count(brandId)).toBe(1)
   })
+
+  it('a document cannot be deleted while research runs for the brand, and can be once it has finished', async () => {
+    const brandId = await newBrand()
+    const id = await insertDocument(brandId, file('application/pdf', 64))
+    const { runId, jobId } = await withBrand(stack.appPool, brandId, async (client) => {
+      const runId = await createRun(client, brandId, {
+        agent: 'test-agent',
+        definitionVersionId: definitionId,
+        startedByKind: 'system',
+        startedById: null,
+      })
+      const jobId = await createJob(client, jobs, brandId, {
+        runId,
+        jobClass: 'production',
+        input: { documentIds: [id] },
+        expectedResultType: 'test.echo',
+      })
+      await client.query(
+        `insert into app.onboarding (brand_id, step, research_run_id) values ($1, 'research', $2)`,
+        [brandId, runId],
+      )
+      return { runId, jobId }
+    })
+    const refused = await owner.request('DELETE', `${base(brandId)}/${id}`)
+    expect(refused.status).toBe(409)
+    expect(refused.json.error.code).toBe('research_running')
+    expect(refused.json.error.message).toBe(
+      'Research is reading the brand’s documents. Wait for it to finish, then delete the file.',
+    )
+    expect(await count(brandId)).toBe(1)
+    // A run whose state already ended but with a job still alive still counts as running (the start guard's rule).
+    await stack.db.admin.query(`update app.run set state = 'failed' where id = $1`, [runId])
+    expect((await owner.request('DELETE', `${base(brandId)}/${id}`)).status).toBe(409)
+    // Once every job has settled and the run has ended, the document can go.
+    await stack.db.admin.query('update app.job_input set finished_at = now() where job_id = $1', [jobId])
+    await stack.db.admin.query(`update app.run set state = 'succeeded' where id = $1`, [runId])
+    expect((await owner.request('DELETE', `${base(brandId)}/${id}`)).status).toBe(204)
+    expect(await count(brandId)).toBe(0)
+  })
 })
 
 describe('large PDFs are split into parts for the AI', () => {

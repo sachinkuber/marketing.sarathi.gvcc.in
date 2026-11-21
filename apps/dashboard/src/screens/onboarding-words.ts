@@ -98,9 +98,14 @@ export function megabytes(bytes: number): string {
     : `${Math.max(1, Math.round(bytes / 1024))} kB`
 }
 
-// Research is open while any group, or the merge, is waiting or running.
-export function isOpen(research: { groups: { state: GroupState }[]; merge: GroupState } | null): boolean {
+// Research is open while its run is still going (created or running) and any group, or the merge, is waiting or
+// running. A run that has ended (failed, succeeded, cancelled) is settled whatever its parts say: when every
+// group died no merge job was made, and its "waiting" would otherwise be waited on for ever.
+export function isOpen(
+  research: { state: string; groups: { state: GroupState }[]; merge: GroupState } | null,
+): boolean {
   if (!research) return false
+  if (research.state !== 'created' && research.state !== 'running') return false
   const open = (s: GroupState) => s === 'waiting' || s === 'running'
   return research.groups.some((g) => open(g.state)) || open(research.merge)
 }

@@ -755,6 +755,77 @@ describe('running a job', () => {
     expect(bodies[0]).toMatchObject({ stopped: true, output: null })
   })
 
+  it('a tools reply too large to save is costed without its output, then a clear error, never posted whole', async () => {
+    // A fetched page of about 9 MB in the reply's content: its checkpoint would pass the core's 8 MB limit.
+    const page = 'x'.repeat(9 * 1024 * 1024)
+    const huge: ModelClient = {
+      async send() {
+        return {
+          text: 'done',
+          content: [{ type: 'web_fetch_tool_result', tool_use_id: 'f1', content: { text: page } }],
+          messageId: 'm-big',
+          requestId: 'r-big',
+          stopReason: 'end_turn',
+          usage: {
+            inputTokens: 900,
+            outputTokens: 10,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            serverToolFetches: 1,
+          },
+        }
+      },
+    }
+    const bodies: Record<string, unknown>[] = []
+    const sizes: number[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        sizes.push(Buffer.byteLength(JSON.stringify(body)))
+        bodies.push(body as unknown as Record<string, unknown>)
+        return { costed: true }
+      },
+    })
+    const error = await runOne(core, huge, toolsRequest(5), []).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toMatch(/too large to save/)
+    expect((error as Error).message).toMatch(/8 MB/)
+    // The paid call is still costed, with its counts, but nothing large reaches the core.
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({
+      stopped: true,
+      output: null,
+      providerMessageId: 'm-big',
+      usage: { inputTokens: 900, serverToolFetches: 1 },
+    })
+    expect(sizes[0]).toBeLessThan(10_000)
+  })
+
+  it('a tools reply just under the limit is saved as usual', async () => {
+    const page = 'x'.repeat(7 * 1024 * 1024)
+    const big: ModelClient = {
+      async send() {
+        return {
+          text: 'done',
+          content: [{ type: 'web_fetch_tool_result', tool_use_id: 'f1', content: { text: page } }],
+          messageId: 'm',
+          requestId: null,
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        }
+      },
+    }
+    const bodies: Record<string, unknown>[] = []
+    const core = fakeCore({
+      async checkpoint(_j, _t, _c, body) {
+        bodies.push(body as unknown as Record<string, unknown>)
+        return { costed: true }
+      },
+    })
+    await runOne(core, big, toolsRequest(5), [])
+    expect(bodies[0]!.stopped).toBeUndefined()
+    expect(typeof bodies[0]!.output).toBe('string')
+  })
+
   it('replays every saved turn of a tool request after a failed attempt, with no new provider request', async () => {
     const saved = new Map<string, { hash: string; output: unknown }>()
     const hashes = new Map<string, string>()

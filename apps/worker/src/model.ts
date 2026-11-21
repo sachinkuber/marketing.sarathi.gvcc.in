@@ -15,6 +15,8 @@ export interface ModelRequest {
 export interface ModelTool {
   type: 'web_search_20260209' | 'web_fetch_20260209'
   maxUses: number
+  // web_fetch only: the most text of one fetched page the provider gives the model (R42).
+  maxContentTokens?: number
 }
 export interface ModelUsage {
   inputTokens: number

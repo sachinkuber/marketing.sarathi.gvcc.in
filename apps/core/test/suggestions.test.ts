@@ -394,6 +394,24 @@ describe('suggest then decide', () => {
     ])
   })
 
+  it('an owner statement is listed exactly as stated: never cut, never read as flagged', async () => {
+    // The owner's own words (up to 4000 characters) are not research extracts: no 500-character cut, and a
+    // statement that happens to start like the flag marker is still the owner's text.
+    const wording = `[flagged: not a flag] ${'w'.repeat(2000 - 22)}`
+    expect(wording).toHaveLength(2000)
+    const made = await stack.db.admin.query(
+      `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', $2) returning id`,
+      [brandId, wording],
+    )
+    const statement = made.rows[0].id as string
+    const [id] = await add([{ step: 'rule', key: 'owner-words', sourceIds: [statement] }])
+    const reply = await owner.request('GET', `${base()}?step=rule`)
+    const mine = reply.json.suggestions.find((x: { id: string }) => x.id === id)
+    expect(mine.sources).toEqual([
+      expect.objectContaining({ id: statement, kind: 'owner_statement', extract: wording, flagged: null }),
+    ])
+  })
+
   it('every decision writes one audit entry with step and decision, and no answer text', async () => {
     const [id] = await add([{ step: 'question', key: 'aud', proposed: 'secret-wording' }])
     const before = stack.audit.entries.length

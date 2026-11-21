@@ -78,9 +78,10 @@ describe('the research group handler', () => {
     expect(out.type).toBe('research_group.v1')
     expect(out.result).toEqual(groupResult('site'))
     expect(seen.map((s) => s.step)).toEqual(['site#0'])
+    // web_fetch carries the definition's page-size bound (R42), so one fetched page cannot fill a checkpoint.
     expect(seen[0]!.request.tools).toEqual([
       { type: 'web_search_20260209', maxUses: 20 },
-      { type: 'web_fetch_20260209', maxUses: 30 },
+      { type: 'web_fetch_20260209', maxUses: 30, maxContentTokens: 40000 },
     ])
     expect(seen[0]!.request.outputSchema).toBeUndefined()
   })
@@ -261,6 +262,111 @@ describe('the documents group', () => {
     await researchGroupHandler(ctx)
     expect(seen[0]!.request.tools).toBeUndefined()
     expect(seen[0]!.step).toBe('documents#0')
+  })
+
+  // R41: the provider's 5 MB image limit may be measured on the base64 text (about 3.75 MiB of image). An image
+  // whose base64 is over 5,242,880 characters is not sent: it is recorded as an error source the owner can act on,
+  // and the rest of the batch is read as usual.
+  const TOO_LARGE = 'Too large for the AI to read. Save it under 3.7 MB and upload it again.'
+  const photo = {
+    id: DOC,
+    fileName: 'shop front.jpg',
+    mediaType: 'image/jpeg',
+    sizeBytes: Math.round(4.5 * 1024 * 1024),
+    parts: [],
+  }
+  const leaflet = { id: DOC2, fileName: 'leaflet.pdf', mediaType: 'application/pdf', sizeBytes: 5, parts: [] }
+  const citesEach: Script = (_step, request) => {
+    const content = request.messages[0]!.content as { type: string }[]
+    const n = content.filter((b) => b.type === 'document' || b.type === 'image').length
+    const sources = Array.from({ length: n }, (_v, i) =>
+      source(`s${i + 1}`, { kind: 'document', address: null, documentId: DOC2, extract: `doc ${i + 1}` }),
+    )
+    return ends(
+      JSON.stringify(
+        groupResult('documents', {
+          sources,
+          findings: [
+            finding(
+              'what_they_sell',
+              'Pumps',
+              sources.map((x) => x.ref),
+            ),
+          ],
+        }),
+      ),
+    )
+  }
+
+  it('an image too large for the provider is skipped and recorded as an error; the rest is still sent', async () => {
+    const read: string[] = []
+    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC, DOC2] }, citesEach, {
+      documents: async () => [photo, leaflet],
+      document: async (id) => {
+        read.push(id)
+        if (id === DOC) throw new Error('the too-large image must not be read')
+        return { mediaType: 'application/pdf', bytes: Buffer.from('hello') }
+      },
+    })
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(read).toEqual([DOC2])
+    expect(seen).toHaveLength(1)
+    const content = seen[0]!.request.messages[0]!.content as { type: string; text?: string }[]
+    expect(content.filter((b) => b.type === 'image')).toHaveLength(0)
+    expect(content.filter((b) => b.type === 'document')).toHaveLength(1)
+    expect(
+      content
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n'),
+    ).not.toContain('shop front.jpg')
+    expect(researchGroupResultSchema.safeParse(out).success).toBe(true)
+    expect(out.findings).toHaveLength(1)
+    const skipped = out.sources.find((s) => s.documentId === DOC)
+    expect(skipped).toEqual({
+      ref: expect.stringMatching(/^s\d+$/),
+      kind: 'document',
+      address: 'shop front.jpg',
+      documentId: DOC,
+      result: 'error',
+      extract: TOO_LARGE,
+      flagged: null,
+    })
+    expect(out.sources.find((s) => s.documentId === DOC2)?.result).toBe('read')
+  })
+
+  it('a job whose only document is a too-large image makes no model call and records the error', async () => {
+    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC] }, citesEach, {
+      documents: async () => [photo],
+    })
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(seen).toHaveLength(0)
+    expect(researchGroupResultSchema.safeParse(out).success).toBe(true)
+    expect(out.sources).toEqual([
+      {
+        ref: 's1',
+        kind: 'document',
+        address: 'shop front.jpg',
+        documentId: DOC,
+        result: 'error',
+        extract: TOO_LARGE,
+        flagged: null,
+      },
+    ])
+    expect(out.findings).toEqual([])
+  })
+
+  it('an image whose base64 is exactly 5,242,880 characters is still sent', async () => {
+    // 3,932,160 bytes encode to exactly 5,242,880 base64 characters.
+    const edge = { ...photo, sizeBytes: 3_932_160 }
+    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC] }, citesEach, {
+      documents: async () => [edge],
+      document: async () => ({ mediaType: 'image/jpeg', bytes: Buffer.alloc(3_932_160) }),
+    })
+    await researchGroupHandler(ctx)
+    expect(seen).toHaveLength(1)
+    const content = seen[0]!.request.messages[0]!.content as { type: string; source?: { data: string } }[]
+    expect(content.find((b) => b.type === 'image')!.source!.data).toHaveLength(5_242_880)
   })
 
   it('a job that lists no documents makes no model call', async () => {

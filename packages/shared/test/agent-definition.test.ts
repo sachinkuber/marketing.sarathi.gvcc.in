@@ -62,4 +62,33 @@ describe('loadAgentDefinition', () => {
     const dir = agentDir({ ...GOOD, tools: [{ type: 'web_search_20250305', maxUses: 1 }] })
     expect(() => loadAgentDefinition(dir)).toThrow(/definition\.json: tools\.0\.type: /)
   })
+
+  // R42: web_fetch may bound the text of one fetched page, so a large page cannot fill a checkpoint.
+  const fetchWith = (maxContentTokens: unknown) =>
+    agentDir({ ...GOOD, tools: [{ type: 'web_fetch_20260209', maxUses: 3, maxContentTokens }] })
+
+  it.each([1000, 40000, 100000])('accepts maxContentTokens %i on web_fetch', (n) => {
+    expect(loadAgentDefinition(fetchWith(n)).definition.tools).toEqual([
+      { type: 'web_fetch_20260209', maxUses: 3, maxContentTokens: n },
+    ])
+  })
+
+  it.each([999, 100001, 1500.5, '40000', 0])('refuses maxContentTokens %s, naming the field', (n) => {
+    expect(() => loadAgentDefinition(fetchWith(n))).toThrow(/definition\.json: tools\.0\.maxContentTokens: /)
+  })
+
+  it('refuses maxContentTokens on web_search, naming the field', () => {
+    const dir = agentDir({
+      ...GOOD,
+      tools: [{ type: 'web_search_20260209', maxUses: 3, maxContentTokens: 40000 }],
+    })
+    expect(() => loadAgentDefinition(dir)).toThrow(
+      /definition\.json: tools\.0\.maxContentTokens: only web_fetch_20260209 takes it/,
+    )
+  })
+
+  it('web_fetch without maxContentTokens is still accepted', () => {
+    const dir = agentDir({ ...GOOD, tools: [{ type: 'web_fetch_20260209', maxUses: 3 }] })
+    expect(loadAgentDefinition(dir).definition.tools).toEqual([{ type: 'web_fetch_20260209', maxUses: 3 }])
+  })
 })

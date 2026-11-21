@@ -423,6 +423,13 @@ describe('the dashboard schemas accept the core’s replies', () => {
       expect(listed.status).toBe(200)
       const docs = documentsReply.parse(listed.json).documents
       expect(docs.find((d) => d.id === summary.id)?.parts).toBe(summary.parts)
+      // A document cannot be deleted while the brand's research runs (409 research_running), so this brand's run,
+      // started above, is ended first.
+      const run = `(select research_run_id from app.onboarding where brand_id = $1)`
+      await q(`update app.job_input set finished_at = coalesce(finished_at, now()) where run_id = ${run}`, [
+        brand,
+      ])
+      await q(`update app.run set state = 'succeeded', finished_at = now() where id = ${run}`, [brand])
       const gone = await owner.request('DELETE', `${base()}/documents/${summary.id}`)
       expect(gone.status).toBe(204)
       expect(deletedReply.parse(gone.text === '' ? null : JSON.parse(gone.text))).toBeNull()

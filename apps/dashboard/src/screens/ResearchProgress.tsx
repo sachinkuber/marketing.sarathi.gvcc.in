@@ -135,6 +135,8 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
 
   const research = data?.research ?? null
   const done = research?.merge === 'done' || (data?.openSuggestions ?? 0) > 0
+  // The run ended without a merge result (every group died, or the merge did): nothing more will come.
+  const couldNotFinish = research !== null && !isOpen(research) && research.merge !== 'done'
 
   return (
     <main id="content" className="page">
@@ -188,6 +190,16 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
             </ul>
           </div>
           <p className="sub mt-4">{`Cost so far: ${costWords(data.cost)}`}</p>
+          {couldNotFinish ? (
+            <div className="callout warn mt-4 stack" role="alert">
+              <p>Research could not finish. Check the agents’ releases, then start research again.</p>
+              <div>
+                <Link className="btn onb-touch" href={`/b/${brandId}/onboarding/intake`}>
+                  Go to the intake
+                </Link>
+              </div>
+            </div>
+          ) : null}
           {done ? (
             <div className="mt-4">
               <Link className="btn primary onb-touch" href={`/b/${brandId}/onboarding/profile`}>

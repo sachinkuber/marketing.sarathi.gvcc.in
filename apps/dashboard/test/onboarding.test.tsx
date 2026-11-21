@@ -313,6 +313,77 @@ describe('onboarding screens, driven', () => {
     expect(dom.text()).toContain('Empty')
   })
 
+  // Every group died, so no merge job was ever made: the run has ended (failed) and nothing is still open.
+  const failedRun = (merge: string) =>
+    overview({
+      step: 'research',
+      intake,
+      research: {
+        runId: 'r1',
+        state: 'failed',
+        groups: [group('site', 'failed'), group('social', 'failed')],
+        merge,
+        gaps: [],
+      },
+    })
+
+  it('a run that could not finish says what to do and links back to start it again', async () => {
+    for (const merge of ['failed', 'waiting']) {
+      dom.stop()
+      dom.start()
+      dom.replies.push({ status: 200, body: failedRun(merge) })
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain(
+        'Research could not finish. Check the agents’ releases, then start research again.',
+      )
+      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/intake"]`)).not.toBeNull()
+      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/profile"]`)).toBeNull()
+    }
+  })
+
+  it('Start research is enabled again once the run has failed, even if the merge never started', async () => {
+    dom.replies.push({ status: 200, body: failedRun('waiting') }, { status: 200, body: { documents: [] } })
+    await dom.mount(<OnboardingIntakeScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.button('Start research').disabled).toBe(false)
+  })
+
+  it('a removal refused while research reads the documents shows how to proceed', async () => {
+    dom.replies.push(
+      { status: 200, body: overview({ intake }) },
+      {
+        status: 200,
+        body: {
+          documents: [
+            {
+              id: 'd1',
+              fileName: 'brochure.pdf',
+              mediaType: 'application/pdf',
+              sizeBytes: 2048,
+              sha256: 'x',
+              parts: 0,
+              uploadedAt: '2026-11-20T08:00:00.000Z',
+            },
+          ],
+        },
+      },
+    )
+    await dom.mount(<OnboardingIntakeScreen brandId={brandId} />, sessionAs('owner'))
+    dom.replies.push({
+      status: 409,
+      body: {
+        error: {
+          code: 'research_running',
+          message: 'Research is reading the brand’s documents. Wait for it to finish, then delete the file.',
+        },
+      },
+    })
+    await dom.click('Remove')
+    expect(dom.text()).toContain(
+      'brochure.pdf: Research is reading the brand’s documents. Wait for it to finish, then delete the file.',
+    )
+    expect(dom.text()).toContain('brochure.pdf')
+  })
+
   it('links to the draft profile once the merge is done', async () => {
     dom.replies.push({ status: 200, body: running([group('site', 'done')], 'done') })
     await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
@@ -452,6 +523,20 @@ describe('onboarding screens, driven', () => {
       expect(gets()).toBe(2)
       await tick(20_000)
       expect(gets()).toBe(2)
+    })
+
+    it('stops once the run has failed, even when the merge never started', async () => {
+      dom.replies.push({
+        status: 200,
+        body: overview({
+          step: 'research',
+          intake,
+          research: { runId: 'r1', state: 'failed', groups: [groupOf('failed')], merge: 'waiting', gaps: [] },
+        }),
+      })
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      await tick(20_000)
+      expect(gets()).toBe(1)
     })
 
     it('stops when the screen is left', async () => {

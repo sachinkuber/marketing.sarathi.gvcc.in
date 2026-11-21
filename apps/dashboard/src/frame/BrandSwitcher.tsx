@@ -12,8 +12,10 @@ export function BrandSwitcher(props: {
   return (
     <label className="brandswitch">
       <span className="tiny muted">Brand</span>
+      {/* The visible label is hidden at 640 px and below, so the select names itself. */}
       <select
         className="input"
+        aria-label="Brand"
         value={props.currentId}
         onChange={(event) => props.onSwitch(event.target.value === '' ? null : event.target.value)}
       >

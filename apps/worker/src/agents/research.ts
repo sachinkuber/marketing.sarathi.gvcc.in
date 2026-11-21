@@ -108,7 +108,11 @@ export function buildResearchGroupRequest(
       source: { type: 'base64', media_type: document.mediaType, data: document.base64 },
     })
   })
-  const tools = agent.definition.tools?.map((tool) => ({ type: tool.type, maxUses: tool.maxUses }))
+  const tools = agent.definition.tools?.map((tool) => ({
+    type: tool.type,
+    maxUses: tool.maxUses,
+    ...(tool.maxContentTokens === undefined ? {} : { maxContentTokens: tool.maxContentTokens }),
+  }))
   return {
     ...base(agent),
     system: `${agent.system.trimEnd()}\n\n## Result schema\n\n${JSON.stringify(agent.outputSchema)}\n`,
@@ -284,6 +288,22 @@ interface Item {
 
 const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3)
 
+// The provider's per-image limit (5 MB) may be measured on the base64 text, about 3.75 MiB of image (R41). An
+// image over it is not sent: one refused image would fail the whole documents group. It is recorded as an error
+// source instead, so the owner sees what to do, and the rest of the documents are read. The owner's upload limit
+// (5 MB of image) is unchanged.
+export const IMAGE_MAX_BASE64 = 5_242_880
+export const IMAGE_TOO_LARGE = 'Too large for the AI to read. Save it under 3.7 MB and upload it again.'
+const tooLargeImage = (item: Item): boolean =>
+  item.mediaType.startsWith('image/') && item.base64Length > IMAGE_MAX_BASE64
+
+// A document source's address: the file's plain name, with a part's pages.
+function documentAddress(item: Item): string {
+  const name = plainName(item.fileName) || item.documentId
+  const address = item.firstPage === undefined ? name : `${name}, pages ${item.firstPage}–${item.lastPage}`
+  return address.slice(0, 2000)
+}
+
 function planItems(documents: JobDocument[]): Item[] {
   const items: Item[] = []
   for (const document of documents) {
@@ -421,7 +441,9 @@ export function joinDocumentResults(results: ResearchGroupResult[]): ResearchGro
 }
 
 async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promise<ResearchGroupResult> {
-  const batches = planBatches(planItems(await ctx.documents()))
+  const items = planItems(await ctx.documents())
+  const skipped = items.filter(tooLargeImage)
+  const batches = planBatches(items.filter((item) => !tooLargeImage(item)))
   // No web tools: the documents are the only source.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { tools: _tools, ...definition } = agents.research.definition
@@ -463,10 +485,7 @@ async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promi
         dropped.add(source.ref)
         return []
       }
-      const name = plainName(item.fileName) || item.documentId
-      const address =
-        item.firstPage === undefined ? name : `${name}, pages ${item.firstPage}–${item.lastPage}`
-      return [{ ...source, documentId: item.documentId, address: address.slice(0, 2000) }]
+      return [{ ...source, documentId: item.documentId, address: documentAddress(item) }]
     })
     const unsettled = [...result.unsettled]
     const findings = result.findings.flatMap((found) => {
@@ -481,6 +500,22 @@ async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promi
     })
     results.push({ ...result, sources, findings, unsettled })
   }
+  // The images not sent, each as an error source; joined after the batches, so they are kept while there is room.
+  if (skipped.length > 0)
+    results.push({
+      group: 'documents',
+      sources: skipped.map((item, i) => ({
+        ref: `s${i + 1}`,
+        kind: 'document' as const,
+        address: documentAddress(item),
+        documentId: item.documentId,
+        result: 'error' as const,
+        extract: IMAGE_TOO_LARGE,
+        flagged: null,
+      })),
+      findings: [],
+      unsettled: [],
+    })
   if (results.length === 0) return { group: 'documents', sources: [], findings: [], unsettled: [] }
   try {
     return joinDocumentResults(results)
