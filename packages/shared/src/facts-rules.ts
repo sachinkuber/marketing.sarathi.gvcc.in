@@ -36,6 +36,9 @@ export const factsRulesInputSchema = z
     // The core's date: review dates count from it.
     today: z.iso.date(),
     brandName: given(INPUT_NAME_MAX),
+    // The intake website (null when the brand has none). Only the evaluation checks read it, to tell a page of
+    // the brand's own site from another page labelled site (ruling R41); the prompt does not carry it.
+    website: given(INPUT_ADDRESS_MAX).nullable().optional(),
     // Every source the profile items and the answers cite, and the brand's document sources.
     sources: z
       .array(

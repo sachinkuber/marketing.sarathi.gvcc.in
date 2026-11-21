@@ -163,9 +163,11 @@ async function buildInput(
     listed.add(row.id)
     sources.push(source)
   }
+  const website = await intakeWebsite(client, brandId)
   return factsRulesInputSchema.parse({
     today,
     brandName: clip(brand.rows[0]?.name ?? '', INPUT_NAME_MAX) ?? 'Brand',
+    website: website === null ? null : clip(website, INPUT_ADDRESS_MAX),
     sources,
     // A profile item cites only the sources sent: a flagged or unread one is dropped from its list.
     profile: profile.flatMap((r) => {

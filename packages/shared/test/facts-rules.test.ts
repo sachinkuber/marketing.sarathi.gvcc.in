@@ -144,6 +144,14 @@ describe('facts and rules schemas', () => {
     expect(ok(factsRulesResultSchema, result({ rules: [rule({ text: '  ' })] }))).toBe(false)
   })
 
+  it('the input may carry the intake website, or null, or neither, but not a blank or over-long one', () => {
+    expect(ok(factsRulesInputSchema, { ...input, website: 'https://aztek.example/' })).toBe(true)
+    expect(ok(factsRulesInputSchema, { ...input, website: null })).toBe(true)
+    expect(ok(factsRulesInputSchema, input)).toBe(true)
+    expect(ok(factsRulesInputSchema, { ...input, website: 'h'.repeat(2001) })).toBe(false)
+    expect(ok(factsRulesInputSchema, { ...input, website: 5 })).toBe(false)
+  })
+
   it('the input refuses an unknown key, kind or status, an extra field, and a malformed today', () => {
     expect(ok(factsRulesInputSchema, { ...input, extra: 1 })).toBe(false)
     expect(ok(factsRulesInputSchema, { ...input, today: '2026-11-31' })).toBe(false)

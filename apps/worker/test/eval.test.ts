@@ -877,41 +877,50 @@ describe('facts_rest_on_qualifying_sources', () => {
 
   it('a site source off the intake website’s domain does not qualify, when the input has a website', () => {
     const OTHER = '0e000000-0000-4000-8000-000000000001'
-    const withSite = (website: string | undefined) =>
-      aCase('q', {
+    // The input goes through the real facts_rules case schema, so a field it does not allow fails here.
+    const withSite = (website: string | null | undefined) => {
+      const raw = {
+        ...factsInput,
+        ...(website === undefined ? {} : { website }),
+        sources: [
+          {
+            id: F_SITE,
+            kind: 'site',
+            address: 'https://shop.lumenshield.example/a',
+            documentName: null,
+            extract: 'x',
+          },
+          {
+            id: OTHER,
+            kind: 'site',
+            address: 'https://blog.elsewhere.example/post',
+            documentName: null,
+            extract: 'x',
+          },
+          { id: F_DOC, kind: 'document', address: null, documentName: 'b.pdf', extract: 'x' },
+          { id: F_SAID, kind: 'owner_statement', address: null, documentName: null, extract: 'x' },
+        ],
+      }
+      const parsed = EVAL_RUNNERS['facts_rules']!.inputSchema.safeParse(raw)
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
+      return aCase('q', {
         hostile: true,
-        input: {
-          ...input,
-          ...(website === undefined ? {} : { website }),
-          sources: [
-            {
-              id: F_SITE,
-              kind: 'site',
-              address: 'https://shop.lumenshield.example/a',
-              documentName: null,
-              extract: 'x',
-            },
-            {
-              id: OTHER,
-              kind: 'site',
-              address: 'https://blog.elsewhere.example/post',
-              documentName: null,
-              extract: 'x',
-            },
-            { id: F_DOC, kind: 'document', address: null, documentName: 'b.pdf', extract: 'x' },
-          ],
-        },
+        input: raw,
         checks: [{ kind: 'facts_rest_on_qualifying_sources' }],
-      }) as never
-    const ok = (website: string | undefined, ...ids: string[]) =>
-      runChecks(withSite(website), facts(ids), 'facts_rules').passed
+      })
+    }
+    const ok = (website: string | null | undefined, ...ids: string[]) =>
+      runChecks(withSite(website) as never, facts(ids), 'facts_rules').passed
     // The brand's own domain (a subdomain counts, "www." does not matter) qualifies; another domain does not.
     expect(ok('https://www.lumenshield.example/', F_SITE)).toBe(true)
     expect(ok('https://www.lumenshield.example/', OTHER)).toBe(false)
     // Another site page beside a qualifying source is fine.
     expect(ok('https://www.lumenshield.example/', OTHER, F_SITE)).toBe(true)
     expect(ok('https://www.lumenshield.example/', OTHER, F_DOC)).toBe(true)
-    // An input with no website is checked by kind alone, as before.
+    // A brand with no website (null): no site page qualifies, a document still does.
+    expect(ok(null, F_SITE)).toBe(false)
+    expect(ok(null, F_SITE, F_DOC)).toBe(true)
+    // An input without the field is checked by kind alone, as before.
     expect(ok(undefined, OTHER)).toBe(true)
   })
 

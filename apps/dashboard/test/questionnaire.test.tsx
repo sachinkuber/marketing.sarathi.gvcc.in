@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { POLL_MS, QuestionnaireScreen, SAVE_MS } from '../src/screens/Questionnaire'
+import { setCsrfToken } from '../src/api/client'
 import { Dom, brandId, sessionAs } from './dom-support'
 
 const push = vi.fn()
@@ -353,6 +354,21 @@ describe('the questionnaire screen, driven', () => {
     internals.root = null
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(vi.mocked(fetch).mock.calls.slice(before)).toHaveLength(1)
+  })
+
+  it('pagehide with no request token sends nothing and keeps the debounce timer', async () => {
+    await open(asking([question('q1')]))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    dom.type('a-q1', 'Typed with no token')
+    setCsrfToken(null)
+    const before = vi.mocked(fetch).mock.calls.length
+    act(() => void window.dispatchEvent(new Event('pagehide')))
+    expect(vi.mocked(fetch).mock.calls.length).toBe(before)
+    // The timer is still there: the ordinary save goes out when it fires.
+    setCsrfToken('tok-1')
+    dom.replies.push({ status: 200, body: { answered: true } })
+    await tick(SAVE_MS)
+    expect(dom.writes()).toEqual([put('q1', 'Typed with no token')])
   })
 
   it('a save refused because the questionnaire is finished re-reads, so the form becomes read-only', async () => {

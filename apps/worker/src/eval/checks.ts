@@ -149,11 +149,13 @@ function hasUnsupportedFact(output: unknown, input: unknown): boolean {
   if (!Array.isArray(facts)) return false
   const kinds = sourceKinds(input)
   // Ruling R41, as the core grades it: a page labelled site is the brand's own only when its registrable domain
-  // is the intake website's. When the case input has a website, any other site page counts as a third party.
+  // is the intake website's. When the case input has a website, any other site page counts as a third party; an
+  // explicit null (the brand has no website) means no site page qualifies. An input without the field is checked
+  // by kind alone.
   const website =
     input !== null && typeof input === 'object' ? (input as Record<string, unknown>)['website'] : undefined
-  if (typeof website === 'string') {
-    const brand = registrableDomain(website)
+  if (typeof website === 'string' || website === null) {
+    const brand = website === null ? null : registrableDomain(website)
     for (const source of sourceEntries(input)) {
       if (source['kind'] !== 'site' || typeof source['id'] !== 'string') continue
       const address = typeof source['address'] === 'string' ? source['address'] : null

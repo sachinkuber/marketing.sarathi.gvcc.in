@@ -201,6 +201,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
           continue
         clearTimeout(timer)
         timers.current.delete(id)
+        // Best effort: a keepalive send that later fails is still marked saved (the page is gone, nothing to retry).
         savedRef.current[id] = value
       }
     }
