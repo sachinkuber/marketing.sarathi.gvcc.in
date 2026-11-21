@@ -71,8 +71,8 @@ export async function modelTurns(
         : Number.POSITIVE_INFINITY
     // A tool whose budget is spent (its turn cap or the run's) is left out. Exception (R29): a continuation
     // whose history holds that tool's blocks keeps it with max_uses 1, because it is not known whether the API
-    // accepts such a history with the tool omitted or with max_uses 0 (see the R13 probe in
-    // anthropic-live.test.ts, not yet run).
+    // accepts such a history with the tool omitted. max_uses 0 is refused (R13 probe, 2026-11-21), and
+    // omitting the tool could not be tested without a real pause_turn continuation.
     //
     // What this bounds. On a first attempt nothing can pass the run cap: 4 web groups x (20 + 6 R29 extras) = 104,
     // under 150. On a retry the run's recorded searches (ctx.runSearches) are counted, with two known gaps:

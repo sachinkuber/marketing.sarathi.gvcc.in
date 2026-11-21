@@ -652,7 +652,6 @@ After the final review's fix wave, 2026-11-21, on the development server from th
   - Smaller: `JobsDeps.settled` and the `site` label trust (R33) are covered by tests but worth a second look; pdf-lib warnings bypass the logger; the split deadline is checked only between parts; document type and name are parsed twice in a route.
   - Milestone 10: questionnaire, facts and rules, agent questions. Milestone 11: strategy and gate 1.
 
-
 ## Phase 2, milestone 10: Decisions
 
 Built 2026-11-21 on branch `m10-decisions`. Plan: `docs/plans/2026-11-21-m10-decisions.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 25, 26 and 27, tests 47 and 53, and the halves of 43, 44 and 45 that belong here). This milestone adds the questionnaire, the facts and rules the owner confirms, and the questions an agent asks instead of guessing. It also closes most of what milestone 9 deferred. Nothing from it is on production: it waits for the owner's approval of the steps in `docs/operations.md`, "Production steps at the end of milestone 10". It adds three migrations: 0028, 0029 and 0030.
@@ -661,12 +660,12 @@ Built 2026-11-21 on branch `m10-decisions`. Plan: `docs/plans/2026-11-21-m10-dec
 |---|---|---|
 | 25 Questionnaire agent and screen | Done | Agent `agents/questionnaire` with 10 recorded evaluation cases, 4 hostile (c8ff4ef, fcc58ce, cf1a102); handler (e09710e); answers that save as typed, finish, restart (4176f44, fcf4d64: `apps/core/test/questionnaire.test.ts`); the screen (06f196d, d0deab5, 5e01f0a, 9383f09: `apps/dashboard/test/questionnaire.test.tsx`) |
 | 26 Facts and rules agent and screen | Done | Agent `agents/facts_rules` with 9 cases, 4 hostile (022e051, f811f99, 4ce0775); candidate facts and rules, owner statements, supersede (fb453f7, 8af539d: `apps/core/test/facts-rules.test.ts`); the screen (b52e8f0, 66a2639) |
-| 27 Agent questions and `waiting_for_answer` | Done | Schema (0028; e215ef6, 57676df); a job asks, waits and resumes as a new attempt; reminders (0029); the answer path (e33aea2, b2a676e: `apps/core/test/agent-questions.test.ts`, 14 tests, 4 through the queue and HTTP) |
+| 27 Agent questions and `waiting_for_answer` | Done | Schema (0028; e215ef6, 57676df); a job asks, waits and resumes as a new attempt; reminders (0029; b2a676e); the answer path (e33aea2, b2a676e: `apps/core/test/agent-questions.test.ts`, 14 tests, 4 through the queue and HTTP) |
 
 | # | Test (short) | State | Evidence |
 |---|---|---|---|
 | 43 | No suggestion becomes a fact or rule without the owner's decision; an agent result that tries is refused | Proven here, for facts and rules | The facts result only writes suggestions; accept-all, add, replace and a date-only confirm were all checked for a path to a fact without a decision (fb453f7, 66a2639: `apps/core/test/facts-rules.test.ts`) |
-| 44 | Every fact links to a source; a fact whose only source is third-party is refused | Proven here | A fact needs an owner statement, the site or a document (`facts_rest_on_qualifying_sources`); a competitor-only fact stays out of the input's proposals and cannot be confirmed (R12, R21, C1 of Task 9's review, closed in 66a2639); an owner statement records who, when and the exact wording |
+| 44 | Every fact links to a source; a fact whose only source is third-party is refused | Proven here | A fact needs an owner statement, the site or a document (`facts_rest_on_qualifying_sources`, `apps/core/test/facts-rules.test.ts`); a competitor-only fact stays out of the input's proposals and cannot be confirmed (R12, R21, C1 of Task 9's review, closed in 66a2639); an owner statement records who, when and the exact wording |
 | 45 | A re-run keeps decisions and supersedes only undecided suggestions | Proven here, for facts and rules | A re-run keeps a confirmed fact and does not offer it again (R19); one active fact or rule per wording, by code and by a partial unique index (R20, 8af539d) |
 | 47 | An agent question puts its job in `waiting_for_answer`; the answer resumes it as a new attempt | Proven here | The queue and HTTP path (e33aea2); the browser flow answers an agent question and the worker's next request carries the answer (ef73a96, 7ee1025) |
 | 53 | Onboarding screens work at 390 x 844 with touch | Proven here, for the questionnaire and the facts and rules screens | `apps/dashboard` e2e `onboarding.spec.ts` and `phone.spec.ts` (ef73a96); run three times after the fix in 7ee1025, with no flake |
@@ -680,7 +679,7 @@ M9 deferred items, and what happened to each:
 
 | Item | Result | Commit |
 |---|---|---|
-| I6: web sources must be pages the provider returned | Closed. A read source whose address was not in a fetch or search result becomes an `error` source ("Not read in this run."); the documents group has no web tools, so any web source it returns is treated as invented (R30); a fetch's requested address counts as returned, so a redirect does not hide a real read (R31) | e5b93c3, 0aebe41 |
+| I6: web sources must be pages the provider returned | Closed. A read source whose address was not in a fetch or search result becomes an `error` source ("Not read in this run."). The documents group has no web tools, so a web source from it counts as invented (R30). A fetch's requested address counts as returned, so a redirect does not hide a real read (R31) | e5b93c3, 0aebe41 |
 | M2: a per-run cap on searches | Closed, with two gaps (below) | e5b93c3, 0aebe41 (0030 adds the index) |
 | M6: import cycle between `suggestions.ts` and `research-results.ts` | Closed: the stored-extract reader moved to a leaf file, `stored-extract.ts` | fcf4d64, 50fbbdf |
 | M7: "Cost so far" wording once research ended | Closed: the progress screen says "Cost" when the run is not open | 50fbbdf |
@@ -702,13 +701,14 @@ Where an M9 line above is out of date, this section says what changed.
   - "The 150-search cap per research run is not enforced at run time" is no longer true. See M2 below.
   - "Accepted risks: R17 and R19" are closed (R34, R35, R36, R37).
   - "Not proven on a live model: the research prompts and the 14 evaluation cases" is out of date: the research prompts passed the live evaluation in M9's last commits (48a8ef4), and Task 10 changed the research prompt again, so `research` needs a new evaluation and release (see the production steps).
-  - Still unproven: the R13 continuation probe and the R24 output-schema check.
+  - Milestone 9 is now on production (deployed 2026-11-21: 4797c21, then b20c31d, PR #21; migrations 0023 to 0027). The M9 lines that say research "has not been run on production" are out of date. `research` v1 and `research_merge` v1 are released (after PR #21 they passed 10 of 10 and 4 of 4 cases), and the Aztek live run succeeded at US$0.778. The probes ran too: R24 (web tools with an output schema are accepted), I4 (`max_content_tokens` accepted), I3 (a stream was cut at its 20.0 s timeout) and I5 (a 4.69 MB image accepted).
+  - R13 was run. `max_uses` 0 is refused (it must be greater than 0). Leaving the tool out could not be tested, because the probe's completed turn counts as a prefill and gets a 400. The `max_uses` 1 fallback stays.
 - M2, what the cap now guarantees:
   - The attempt reply carries `runSearches`, the sum of the searches every model call of the run recorded. Each request's `web_search` is limited to 20 per job and to what the run has left. When nothing is left, the request carries no `web_search` tool and fetching goes on.
   - A first attempt cannot pass the cap: four web groups, each 20 searches plus up to 6 R29 extras, is 104, under 150.
   - Gap 1: attempts that start together read the same stale count, so a run can pass 150 by up to the other attempts' allowances (about 60) plus the R29 extras.
   - Gap 2: a call whose reply was lost records 0 searches, so its retry spends that turn again. The old worst case of about 312 is reduced only for recorded calls.
-  - R29 is a third, small exception. A continuation whose history already holds `web_search` blocks keeps the tool at `max_uses` 1, until the R13 live probe shows the API accepts that history without it. The cost is at most 1 search over the cap per continuation.
+  - R29 is a third, small exception. A continuation whose history already holds `web_search` blocks keeps the tool at `max_uses` 1, because the R13 probe could not show that the API accepts that history without it. The cost is at most 1 search over the cap per continuation. Leaving the tool out could only be tested with a real `pause_turn` continuation, a possible later probe.
 - Rulings in milestone 10 (each cheap to change; the full list is R1 to R38 in the build ledger):
   - R5: an answer re-sends the job under a new queue id (the kill-switch release's restart path), because the queue's retry acts only on failed rows and a waiting job's row is completed.
   - R7: no root-level `anyOf` in a provider output schema. Each agent's reply is one strict object with `ask: { ... } | null`; when `ask` is set the result arrays are empty.
@@ -719,7 +719,11 @@ Where an M9 line above is out of date, this section says what changed.
   - R25: a suggested answer the owner leaves in place counts as answered when they finish, and the confirmation shows both counts ("answered by you" and "suggested answers kept").
   - R27: a date change confirms a fact only through `accepted` with a `reviewDate`, which keeps the qualifying-source check and writes no owner statement. An explicit Edit means the owner's own wording. Every decision's review date must be after today.
   - R34 to R37: the split child bounds the JavaScript heap, not Buffers. If the container's out-of-memory killer ends the child, the upload says it "could not be prepared" and the core stays up. A failed fork says "The server could not start reading this PDF. Try again in a minute."
-- Migrations. 0028 (owner statements record who stated them; questionnaire and agent-question state; one active fact per wording), 0029 (a function for the reminder sweep, under forced row security) and 0030 (an index on `app.model_call (brand_id, run_id)` for the run's search count). 0028 was edited in place during the milestone, before any deploy: it was never applied on staging or production, and the production check found no rows in the tables it touches.
+- Migrations:
+  - 0028: owner statements record who stated them; questionnaire and agent-question state; one active fact per wording.
+  - 0029: a function for the reminder sweep, under forced row security.
+  - 0030: an index on `app.model_call (brand_id, run_id)` for the run's search count.
+  - 0028 was edited in place during the milestone, before any deploy. It was never applied on staging or production. When last checked, production had no rows in the tables it touches; the owner re-runs that count before the deploy.
 - Memory: the split child's peak with a 103.8 MB PDF was 685 MiB, against 1 GiB on production and 768 MiB on staging. The staging margin is thin (about 11 percent), the figure includes file cache, and it was never run against staging's own limit.
 - The task reviews found, and the fixes closed, real defects. The ones worth remembering:
   - Task 9: confirming a fact with only a new review date was sent as an edit, which would have made a competitor-only fact "verified" (test 44). Fixed in 66a2639 (R27).
@@ -733,7 +737,7 @@ Where an M9 line above is out of date, this section says what changed.
 - For milestone 11 (strategy and gate 1). Parked from the reviews:
   - Features: the "add as a case" button (C8); a `pagehide` or keepalive flush so a typed answer is saved when the tab closes.
   - Check before customers: production core's `keepAliveTimeout` (Node's default 5 s) against Caddy's 2 minute idle keepalive, the same race the e2e harness had, possible on POSTs.
-  - Live checks: the R13 continuation probe, which decides whether the spent-search exception can go; the I6 cross-check has not run against the live evaluation (the first live research run measures it).
+  - Live checks: the I6 cross-check has not run against the live evaluation (the first live research run measures it). A real `pause_turn` continuation could settle whether the spent-search exception can go (R13 left that open).
   - Agent questions: the worker ignores a null `agentQuestionsFailedBrands`; an asking attempt is stored as `failed` (screens must not show it as a failure); a waiting job with an old failed row is re-reported on each tick (no effect); no runner-level replay test for the asking step; the two handlers duplicate their stop and parse code (a shared `parseDecisionReply`); an input parse error carries a raw `ZodError` message that may hold input values.
   - Questionnaire and facts: `readQuestionnaire` has no `limit 1`; rules for a brand with no onboarding row have no lock (a narrow race); `result_invalid` is untested; the owner-answer rubric relies on `business_name` being asked.
   - Facts screen: the re-run copy says waiting suggestions are replaced but only same-key ones are; `replaceFact` with only a date change records an owner statement and drops site sources (verified facts only); "Stated by you" shows when the statement is by another owner; a date-only accept leaves `decided_value` null; accept-all checks dates against the system clock; `qualifiesAsFactSource` does not check that the cited source supports the fact; core's 503 text from `createJob` has no fix in it.
