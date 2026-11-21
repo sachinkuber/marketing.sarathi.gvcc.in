@@ -248,9 +248,9 @@ async function writeFact(
   const sourceIds = [...row.source_ids]
   if (input.decision === 'edited') {
     const added = await client.query<{ id: string }>(
-      `insert into app.research_source (brand_id, kind, result, extract)
-       values ($1, 'owner_statement', 'stated', $2) returning id`,
-      [input.brandId, statement],
+      `insert into app.research_source (brand_id, kind, result, extract, stated_by)
+       values ($1, 'owner_statement', 'stated', $2, $3) returning id`,
+      [input.brandId, statement, input.actor.userId],
     )
     sourceIds.push(added.rows[0]!.id)
   }

@@ -400,8 +400,8 @@ describe('suggest then decide', () => {
     const wording = `[flagged: not a flag] ${'w'.repeat(2000 - 22)}`
     expect(wording).toHaveLength(2000)
     const made = await stack.db.admin.query(
-      `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', $2) returning id`,
-      [brandId, wording],
+      `insert into app.research_source (brand_id, kind, result, extract, stated_by) values ($1, 'owner_statement', 'stated', $2, $3) returning id`,
+      [brandId, wording, ownerId],
     )
     const statement = made.rows[0].id as string
     const [id] = await add([{ step: 'rule', key: 'owner-words', sourceIds: [statement] }])

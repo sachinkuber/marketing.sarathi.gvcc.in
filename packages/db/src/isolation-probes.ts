@@ -84,8 +84,8 @@ export async function seedProbeBrand(client: Queryable, id: string, slug: string
     [id],
   )
   const source = await client.query(
-    "insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', 'seeded') returning id",
-    [id],
+    "insert into app.research_source (brand_id, kind, result, extract, stated_by) values ($1, 'owner_statement', 'stated', 'seeded', $2) returning id",
+    [id, userId],
   )
   const document = await client.query(
     "insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by) values ($1, 'seeded.pdf', 'application/pdf', '\\x01020304', 4, 'sha256:seed', $2) returning id",

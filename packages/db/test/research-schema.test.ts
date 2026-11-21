@@ -58,10 +58,11 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
 
   it('research_source refuses an unknown result', async () => {
     await asApp(async (c) => {
+      const uid = await userId(c)
       const insert = (result: string) =>
         c.query(
-          "insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', $2, 'x')",
-          [A, result],
+          "insert into app.research_source (brand_id, kind, result, extract, stated_by) values ($1, 'owner_statement', $2, 'x', $3)",
+          [A, result, uid],
         )
       await c.query('savepoint s1')
       expect(await code(() => insert('owner_statement'))).toBe('23514')
@@ -176,8 +177,8 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // Take 0027, 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
-      await runner({ ...base, direction: 'down', count: 3 })
+      // Take 0028, 0027, 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
+      await runner({ ...base, direction: 'down', count: 4 })
       for (const [model, from] of [
         ['claude-sonnet-5-5', '2026-01-01'],
         ['claude-sonnet-5-5', '2026-06-01'],
@@ -266,7 +267,7 @@ describe('migration 0027: document parts', () => {
     })
   })
 
-  it('taking 0027 and 0026 off keeps every stored document, including a PDF above 10 MB', async () => {
+  it('taking 0028, 0027 and 0026 off keeps every stored document, including a PDF above 10 MB', async () => {
     const own = await createTestDatabase()
     try {
       const url = own.urlFor('migration')
@@ -289,7 +290,7 @@ describe('migration 0027: document parts', () => {
         createSchema: false,
         log: () => undefined,
         direction: 'down',
-        count: 2,
+        count: 3,
       })
       const kept = await own.admin.query('select size_bytes from app.brand_document order by size_bytes')
       expect(kept.rows).toEqual([{ size_bytes: 4 }, { size_bytes: big }])
