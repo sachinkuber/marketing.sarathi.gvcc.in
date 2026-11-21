@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "questions": {
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "business_name",
+              "what_they_sell",
+              "main_products",
+              "places_served",
+              "audiences",
+              "price_position",
+              "tone_of_voice",
+              "differentiators",
+              "certifications",
+              "contact_points",
+              "social_presence",
+              "search_visibility",
+              "ai_answer_visibility",
+              "competitors",
+              "goals",
+              "priority_audiences",
+              "proof_points",
+              "never_say",
+              "competitors_not_named",
+              "tone_limits",
+              "pause_dates",
+              "capacity",
+              "success_measures"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "options": {
+            "maxItems": 6,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "suggestedAnswer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["key", "text", "why", "options", "suggestedAnswer"],
+        "additionalProperties": false
+      }
+    },
+    "ask": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "why": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "options": {
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "suggested": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["text", "why", "options", "suggested"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": ["questions", "ask"],
+  "additionalProperties": false
+}

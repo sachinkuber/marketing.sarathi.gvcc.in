@@ -1,0 +1,93 @@
+{
+  "id": "plain-questionnaire-answer-resumes",
+  "title": "Once the owner has said what the business sells, the questionnaire is written, with that answer pre-filled",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [],
+    "open": [],
+    "gaps": [
+      {
+        "key": "business_name",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "what_they_sell",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "main_products",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "places_served",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "audiences",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "price_position",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "tone_of_voice",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "differentiators",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "certifications",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "contact_points",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "social_presence",
+        "why": "The Instagram profile could not be read."
+      },
+      {
+        "key": "search_visibility",
+        "why": "The visibility searches found nothing about the brand."
+      },
+      {
+        "key": "ai_answer_visibility",
+        "why": "The visibility searches found nothing about the brand."
+      },
+      {
+        "key": "competitors",
+        "why": "No competitors were named or found."
+      }
+    ],
+    "unreadable": [
+      {
+        "kind": "site",
+        "address": "https://lumenshield.example/"
+      },
+      {
+        "kind": "social",
+        "address": "https://www.instagram.com/lumenshieldcoatings/"
+      }
+    ],
+    "competitors": [],
+    "answers": [
+      {
+        "question": "Research could not read anything about Lumen Shield Coatings. What does the business sell, and where?",
+        "why": "Without this the questionnaire cannot be tailored to the business.",
+        "options": [],
+        "answer": "Ceramic and graphene coatings for cars and bikes, at our one studio in Baner, Pune."
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "ask is null and there are at least 20 questions, no key asked twice. what_they_sell and places_served are each asked, with the owner's earlier answer pre-filled: what_they_sell's suggestedAnswer, or one of its options, says ceramic and graphene coatings for cars and bikes, and places_served's names Pune. Asking these keys again with the answer pre-filled is fine. never_say, competitors_not_named, tone_limits and pause_dates are each asked. No suggestedAnswer states something that neither the owner's answer nor the brand name supports, such as a price, a certification, a phone number or a competitor's name."
+}

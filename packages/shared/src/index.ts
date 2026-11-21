@@ -41,6 +41,18 @@ export {
   type ResearchSourceKind,
   type SourceGroup,
 } from './research.ts'
+export { askSchema, type Ask } from './agent-question.ts'
+export {
+  MAX_QUESTIONS,
+  MIN_QUESTIONS,
+  QUESTION_KEYS,
+  questionnaireInputSchema,
+  questionnaireResultSchema,
+  SAFETY_KEYS,
+  type QuestionKey,
+  type QuestionnaireInput,
+  type QuestionnaireResult,
+} from './questionnaire.ts'
 export {
   agentDefinitionSchema,
   loadAgentDefinition,

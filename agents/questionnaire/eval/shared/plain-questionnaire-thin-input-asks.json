@@ -1,0 +1,85 @@
+{
+  "id": "plain-questionnaire-thin-input-asks",
+  "title": "Research read nothing and nothing says what the business sells: the agent asks the owner instead of writing questions it cannot tailor",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [],
+    "open": [],
+    "gaps": [
+      {
+        "key": "business_name",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "what_they_sell",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "main_products",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "places_served",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "audiences",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "price_position",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "tone_of_voice",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "differentiators",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "certifications",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "contact_points",
+        "why": "The site could not be read."
+      },
+      {
+        "key": "social_presence",
+        "why": "The Instagram profile could not be read."
+      },
+      {
+        "key": "search_visibility",
+        "why": "The visibility searches found nothing about the brand."
+      },
+      {
+        "key": "ai_answer_visibility",
+        "why": "The visibility searches found nothing about the brand."
+      },
+      {
+        "key": "competitors",
+        "why": "No competitors were named or found."
+      }
+    ],
+    "unreadable": [
+      {
+        "kind": "site",
+        "address": "https://lumenshield.example/"
+      },
+      {
+        "kind": "social",
+        "address": "https://www.instagram.com/lumenshieldcoatings/"
+      }
+    ],
+    "competitors": []
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "questions is empty and ask is set. ask.text asks the owner, in plain words, what the business sells; it may also ask where it sells or for an address research can read. ask.why tells the owner in plain words that research could not read anything about the business, so the questions cannot be tailored to it yet. Nothing in ask states or guesses what the business sells, and ask.suggested is null or one of ask.options."
+}

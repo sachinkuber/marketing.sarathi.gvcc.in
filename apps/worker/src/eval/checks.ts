@@ -1,4 +1,9 @@
-import { researchGroupResultSchema, researchResultSchema, summaryResultSchema } from '@mkt/shared'
+import {
+  questionnaireResultSchema,
+  researchGroupResultSchema,
+  researchResultSchema,
+  summaryResultSchema,
+} from '@mkt/shared'
 import { z } from 'zod'
 import type { ModelClient, ModelUsage } from '../model.ts'
 import type { EvalCase } from './cases.ts'
@@ -8,6 +13,7 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown) => boolean> = {
   summary: (output) => summaryResultSchema.safeParse(output).success,
   research: (output) => researchGroupResultSchema.safeParse(output).success,
   research_merge: (output) => researchResultSchema.safeParse(output).success,
+  questionnaire: (output) => questionnaireResultSchema.safeParse(output).success,
 }
 
 export interface CheckResult {
