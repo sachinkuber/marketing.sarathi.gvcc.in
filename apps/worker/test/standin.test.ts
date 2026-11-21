@@ -2,6 +2,7 @@ import { summaryResultSchema, wrapBrief } from '@mkt/shared'
 import { describe, expect, it } from 'vitest'
 import { loadWorkerConfig } from '../src/config.ts'
 import { chooseModel } from '../src/main.ts'
+import { contentText } from '../src/standin.ts'
 
 // The load test (spec 17, test 41) runs the worker with the stand-in model and a fixed answer time,
 // STANDIN_DELAY_MS, read only when MODEL_BACKEND=standin (which the configuration accepts only under
@@ -58,5 +59,20 @@ describe('the stand-in answer time', () => {
     const config = loadWorkerConfig({ ...base, ANTHROPIC_API_KEY: 'k', STANDIN_DELAY_MS: 'not a number' })
     expect(config.modelBackend).toBe('anthropic')
     expect(config.standinDelayMs).toBe(0)
+  })
+})
+
+describe('the stand-in reads block content', () => {
+  it('turns block arrays into a stable string', () => {
+    expect(contentText('plain')).toBe('plain')
+    expect(
+      contentText([
+        { type: 'text', text: 'a' },
+        { type: 'document', source: {} },
+        { type: 'image', source: {} },
+        { type: 'server_tool_use' },
+        { type: 'text', text: 'b' },
+      ]),
+    ).toBe('a[document][image]b')
   })
 })

@@ -6,10 +6,14 @@ import { principalOf } from '../auth/session.ts'
 import type { AuditSink } from '../ports.ts'
 import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/suggestions.ts'
 import { inputOf, validate } from '../validate.ts'
+import type { JobsDeps } from '../jobs/service.ts'
+import { intakeSchema, readOverview, saveIntake, startResearch } from '../onboarding/research.ts'
 
 export interface OnboardingRouteDeps {
   pool: Pool
   audit: AuditSink
+  // Present only with the work engine; starting research needs it.
+  jobs?: JobsDeps
 }
 
 const STEPS = ['profile', 'question', 'fact', 'rule', 'choice'] as const
@@ -51,6 +55,60 @@ const decisionBody = z
   })
 
 export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRouteDeps): void {
+  table.add({
+    method: 'get',
+    path: '/brands/:brandId/onboarding',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary:
+      'Where onboarding stands: the step, the intake, and for each research group its state, searches, page reads, cost and sources',
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json(await readOverview(deps.pool, brandContextOf(res).brandId))
+      },
+    ],
+  })
+
+  table.add({
+    method: 'put',
+    path: '/brands/:brandId/onboarding/intake',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'Save the intake: the website, social links and competitors the research starts from',
+    handlers: [
+      validate({ params: brandParams, body: intakeSchema }),
+      async (_req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof intakeSchema> }>(res)
+        await saveIntake(deps.pool, deps, {
+          brandId: brandContextOf(res).brandId,
+          intake: body,
+          actor: { userId: principalOf(res).userId },
+        })
+        res.json({ intake: body })
+      },
+    ],
+  })
+
+  if (deps.jobs) {
+    const jobs = deps.jobs
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/research',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary: 'Start research: one job per source group, from the saved intake and the uploaded documents',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startResearch(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
+  }
+
   table.add({
     method: 'get',
     path: '/brands/:brandId/onboarding/suggestions',

@@ -143,6 +143,7 @@ describe('the side menu', () => {
       'Agents',
       'Alerts and incidents',
       'Settings',
+      'Onboarding',
     ])
     expect(labels('brand_admin')).toEqual([
       'Home',
@@ -187,6 +188,8 @@ describe('the stop button and the brand switcher', () => {
     expect(html).toContain('Aztek')
     expect(html).toContain('11oils')
     expect(html).toContain('All brands')
+    // The visible "Brand" label is hidden at 640 px and below, so the select carries its own name.
+    expect(html).toMatch(/<select[^>]*aria-label="Brand"/)
   })
 })
 

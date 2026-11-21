@@ -20,8 +20,10 @@ vi.mock('@mkt/db', async (importOriginal) => {
   }
 })
 
-// The result-handler map startServer builds, captured as it is passed to the summary registration.
+// The result-handler map startServer builds, captured as it is passed to the summary registration, and the
+// settled-hook map passed to the research registration.
 const registered = vi.hoisted(() => [] as Map<string, unknown>[])
+const settled = vi.hoisted(() => [] as Map<string, unknown>[])
 vi.mock('../src/agents/register.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/agents/register.ts')>()
   return {
@@ -29,6 +31,10 @@ vi.mock('../src/agents/register.ts', async (importOriginal) => {
     registerSummaryHandlers: (...args: Parameters<typeof original.registerSummaryHandlers>) => {
       registered.push(args[0])
       return original.registerSummaryHandlers(...args)
+    },
+    registerResearchHandlers: (...args: Parameters<typeof original.registerResearchHandlers>) => {
+      settled.push(args[1])
+      return original.registerResearchHandlers(...args)
     },
   }
 })
@@ -77,10 +83,11 @@ describe('startServer', () => {
     await expect(fetch(`${server.url}/health/live`)).rejects.toThrow()
   }, 30_000)
 
-  it('registers the summary and check result handlers', async () => {
+  it('registers the summary, check and research result handlers, and the research groups settled hook', async () => {
     await requireDatabase()
     const db = await createQueueTestDatabase()
     registered.length = 0
+    settled.length = 0
     const server = await startServer(
       {
         nodeEnv: 'test',
@@ -103,7 +110,14 @@ describe('startServer', () => {
     )
     try {
       expect(registered).toHaveLength(1)
-      expect([...registered[0]!.keys()].sort()).toEqual(['placeholder_check.v1', 'summary.v1'])
+      expect([...registered[0]!.keys()].sort()).toEqual([
+        'placeholder_check.v1',
+        'research.v1',
+        'research_group.v1',
+        'summary.v1',
+      ])
+      expect(settled).toHaveLength(1)
+      expect([...settled[0]!.keys()]).toEqual(['research_group.v1'])
     } finally {
       await server.stop()
       await db.drop()

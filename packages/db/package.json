@@ -9,6 +9,7 @@
     "./isolation-probes": "./src/isolation-probes.ts"
   },
   "dependencies": {
+    "@mkt/shared": "*",
     "@mkt/test-support": "*",
     "node-pg-migrate": "8.0.4",
     "pg": "8.23.0"

@@ -30,8 +30,23 @@
 __MKT_HOST__ {
 	__MKT_TLS__
 
-	# The core's largest body is a worker checkpoint, which it caps at 1 MiB itself (express.json 1mb).
-	request_body {
+	# Body sizes. Everything is capped at 1 MiB (the core's own JSON limit is 1 MB) except one path: the document
+	# upload, POST /api/v1/brands/<brand uuid>/onboarding/documents (exactly that path, no trailing segment), which takes a PDF
+	# of up to 100 MB (the core caps it itself by type) and so gets 101 MiB. The worker's checkpoints (up to 8 MB)
+	# never pass this proxy: in production the worker reaches the core directly (CORE_URL http://core:4000).
+	# Named matchers, so exactly one request_body applies to each request.
+	@documentUpload {
+		method POST
+		path_regexp ^/api/v1/brands/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/onboarding/documents$
+	}
+	@notDocumentUpload not {
+		method POST
+		path_regexp ^/api/v1/brands/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/onboarding/documents$
+	}
+	request_body @documentUpload {
+		max_size 101MiB
+	}
+	request_body @notDocumentUpload {
 		max_size 1MiB
 	}
 

@@ -16,7 +16,24 @@ export interface JobsDeps {
   backlogLimit: number
   now: () => Date
   results: ResultHandlers
+  // Result types whose run decides for itself what the end of one of its jobs means (research groups). Every
+  // construction passes a map, empty when nothing is registered.
+  settled: SettledHooks
 }
+
+// Called when a job of a result type registered here settles, inside the transaction that ends it, with the
+// job's input row and then its run row locked (the engine's lock order) and the job's end already written: by
+// applyResult once its result is applied, and by markDead once it is marked dead. A job of such a type that dies
+// does not fail its run: the hook decides what follows (the research merge, for a research group), and the
+// dead job counts as settled when the run ends (finaliseRun). Every other type keeps the Phase 1 rule.
+export type SettledHook = (
+  client: PoolClient,
+  context: { brandId: string; runId: string; jobId: string },
+) => Promise<void>
+export type SettledHooks = Map<string, SettledHook>
+
+// The result types whose dead jobs settle rather than fail their run.
+export const settledTypes = (deps: Pick<JobsDeps, 'settled'>): string[] => [...deps.settled.keys()]
 
 export interface NewRun {
   agent: string
@@ -39,6 +56,10 @@ export interface NewJob {
   jobClass: JobClass
   input: unknown
   expectedResultType: string
+  // The agent whose files the worker loads to run this job. Its live release is read here and its files hash
+  // stored, so the worker can refuse to run files that differ from the release (ruling R9). A job that makes
+  // no model call from agent files passes none.
+  agent?: string
 }
 
 // Backpressure applies to production and bulk work only (architecture 7.1): interactive and publishing
@@ -65,11 +86,39 @@ export async function createJob(
   )
   const scheduleKey = brand.rows[0]?.schedule_key
   if (!scheduleKey) throw new AppError(404, 'brand_not_found', 'No such brand.')
+  let filesHash: string | null = null
+  if (job.agent !== undefined) {
+    // The run's own agent runs the version the run is pinned to (a requeue keeps it, ruling R7); another agent
+    // in the same run runs that agent's live release.
+    const found = await client.query<{ files_hash: string }>(
+      `select v.files_hash
+         from app.run r
+         join app.agent_definition_version v on v.id = r.definition_version_id
+        where r.id = $1 and r.agent = $2
+       union all
+       select files_hash from app.agent_definition_version
+        where agent = $2 and live and not exists (select 1 from app.run where id = $1 and agent = $2)`,
+      [job.runId, job.agent],
+    )
+    if (!found.rows[0]) {
+      throw new AppError(503, 'agent_unavailable', `The ${job.agent} agent has no live release.`)
+    }
+    filesHash = found.rows[0].files_hash
+  }
   const jobId = randomUUID()
   await client.query(
-    `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type)
-     values ($1, $2, $3, $4, $5::jsonb, $6)`,
-    [jobId, brandId, job.runId, job.jobClass, JSON.stringify(job.input), job.expectedResultType],
+    `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type, agent, files_hash)
+     values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)`,
+    [
+      jobId,
+      brandId,
+      job.runId,
+      job.jobClass,
+      JSON.stringify(job.input),
+      job.expectedResultType,
+      job.agent ?? null,
+      filesHash,
+    ],
   )
   // Born held when an active kill switch covers the brand or the run's agent, so release finds it by its flag.
   const covered = await client.query<{ covered: boolean }>(
@@ -97,6 +146,11 @@ export interface StartedAttempt {
   savedSteps: unknown[]
   expectedResultType: string
   jobClass: JobClass
+  // The agent files the job must run (null: none, or a job made before they were recorded).
+  agent: string | null
+  filesHash: string | null
+  // When the attempt token expires (epoch seconds): the worker plans its requests to end before it.
+  expiresAt: number
 }
 export interface FinishedJob {
   finished: true
@@ -139,8 +193,10 @@ export async function startAttempt(
       expected_result_type: string
       outcome: unknown
       finished_at: Date | null
+      agent: string | null
+      files_hash: string | null
     }>(
-      `select class, run_id, input, saved_steps, expected_result_type, outcome, finished_at
+      `select class, run_id, input, saved_steps, expected_result_type, outcome, finished_at, agent, files_hash
          from app.job_input where job_id = $1 for update`,
       [jobId],
     )
@@ -183,8 +239,8 @@ export async function startAttempt(
     const attemptId = created.rows[0]!.id
     // A requeued job is no longer dead, and its run (failed when the job was marked dead) runs again. This
     // is what makes a requeue whose database half rolled back still end right. A run with another job still
-    // dead stays failed: reviving it would leave it running with a job that is listed as dead. The job_input
-    // lock is held;
+    // dead stays failed: reviving it would leave it running with a job that is listed as dead (a dead job of a
+    // settled type does not hold its run failed). The job_input lock is held;
     // the run row is taken next, the engine's lock order.
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
@@ -194,8 +250,9 @@ export async function startAttempt(
       `update app.run set state = 'running', finished_at = null
         where id = $1 and state = 'failed' and not exists (
           select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2)`,
-      [row.run_id, jobId],
+           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2
+             and not (i.expected_result_type = any($3::text[])))`,
+      [row.run_id, jobId, settledTypes(deps)],
     )
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)
@@ -217,6 +274,9 @@ export async function startAttempt(
       savedSteps: row.saved_steps,
       expectedResultType: row.expected_result_type,
       jobClass: row.class,
+      agent: row.agent,
+      filesHash: row.files_hash,
+      expiresAt: claims.expiresAt,
     }
   })
 }
@@ -258,7 +318,11 @@ export async function requireCurrentAttempt(
 // Only the job's latest attempt, the one in the token, may end: an older token is refused and recorded
 // like any other stale attempt. An attempt that has already ended (a repeat) is left as it is. The state is
 // 'failed' (the enum has no 'held'); nothing is audited, as a hold is not an event of the attempt's own.
-export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise<void> {
+export async function endAttempt(
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  reason: 'held' | 'agent_files_mismatch' = 'held',
+): Promise<void> {
   await withBrand(deps.pool, claims.brandId, async (client) => {
     await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
     const { rows } = await client.query<{ id: string; state: string }>(
@@ -282,6 +346,20 @@ export async function endAttempt(deps: JobsDeps, claims: AttemptClaims): Promise
       `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
       [claims.attemptId],
     )
+    // A held stop is not an event of the attempt's own. A files mismatch is: the worker refused to run.
+    if (reason === 'agent_files_mismatch') {
+      await deps.audit.record(
+        {
+          action: 'worker.attempt_ended',
+          actor: null,
+          brandId: claims.brandId,
+          subject: claims.jobId,
+          outcome: 'failure',
+          detail: { reason, jobId: claims.jobId, attemptId: claims.attemptId },
+        },
+        client,
+      )
+    }
   })
 }
 
@@ -415,7 +493,14 @@ export interface CheckpointInput {
   model: string
   providerMessageId: string
   providerRequestId: string | null
-  usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    serverToolSearches: number
+    serverToolFetches: number
+  }
 }
 
 // Spec 9.5, step 4: in one transaction the core saves the step, marks the call succeeded, stores the
@@ -472,8 +557,9 @@ export async function saveCheckpoint(
       output_micros: string
       cache_read_micros: string
       cache_write_micros: string
+      search_micros: string | null
     }>(
-      `select input_micros, output_micros, cache_read_micros, cache_write_micros from app.model_price
+      `select input_micros, output_micros, cache_read_micros, cache_write_micros, search_micros from app.model_price
         where model = $1 and effective_from <= $2::date order by effective_from desc limit 1`,
       [input.model, today],
     )
@@ -485,25 +571,30 @@ export async function saveCheckpoint(
     )
     const p = price.rows[0]
     const r = rate.rows[0]
-    const costed = Boolean(p && r)
-    const usd = p
-      ? usdMicros(
-          {
-            inputMicros: BigInt(p.input_micros),
-            outputMicros: BigInt(p.output_micros),
-            cacheReadMicros: BigInt(p.cache_read_micros),
-            cacheWriteMicros: BigInt(p.cache_write_micros),
-          },
-          input.usage,
-        )
-      : null
+    // Searches with no search price cannot be costed: leave the call uncosted rather than undercount.
+    const priced = Boolean(p) && !(input.usage.serverToolSearches > 0 && p!.search_micros === null)
+    const costed = priced && Boolean(r)
+    const usd =
+      p && priced
+        ? usdMicros(
+            {
+              inputMicros: BigInt(p.input_micros),
+              outputMicros: BigInt(p.output_micros),
+              cacheReadMicros: BigInt(p.cache_read_micros),
+              cacheWriteMicros: BigInt(p.cache_write_micros),
+              searchMicros: p.search_micros === null ? null : BigInt(p.search_micros),
+            },
+            input.usage,
+          )
+        : null
     const inr = usd !== null && r ? inrMicros(usd, BigInt(r.rate_micros)) : null
 
     await client.query(
       `update app.model_call set status = 'succeeded', finished_at = now(),
               provider_message_id = $2, provider_request_id = $3,
               input_tokens = $4, output_tokens = $5, cache_read_tokens = $6, cache_write_tokens = $7,
-              charged_micros = $8, charged_currency = $9, usd_micros = $10, inr_micros = $11, fx_rate_id = $12
+              charged_micros = $8, charged_currency = $9, usd_micros = $10, inr_micros = $11, fx_rate_id = $12,
+              server_tool_searches = $13, server_tool_fetches = $14
         where id = $1`,
       [
         input.callId,
@@ -518,6 +609,8 @@ export async function saveCheckpoint(
         costed ? usd!.toString() : null,
         costed ? inr!.toString() : null,
         costed ? r!.id : null,
+        input.usage.serverToolSearches,
+        input.usage.serverToolFetches,
       ],
     )
     if (costed) {
@@ -648,28 +741,45 @@ export async function postResult(
   })
 }
 
-// How a run ends (plan decision 15), called by applyResult and by cancelJob with the run row locked by the
-// caller, after the job's own change is written. A job is open when it is neither finished nor cancelled.
+// How a run ends (plan decision 15), called by applyResult, markDead (for a settled type) and cancelJob with
+// the run row locked by the caller, after the job's own change is written. A job is open when it is neither
+// finished nor cancelled, nor dead with one of the `settledWhenDead` result types (SettledHook): such a job has
+// settled without a result.
 // - Any open job that is dead: the run stays as it is (failed), never succeeded.
 // - Otherwise, an open job left: a run that a dead job failed runs again (its dead jobs were cancelled or
 //   requeued since), so the later finish can end it.
-// - Otherwise every job is finished or cancelled: succeeded when at least one finished, else cancelled.
+// - Otherwise every job has settled: succeeded when at least one finished, else failed when one died with a
+//   settled type, else cancelled.
 // Only a run that is still going (created, running, or failed by a dead job) is moved: a run someone
 // cancelled, or one held or needing manual work, keeps its state. The run row is locked, so a sibling
 // finishing at the same moment waits for the caller and reads its job's end once it commits: one of the two
 // always sees the run complete.
-export async function finaliseRun(client: PoolClient, runId: string): Promise<void> {
-  const { rows } = await client.query<{ state: string; finished: number; open: number; dead: number }>(
+export async function finaliseRun(
+  client: PoolClient,
+  runId: string,
+  settledWhenDead: readonly string[] = [],
+): Promise<void> {
+  const { rows } = await client.query<{
+    state: string
+    finished: number
+    open: number
+    dead: number
+    settled: number
+  }>(
     `select r.state,
             count(*) filter (where i.finished_at is not null)::int as finished,
-            count(*) filter (where i.finished_at is null and not c.cancel_requested)::int as open,
-            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null)::int as dead
+            count(*) filter (where i.finished_at is null and not c.cancel_requested
+                               and not (c.dead_at is not null and i.expected_result_type = any($2::text[])))::int as open,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null
+                               and not (i.expected_result_type = any($2::text[])))::int as dead,
+            count(*) filter (where i.finished_at is null and not c.cancel_requested and c.dead_at is not null
+                               and i.expected_result_type = any($2::text[]))::int as settled
        from app.run r
        join app.job_input i on i.run_id = r.id
        join app.job_control c on c.job_id = i.job_id
       where r.id = $1
       group by r.state`,
-    [runId],
+    [runId, settledWhenDead],
   )
   const run = rows[0]
   if (!run || !['created', 'running', 'failed'].includes(run.state)) return
@@ -680,9 +790,10 @@ export async function finaliseRun(client: PoolClient, runId: string): Promise<vo
     }
     return
   }
-  await client.query(`update app.run set state = $2, finished_at = now() where id = $1`, [
+  const end = run.finished > 0 ? 'succeeded' : run.settled > 0 ? 'failed' : 'cancelled'
+  await client.query(`update app.run set state = $2, finished_at = now() where id = $1 and state <> $2`, [
     runId,
-    run.finished > 0 ? 'succeeded' : 'cancelled',
+    end,
   ])
 }
 
@@ -698,7 +809,7 @@ export interface HeldResult {
 // held result goes through exactly the path a normal post does.
 export async function applyResult(
   client: PoolClient,
-  deps: Pick<JobsDeps, 'results'>,
+  deps: Pick<JobsDeps, 'results' | 'settled'>,
   input: { brandId: string; jobId: string; runId: string; attemptId: string; posted: PostedResult },
 ): Promise<unknown> {
   const { posted } = input
@@ -725,7 +836,13 @@ export async function applyResult(
   await client.query(`update app.job_attempt set state = 'succeeded', ended_at = now() where id = $1`, [
     input.attemptId,
   ])
-  await finaliseRun(client, input.runId)
+  // A type whose run settles itself hears of the job's end once it is written (its outcome included).
+  await deps.settled.get(posted.type)?.(client, {
+    brandId: input.brandId,
+    runId: input.runId,
+    jobId: input.jobId,
+  })
+  await finaliseRun(client, input.runId, settledTypes(deps))
   // Through JSON, so the first answer is exactly what a repeated post reads back from the jsonb column.
   return JSON.parse(JSON.stringify(outcome ?? null)) as unknown
 }

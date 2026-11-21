@@ -1619,3 +1619,104 @@ a.inherit {
 .scroll-x {
   overflow-x: auto;
 }
+
+/* ---------- onboarding (M9) ---------- */
+/* Touch-sized controls, and nothing that widens the page at 390 px. */
+.onb-touch {
+  min-height: 44px;
+}
+.onb-h {
+  font-size: 15px;
+  margin: 8px 0 0;
+}
+.onb-comp {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.onb-wrap {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.onb-bar {
+  width: 100%;
+}
+.onb-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.onb-sources {
+  border-top: 1px solid var(--line);
+}
+
+.onb-errors {
+  list-style: none;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+/* ---------- draft profile (M9) ---------- */
+.dp-item {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  min-width: 0;
+}
+.dp-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.dp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dp-extract {
+  margin: 4px 0 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.dp-edit {
+  width: 100%;
+  min-height: 96px;
+}
+
+/* The platform owner's top bar also holds the brand switcher: on a phone it shrinks to fit (the page must not
+   grow wider than the screen). */
+@media (max-width: 640px) {
+  .brandswitch {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .brandswitch .tiny {
+    display: none;
+  }
+  .brandswitch select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* `.list > li` is a row; these items stack their parts. */
+.list > li.dp-item,
+.list > li.onb-group {
+  display: grid;
+  align-items: stretch;
+  gap: 10px;
+}
+.list > li.dp-item,
+.list > li.onb-group {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dp-item .tag,
+.onb-group .tag {
+  white-space: normal;
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { summaryResultSchema, wrapBrief } from '@mkt/shared'
+import Anthropic from '@anthropic-ai/sdk'
 import { anthropicModel } from '../src/anthropic.ts'
 import { SUMMARY_AGENT, providerSchema } from '../src/agents/summary.ts'
 
@@ -23,6 +24,60 @@ describe('the summary request against the real provider', () => {
       })
       expect(reply.stopReason).toBe('end_turn')
       expect(summaryResultSchema.safeParse(JSON.parse(reply.text)).success).toBe(true)
+    },
+    120_000,
+  )
+})
+
+// R13 probe: does the API accept a continuation whose history holds server-tool blocks when that tool is left
+// out (a), or listed with max_uses 0 (b)? Run by hand with LIVE_ANTHROPIC=1 and a key; it spends a few cents.
+// The outcome decides how modelTurns treats a spent tool budget.
+describe('spent tool budget forms against the real provider', () => {
+  const live = process.env.LIVE_ANTHROPIC === '1' && !!process.env.ANTHROPIC_API_KEY
+  const history = async (client: Anthropic) => {
+    // A real search turn to get valid server-tool blocks into a history.
+    const first = await client.messages.create({
+      model: 'claude-sonnet-5-5',
+      max_tokens: 400,
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 1 }],
+      messages: [
+        { role: 'user', content: 'Search once for the current weather in Pune, then answer in one line.' },
+      ],
+    })
+    return first.content
+  }
+  const attempt = async (tools: Anthropic.ToolUnion[] | undefined) => {
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+    const blocks = await history(client)
+    try {
+      await client.messages.create({
+        model: 'claude-sonnet-5-5',
+        max_tokens: 200,
+        ...(tools ? { tools } : {}),
+        messages: [
+          { role: 'user', content: 'Search once for the current weather in Pune, then answer in one line.' },
+          { role: 'assistant', content: blocks as Anthropic.ContentBlockParam[] },
+        ],
+      })
+      return 'accepted'
+    } catch (error) {
+      return `rejected: ${error instanceof Anthropic.APIError ? `${error.status} ${error.message}` : String(error)}`
+    }
+  }
+  it.skipIf(!live)(
+    '(a) the tool left out of a request whose history has its blocks',
+    async () => {
+      console.log('probe (a):', await attempt(undefined))
+    },
+    120_000,
+  )
+  it.skipIf(!live)(
+    '(b) the tool listed with max_uses 0',
+    async () => {
+      console.log(
+        'probe (b):',
+        await attempt([{ type: 'web_search_20260209', name: 'web_search', max_uses: 0 }]),
+      )
     },
     120_000,
   )

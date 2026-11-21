@@ -8,6 +8,7 @@ const A = '11111111-1111-4111-8111-111111111111'
 const TABLES = [
   'onboarding',
   'brand_document',
+  'brand_document_part',
   'research_source',
   'suggestion',
   'profile_item',
@@ -60,21 +61,22 @@ describe('brand knowledge tables', () => {
     for (const t of TABLES) expect(scoped).toContain(t)
   })
 
-  it('refuses a document over 10 MB or of another type', async () => {
+  it('refuses an image over 5 MB or a document of another type, and accepts a PDF over 10 MB', async () => {
     const insert = (c: pg.Client, uid: string, size: number, type: string) =>
       c.query(
         `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
-         values ($1, 'f', $2, '\\x00', $3, 'h', $4)`,
+         values ($1, 'f', $2, decode(repeat('00', $3::int), 'hex'), $3, 'h', $4)`,
         [A, type, size, uid],
       )
     await asApp(async (c) => {
       const uid = await userId(c)
       await c.query('savepoint s1')
-      expect(await code(() => insert(c, uid, 10485761, 'application/pdf'))).toBe('23514')
+      expect(await code(() => insert(c, uid, 5242881, 'image/png'))).toBe('23514')
       await c.query('rollback to savepoint s1')
       expect(await code(() => insert(c, uid, 10, 'text/html'))).toBe('23514')
       await c.query('rollback to savepoint s1')
-      await insert(c, uid, 10485760, 'application/pdf')
+      await insert(c, uid, 5242880, 'image/png')
+      await insert(c, uid, 10485761, 'application/pdf')
     })
   })
 

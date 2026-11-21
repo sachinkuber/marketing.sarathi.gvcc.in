@@ -6,6 +6,7 @@ import { ModelStopped, type ModelClient, type ModelRequest } from '../src/model.
 import { runJob, type JobContext } from '../src/runner.ts'
 import { checkHandler } from '../src/agents/check.ts'
 import { providerSchema, summaryHandler } from '../src/agents/summary.ts'
+import { NO_DOCUMENTS } from './no-documents.ts'
 
 const good = { summary: 'One. Two.', keywords: ['a', 'b', 'c'] }
 const agentFile = (name: string) =>
@@ -20,11 +21,13 @@ function stubContext(
     jobId: 'j',
     jobClass: 'interactive',
     input,
+    deadline: new Date(8.64e15),
     async modelStep(name, request) {
       requests.push({ step: name, request })
       return step
     },
     async checkStop() {},
+    ...NO_DOCUMENTS,
   }
   return { ctx, requests }
 }
@@ -127,7 +130,12 @@ describe('the summary handler through the runner', () => {
       },
     }
     const done = runJob(
-      { core, model, handlers: { 'summary.v1': summaryHandler }, workerId: 'w' },
+      {
+        core,
+        model,
+        handlers: { 'summary.v1': { handler: summaryHandler, agent: null, filesHash: null } },
+        workerId: 'w',
+      },
       { id: 'j', jobClass: 'interactive' },
     )
     return { done, posted, calls }

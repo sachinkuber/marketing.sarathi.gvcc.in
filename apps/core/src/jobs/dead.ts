@@ -1,7 +1,7 @@
 import { withBrand, type PoolClient } from '@mkt/db'
 import { CLASS_SETTINGS, JOB_CLASSES, type JobClass } from '@mkt/queue'
 import { AppError } from '../errors.ts'
-import { currentQueueId, finaliseRun, type JobsDeps } from './service.ts'
+import { currentQueueId, finaliseRun, settledTypes, type JobsDeps } from './service.ts'
 
 export interface DeadJob {
   jobId: string
@@ -55,14 +55,24 @@ async function lockJob(client: PoolClient, jobId: string): Promise<Locked> {
 }
 
 // Called by the worker's dead-letter watcher when the library has given up on a job. Repeating it is safe.
+// A job of a type with a settled hook (deps.settled) does not fail its run: the hook decides what follows.
 export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
   const brandId = await brandOf(deps, jobId)
   await withBrand(deps.pool, brandId, async (client) => {
+    const type = await client.query<{ expected_result_type: string }>(
+      'select expected_result_type from app.job_input where job_id = $1',
+      [jobId],
+    )
+    const settle = deps.settled.get(type.rows[0]?.expected_result_type ?? '')
+    // The hook may create the run's next job, which takes the brand row: it is taken first, as a result post
+    // takes it (the engine's lock order), so a kill switch holding it is never waited on with the job held.
+    if (settle) await client.query('select 1 from app.brand where id = $1 for share', [brandId])
     const job = await lockJob(client, jobId)
     // A job whose result was already applied is not dead, whatever a late copy says.
     if (job.finishedAt) return
-    // Already marked (dead_at set, run failed): a repeated report changes nothing and costs no queue call.
-    if (job.deadAt && job.runState === 'failed') return
+    // Already marked (dead_at set, so the run failed, or its hook ran, in that same transaction): a repeated
+    // report changes nothing and costs no queue call.
+    if (job.deadAt && (settle || job.runState === 'failed')) return
     // Nor is a job the queue is running again: a redelivered copy, or the reconciliation, arriving after an
     // owner's requeue must not fail the run or the live attempt. The queue's own record decides.
     if ((await deps.queue.state(job.jobClass, await currentQueueId(client, jobId))) !== 'failed') return
@@ -76,11 +86,16 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
       `update app.job_attempt set state = 'failed', ended_at = now() where job_id = $1 and state = 'active'`,
       [jobId],
     )
-    await client.query(
-      `update app.run set state = 'failed', finished_at = now()
-        where id = $1 and state in ('created', 'running')`,
-      [job.runId],
-    )
+    if (settle) {
+      await settle(client, { brandId, runId: job.runId, jobId })
+      await finaliseRun(client, job.runId, settledTypes(deps))
+    } else {
+      await client.query(
+        `update app.run set state = 'failed', finished_at = now()
+          where id = $1 and state in ('created', 'running')`,
+        [job.runId],
+      )
+    }
     if (job.deadAt) return
     await deps.audit.record(
       { action: 'jobs.dead', actor: null, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
@@ -172,14 +187,15 @@ export async function requeueJob(
     await client.query('update app.job_control set dead_at = null, updated_at = now() where job_id = $1', [
       jobId,
     ])
-    // Only a run the dead job failed runs again, and only when no other job of it is still dead; a run
-    // someone cancelled stays cancelled.
+    // Only a run the dead job failed runs again, and only when no other job of it is still dead (a dead job
+    // of a settled type does not hold it failed); a run someone cancelled stays cancelled.
     await client.query(
       `update app.run set state = 'running', finished_at = null
         where id = $1 and state = 'failed' and not exists (
           select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2)`,
-      [runId, jobId],
+           where i.run_id = $1 and c.dead_at is not null and i.finished_at is null and i.job_id <> $2
+             and not (i.expected_result_type = any($3::text[])))`,
+      [runId, jobId, settledTypes(deps)],
     )
     await deps.audit.record(
       { action: 'jobs.requeued', actor, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
@@ -203,7 +219,7 @@ export async function cancelJob(
       'update app.job_control set cancel_requested = true, dead_at = null, updated_at = now() where job_id = $1',
       [jobId],
     )
-    await finaliseRun(client, runId)
+    await finaliseRun(client, runId, settledTypes(deps))
     await deps.audit.record(
       { action: 'jobs.cancelled', actor, brandId, subject: jobId, outcome: 'success', detail: { jobId } },
       client,

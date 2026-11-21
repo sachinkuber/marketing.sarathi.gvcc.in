@@ -15,6 +15,7 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
+import { listJobDocuments, readJobDocument, readJobDocumentPart } from '../onboarding/documents.ts'
 import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
 import { errorName, type NotifyDeps } from '../notify/ports.ts'
@@ -54,6 +55,9 @@ const checkpointBody = z.strictObject({
     outputTokens: count,
     cacheReadTokens: count,
     cacheWriteTokens: count,
+    // Old workers do not send these; absent means none.
+    serverToolSearches: count.default(0),
+    serverToolFetches: count.default(0),
   }),
 })
 const resultBody = z.strictObject({
@@ -62,8 +66,17 @@ const resultBody = z.strictObject({
 })
 const tickBody = z.strictObject({ workerId: z.string().min(1).max(200) })
 const unmarkedBody = z.strictObject({ jobIds: z.array(z.uuid()).max(500) })
-const endBody = z.strictObject({ reason: z.literal('held') })
+const endBody = z.strictObject({ reason: z.enum(['held', 'agent_files_mismatch']) })
 const failureBody = z.strictObject({ error: text(2000) })
+const documentParams = z.strictObject({ jobId: z.uuid(), documentId: z.uuid() })
+const partParams = z.strictObject({
+  jobId: z.uuid(),
+  documentId: z.uuid(),
+  partNo: z
+    .string()
+    .regex(/^[0-9]{1,9}$/)
+    .transform(Number),
+})
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
 
 export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?: NotifyDeps): void {
@@ -103,6 +116,91 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     ],
   })
 
+  // The bytes of a brand document the job's input lists, for the job's own brand only.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents/:documentId',
+    access: { kind: 'attempt' },
+    summary: "A worker reads the bytes of a brand document listed in its job's input",
+    handlers: [
+      validate({ params: documentParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const { params } = inputOf<{ params: z.infer<typeof documentParams> }>(res)
+        const document = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return readJobDocument(client, {
+            jobId: claims.jobId,
+            brandId: claims.brandId,
+            documentId: params.documentId,
+          })
+        })
+        // res.end, not res.send: send would hash the whole body (up to 100 MB) for an ETag nobody uses.
+        res
+          .status(200)
+          .set({
+            'content-type': document.mediaType,
+            'content-length': String(document.bytes.length),
+            'cache-control': 'no-store',
+          })
+          .end(document.bytes)
+      },
+    ],
+  })
+
+  // The job's documents with the parts of each, so a worker knows what to read.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents',
+    access: { kind: 'attempt' },
+    summary: "A worker lists the brand documents in its job's input, with the AI-ready parts of each",
+    handlers: [
+      validate({ params: jobParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const documents = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return listJobDocuments(client, { jobId: claims.jobId, brandId: claims.brandId })
+        })
+        res.json(documents)
+      },
+    ],
+  })
+
+  // One part of a listed document: whole pages of the PDF, at most 8 MB, the pages named in the headers.
+  table.add({
+    method: 'get',
+    path: '/worker/jobs/:jobId/documents/:documentId/parts/:partNo',
+    access: { kind: 'attempt' },
+    summary: "A worker reads one AI-ready part of a brand document listed in its job's input",
+    handlers: [
+      validate({ params: partParams }),
+      async (_req, res) => {
+        const claims = claimsOf(res)
+        const { params } = inputOf<{ params: z.infer<typeof partParams> }>(res)
+        const part = await withBrand(deps.pool, claims.brandId, async (client) => {
+          await requireCurrentAttempt(client, deps, claims)
+          return readJobDocumentPart(client, {
+            jobId: claims.jobId,
+            brandId: claims.brandId,
+            documentId: params.documentId,
+            partNo: params.partNo,
+          })
+        })
+        res
+          .status(200)
+          .set({
+            'content-type': 'application/pdf',
+            'content-length': String(part.bytes.length),
+            'cache-control': 'no-store',
+            'x-first-page': String(part.firstPage),
+            'x-last-page': String(part.lastPage),
+          })
+          .end(part.bytes)
+      },
+    ],
+  })
+
   table.add({
     method: 'post',
     path: '/worker/jobs/:jobId/model-calls',
@@ -117,7 +215,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     ],
   })
 
-  // The global JSON parser (100 kB) skips exactly this request (see app.ts); the 1 MB parser runs here, after
+  // The global JSON parser (100 kB) skips exactly this request (see app.ts); the 8 MB parser runs here (research steps keep search results and page text), after
   // the worker credential and the attempt token have been checked, so nothing large is read for a stranger.
   table.add({
     method: 'post',
@@ -125,7 +223,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     access: { kind: 'attempt' },
     summary: 'A worker saves a step and its cost in one transaction',
     handlers: [
-      express.json({ limit: '1mb', strict: true }),
+      express.json({ limit: '8mb', strict: true }),
       validate({ params: callParams, body: checkpointBody }),
       async (_req, res) => {
         const { params, body } = inputOf<{
@@ -175,11 +273,13 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     method: 'post',
     path: '/worker/jobs/:jobId/attempt/end',
     access: { kind: 'attempt' },
-    summary: 'A worker ends its current attempt because the job is held, so a release starts a fresh one',
+    summary:
+      "A worker ends its current attempt because the job is held or its agent files differ from the job's",
     handlers: [
       validate({ params: jobParams, body: endBody }),
       async (_req, res) => {
-        await endAttempt(deps, claimsOf(res))
+        const { body } = inputOf<{ body: z.infer<typeof endBody> }>(res)
+        await endAttempt(deps, claimsOf(res), body.reason)
         res.status(204).end()
       },
     ],

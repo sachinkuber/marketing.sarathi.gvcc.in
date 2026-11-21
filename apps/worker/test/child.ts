@@ -26,7 +26,7 @@ await startWorker({
     crashAfterReplyOn: env.CRASH_AFTER_REPLY_ON,
     delayMs: 200,
   }),
-  handlers: { 'test.three_steps': threeSteps },
+  handlers: { 'test.three_steps': { handler: threeSteps, agent: null, filesHash: null } },
   queueUrl: env.QUEUE_DATABASE_URL!,
   workerId: env.WORKER_ID ?? 'child',
   classes: ['interactive'],

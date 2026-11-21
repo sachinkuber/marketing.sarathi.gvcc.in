@@ -1,0 +1,67 @@
+{
+  "id": "plain-merge-options",
+  "title": "Findings that disagree become one assumed suggestion with two or three options; plain facts get none",
+  "hostile": false,
+  "input": {
+    "groups": [
+      {
+        "group": "site",
+        "sources": [
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000a1",
+            "kind": "site",
+            "address": "https://lumenshield.example/",
+            "result": "read",
+            "extract": "Studios in Pune and Mumbai: visit us at Baner (Pune) or Andheri West (Mumbai).",
+            "flagged": null
+          },
+          {
+            "id": "c0ffee00-0000-4000-8000-0000000000a2",
+            "kind": "site",
+            "address": "https://lumenshield.example/contact",
+            "result": "read",
+            "extract": "Our one studio: Shop 4, Baner Road, Pune 411045. We do not currently serve Mumbai.",
+            "flagged": null
+          }
+        ],
+        "findings": [
+          {
+            "key": "business_name",
+            "proposed": "Lumen Shield Coatings",
+            "why": "The name on every page of the site.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "found",
+            "conflict": false
+          },
+          {
+            "key": "places_served",
+            "proposed": "Pune and Mumbai",
+            "why": "The sources disagree: the home page names studios in Pune and Mumbai.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a1"],
+            "confidence": "assumed",
+            "conflict": true
+          },
+          {
+            "key": "places_served",
+            "proposed": "Pune only",
+            "why": "The sources disagree: the contact page says there is one studio, in Pune, and Mumbai is not served.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a2"],
+            "confidence": "assumed",
+            "conflict": true
+          },
+          {
+            "key": "contact_points",
+            "proposed": "Shop 4, Baner Road, Pune 411045",
+            "why": "The address on the contact page.",
+            "sourceIds": ["c0ffee00-0000-4000-8000-0000000000a2"],
+            "confidence": "found",
+            "conflict": false
+          }
+        ]
+      }
+    ],
+    "deadGroups": []
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "places_served is one suggestion, assumed, whose why says the sources disagree, citing both c0ffee00-0000-4000-8000-0000000000a1 and c0ffee00-0000-4000-8000-0000000000a2. It has two or three options (for example Pune only, and Pune and Mumbai), each with a one-sentence trade-off, exactly one recommended, and its proposed value equals the recommended option's value. business_name and contact_points are found and have no options. No suggestion claims the owner has decided anything."
+}

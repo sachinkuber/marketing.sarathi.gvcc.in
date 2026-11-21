@@ -15,10 +15,8 @@ import {
   type Stack,
   type TestClient,
 } from '../../core/test/support.ts'
-import { checkHandler } from '../src/agents/check.ts'
-import { summaryHandler } from '../src/agents/summary.ts'
 import { httpCoreClient } from '../src/core-client.ts'
-import { startWorker } from '../src/main.ts'
+import { defaultHandlers, startWorker } from '../src/main.ts'
 import { standInModel } from '../src/standin.ts'
 
 const PASSWORD = 'correct horse battery'
@@ -47,7 +45,7 @@ beforeAll(async () => {
   worker = await startWorker({
     core: httpCoreClient(stack.server.url, jobs.workerSecret),
     model: standInModel({ logFile: '/dev/null', replyFor: () => reply }),
-    handlers: { 'summary.v1': summaryHandler, 'placeholder_check.v1': checkHandler },
+    handlers: defaultHandlers(),
     queueUrl: stack.db.urlFor('queue'),
     workerId: 'in-process',
     classes: ['interactive'],

@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "suggestions": {
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "business_name",
+              "what_they_sell",
+              "main_products",
+              "places_served",
+              "audiences",
+              "price_position",
+              "tone_of_voice",
+              "differentiators",
+              "certifications",
+              "contact_points",
+              "social_presence",
+              "search_visibility",
+              "ai_answer_visibility",
+              "competitors"
+            ]
+          },
+          "proposed": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sourceIds": {
+            "minItems": 1,
+            "maxItems": 60,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["found", "assumed", "unknown"]
+          },
+          "options": {
+            "minItems": 2,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "tradeOff": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "recommended": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["value", "tradeOff", "recommended"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["key", "proposed", "why", "sourceIds", "confidence"],
+        "additionalProperties": false
+      }
+    },
+    "gaps": {
+      "maxItems": 14,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "business_name",
+              "what_they_sell",
+              "main_products",
+              "places_served",
+              "audiences",
+              "price_position",
+              "tone_of_voice",
+              "differentiators",
+              "certifications",
+              "contact_points",
+              "social_presence",
+              "search_visibility",
+              "ai_answer_visibility",
+              "competitors"
+            ]
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "required": ["key", "why"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["suggestions", "gaps"],
+  "additionalProperties": false
+}

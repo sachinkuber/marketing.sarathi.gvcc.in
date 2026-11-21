@@ -572,3 +572,83 @@ How to run an evaluation and a release on production, with the exit codes and re
   - Evaluation: the judge's cost is not in the per-result rows; `recordedReplies` is unused; the `flags_source` and `no_third_party_fact` checks are placeholders to pin; no test for a missing judge price or exchange rate, or for a judge failure; a redundant `existsSync` in `eval-cli.ts`.
   - Release: the failed cases are fetched only for the first brand missing a run.
   - Suggestions: an edited profile item keeps the suggestion's confidence (decide in the UI); the owner-statement "who" lives in `confirmed_by` and `decided_by`; concurrent `addSuggestions` for one brand (research runs per brand do not overlap, so note it for the research job); a non-UUID source id gives a 500 (tighten in the agent result schema).
+
+## Phase 2, milestone 9: Research
+
+Built 2026-11-20 on branch `m9-research`. Plan: `docs/plans/2026-11-20-m9-research.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 22, 23 and 29, tests 50 and 51 and the halves of 43, 45 and 53 that belong here). This milestone adds the server-side web tools, the research and merge agents, document upload with PDF splitting, and the owner's onboarding screens. Research has not been run on production: it waits for the owner's approval of the steps in `docs/operations.md`, "Production steps at the end of milestone 9".
+
+| Package | State | Evidence |
+|---|---|---|
+| 22 Server-side web tools; searches and fetches counted and costed | Done | Worker tools, `pause_turn` continuation, replay-stable steps and the attempt time budget (87e92f1, e6f8c3c: `apps/worker/test/`); searches recorded and priced in USD and INR (efc8664: `apps/core` model-call tests) |
+| 23 Research agent and its jobs per source group; documents as input | Done | Agents `agents/research` and `agents/research_merge` with 14 recorded evaluation cases, 7 hostile (research 6, merge 1) and 7 plain (7386c93, 1d2f65c); group and merge handlers (fafbf61, f724fe3: `apps/worker/test/research-handler.test.ts`); intake and start (b81f4f0, 7d8a189); results to graded suggestions (120a396, eafd9c2: `apps/core/test/research-results.test.ts`, `research-e2e`) |
+| 29 Onboarding screens: overview, intake, progress, profile | Done | Overview, intake, per-group progress (searches, page reads, cost, sources) (f6a7979, fd99bde); draft profile with suggest-then-decide and the browser flow (ef861ca: `apps/dashboard` e2e) |
+| Document upload and large PDFs (owner decision 2026-11-20) | Done | Upload with limits by type and brand (c12774f, 0a4765a); split into parts with `pdf-lib` (0d06893, 688c295) |
+| Proxy upload path | Done | `infra/prod/proxy/marketing.caddy`: 101 MiB for the document upload path only; smoke check `document-body`; `infra/prod/test/proxy.test.mjs` runs it in the pinned Caddy |
+
+| # | Test (short) | State | Evidence |
+|---|---|---|---|
+| 43 | No suggestion becomes a profile item, fact or rule without a decision; an agent result that tries is refused | Proven here (the agent-result half) | Research results only ever write suggestions; the result schema refuses anything else; a document source outside the job's documents is refused (`apps/core/test/research-results.test.ts`) |
+| 45 | A re-run keeps decisions and supersedes only undecided suggestions | Proven here, through research | Re-run after a decision; a stale run never overwrites a newer run's suggestions (`apps/core/test/research-results.test.ts`, `suggestions.test.ts`) |
+| 50 | Research costs include searches and fetches in USD and INR | Proven here | `model_call` carries search and fetch counts, priced from `model_price.search_micros`; the overview shows the cost per group, and null while any call's cost is unknown; the e2e run records 3 searches per call at 10,000 microdollars each |
+| 51 | Upload limits are enforced; documents are restored by the restore drill | Proven here | Size, type, count and per-brand total refused with a message that says how to fix it (`apps/core/test/documents.test.ts`); the restore check's fifth line proves the seeded PDF came back with its checksum (`apps/ops/test/restore-check.test.ts`) |
+| 53 | Onboarding screens work at 390 x 844 with touch | Proven here, for these screens | The browser flow and the phone check in `apps/dashboard` e2e; two real layout bugs found and fixed (owner top bar, list rows) |
+
+M8 carry-overs closed here: the live files-hash check (`job_input.agent` and `files_hash`, so the worker runs only the released agent files), `profile_item.superseded_by` (accepting or editing a profile suggestion supersedes the old item), `recordedReplies` (replaced by recorded pages in the cases), `research_source.result` written and graded, the upload route's size and count enforcement, the check semantics for `flags_source` and `no_third_party_fact` (now pinned, with a static integrity test over the cases), and research serialised per brand (no overlap).
+
+Full run on the development server, 2026-11-20, from the tree of this milestone's last commit:
+
+- `npm ci && npm run verify`: 169 test files passed, 2 skipped (171); 1659 tests passed, 4 skipped (1663), the live model checks; 1003 s; gitleaks found no leaks.
+- `npm ci && npm run e2e` in the browser image: 8 passed (2.2m).
+- `node --test infra/prod/test/proxy.test.mjs infra/prod/test/smoke.test.mjs` in the infrastructure image: 39 tests, all passed, including the 101 MiB upload path, a 413 on the same path with a trailing segment, another method or another path, and the new `document-body` smoke check.
+
+After the final review's fix wave, 2026-11-21, on the development server from the fix wave's tree:
+
+- `npm run verify`: 169 test files passed, 2 skipped (171); 1717 tests passed, 4 skipped (1721); 987 s; gitleaks found no leaks.
+- `npm run e2e` in the browser image: 8 passed (2.2m).
+
+## Findings
+
+- Rulings in milestone 9 (each cheap to change; the full list is R1 to R42 in the build ledger):
+  - R5, R7: a job whose agent files differ from the live release ends its attempt (`agent_files_mismatch`) and the queue gives up; a requeue keeps the job's hash, so a job created before a release can only be cancelled.
+  - R12: a job's attempt deadline is known to the worker; it never starts a model request that cannot finish 60 s before the deadline.
+  - R14, R15, R18, R19, R20: a PDF is split before the transaction; every PDF is loaded by `pdf-lib` and an unreadable one is refused; part bytes are bounded (twice the original or 32 MiB) and a split has a 120 s deadline; a decompression bomb at load is an accepted risk; links and actions are stripped from the parts.
+  - R22, R22a, R33, R34, R35: grading only lowers confidence. Two agreeing sources on different registrable domains are `found`; a single third-party source is `assumed`; competitor pages never count toward `found` and the `competitors` key is capped at `assumed` with " (to confirm)"; a `site` source counts as the brand's own only when its registrable domain equals the intake website's.
+  - R24, R29: research group requests send no output schema; the JSON is taken from the final text and validated, with one repair request per invalid reply in the same attempt; the merge keeps its schema.
+  - R26, R27, R27a: document batches are at most 24 MiB of base64 and 100 pages; batch results are joined by key and normalised proposal, capped at 40 findings and 60 sources, the rest moving to `unsettled`.
+  - R28, R38: the overview reads each group's sources from its job outcome joined to `research_source`; the research block also returns the merge's `gaps`.
+  - Research start guard (commit 7d8a189, no ruling number): a new research run cannot start while an earlier run's groups still run.
+  - R36: a kill switch on `research` holds the merge as well; it is the owner's single stop control.
+  - R40: the final review's fix wave (below) closed I1 to I5, M1, M3, M5, the shared-hosting suffixes and the brand switcher's name; the rest went to milestone 10.
+  - R41: an image whose base64 is over 5,242,880 characters (about 3.75 MiB of image) is not sent to the model; it becomes an `error` source ("Too large for the AI to read. Save it under 3.7 MB and upload it again.") and the rest of the documents are read. The owner's 5 MB upload limit is unchanged.
+  - R42: `web_fetch` carries `maxContentTokens` from the definition (40,000 for research), sent as `max_content_tokens`, so one large page cannot fill a step; the worker also refuses to save a step over the core's 8 MB checkpoint limit (costed, not saved, a clear error).
+- The 150-search cap per research run is not enforced at run time. Each group's request caps its own searches, which bounds a first attempt (5 groups × 20, and at most 26 per web group with continuations). It does not hold by construction across retries: a retry after a lost reply sends that turn again with a full budget, so the worst case is about 312 searches (4 web groups × 3 attempts × 26). A runtime per-run cap is planned for milestone 10.
+- A requeued group that finishes after the merge has started stores its sources, but they never reach the suggestions (the merge has already read the finished groups). Re-running research picks them up.
+- Accepted risks: R17 (two concurrent 100 MB uploads) and R19 (a decompression-bomb PDF can restart the core); both in `docs/operations.md`, "Documents". Revisit before uploads open to customers.
+- Not proven on a live model: the research prompts and the 14 evaluation cases have not run against the provider (no key on the development server); the owner's evaluation gate is a production step. Also unproven: whether the API accepts a continuation with a spent web tool removed (R13) and web tools with an output schema (R24).
+- Closed by the final review's fix wave (2026-11-21, R40):
+  - I1: when every group dies, the overview shows the merge as failed (it said waiting, so the dashboard waited for ever); the dashboard also treats an ended run as settled, so polling stops and Start research is enabled again, and the progress screen says "Research could not finish. Check the agents' releases, then start research again."
+  - I2: after a re-run, the draft profile shows the open suggestion for a key the owner already decided (it showed the oldest item per key), and "Accept all found items" counts it.
+  - I3: a model request is bounded from start to end by the worker's own timer and abort signal. The provider library's timeout covers only the wait for the response headers (checked in `@anthropic-ai/sdk` 0.124.0: its timer is cleared once `fetch` resolves), so a stream that stalled after its headers had no bound. A cut request is reported as the library's timeout error, so the call stays started and the job retries, as before.
+  - I4 (R42): `max_content_tokens` on `web_fetch`, and the runner's guard against a checkpoint over 8 MB.
+  - I5 (R41): the worker's guard for images over 5,242,880 base64 characters.
+  - M1: the runbook's evaluation command no longer passes `--brand aztek` (there is no `eval/aztek/`, so that run could not stand for the release).
+  - M3: a document cannot be deleted while the brand's research run is going (409 `research_running`); this reuses the start guard's check.
+  - M5: an owner statement is listed exactly as stated, with no 500-character cut and never read as flagged.
+  - R34's shared-hosting suffixes: `github.io`, `gitlab.io`, `blogspot.com`, `wordpress.com`, `wixsite.com`, `weebly.com`, `netlify.app`, `vercel.app`, `pages.dev`, `web.app`, `firebaseapp.com`, `herokuapp.com`, `myshopify.com` and `square.site` keep one more label, so `aztek.github.io` and `other.github.io` are different domains.
+  - The brand switcher's select has its own accessible name ("Brand") at 640 px and below.
+  - Docs: the 150-search cap and late group results (above), and the production checklist (rows checked before 0025, the stream-timeout check, the image probe, `max_content_tokens` as a precondition of the Aztek run).
+- Deferred to milestone 10, before customers:
+  - I6: R33 trusts the address the model writes for a source; cross-check source addresses against the URLs actually fetched or searched, so a planted page cannot pose as the brand's own site.
+  - M2: a runtime per-run search cap (above).
+  - M4: a PDF's parts count toward the brand's storage limit.
+  - M6: the circular import between `suggestions.ts` and `research-results.ts`.
+  - M7: the "Cost so far" wording on the progress screen once research has ended.
+  - M8: check `maxTokens` (16,000) against real replies in the live evaluation.
+  - M9: prompt caching for continuation turns.
+- Also deferred (minor):
+  - Merge creation under a full job backlog can lose a finished group's paid result (the Phase 1 backpressure pattern).
+  - An unsplit PDF is counted as 100 pages in batching (needs a page count column); the research module is large and could split batching and join into their own file.
+  - Dashboard: the edit box has no length limit and sends untrimmed text; a failed reload after a decision replaces the screen; the page range is parsed from the address text; the 401 polling-stop path is untested. The progress screen shows a too-large image's source as "Error" without its extract (the extract, with what to do, is stored on the source).
+  - Smaller: `JobsDeps.settled` and the `site` label trust (R33) are covered by tests but worth a second look; pdf-lib warnings bypass the logger; the split deadline is checked only between parts; document type and name are parsed twice in a route.
+  - Milestone 10: questionnaire, facts and rules, agent questions. Milestone 11: strategy and gate 1.
+

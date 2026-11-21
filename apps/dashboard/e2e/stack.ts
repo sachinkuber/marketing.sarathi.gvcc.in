@@ -24,7 +24,8 @@ import type { TestDatabase } from '@mkt/db/testing'
 import { openQueue } from '@mkt/queue'
 import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
-import { registerSummaryHandlers } from '../../core/src/agents/register.ts'
+import { agentFilesHash } from '@mkt/shared'
+import { registerResearchHandlers, registerSummaryHandlers } from '../../core/src/agents/register.ts'
 import { tick } from '../../core/src/approvals/requests.ts'
 import { DbAudit } from '../../core/src/audit/db-audit.ts'
 import { AttemptLimiter } from '../../core/src/auth/limiter.ts'
@@ -38,11 +39,11 @@ import type { Mailer, MailMessage, SendReceipt } from '../../core/src/ports.ts'
 import type { JobsDeps } from '../../core/src/jobs/service.ts'
 import type { ResultHandlers } from '../../core/src/jobs/results.ts'
 import { addBrand, addUser, enrol, TestClient, totp } from '../../core/test/support.ts'
-import { checkHandler } from '../../worker/src/agents/check.ts'
-import { summaryHandler } from '../../worker/src/agents/summary.ts'
 import { httpCoreClient } from '../../worker/src/core-client.ts'
-import { startWorker } from '../../worker/src/main.ts'
+import { RESEARCH_DIR, RESEARCH_MERGE_DIR } from '../../worker/src/agents/research.ts'
+import { defaultHandlers, startWorker } from '../../worker/src/main.ts'
 import { standInModel } from '../../worker/src/standin.ts'
+import { researchReplyFor, withWebTools } from './research-script.ts'
 
 export const PASSWORD = 'correct horse battery'
 const HOUR = 3_600_000
@@ -171,15 +172,29 @@ export async function startStack(env: Record<string, string | undefined> = proce
     // Job tokens and timeouts run on real time; only the approvals' reminders follow the harness clock.
     now: () => new Date(),
     results,
+    settled: new Map(),
   }
   registerSummaryHandlers(results, jobs)
+  // Research: a group result stores its sources, and the last group starts the merge.
+  registerResearchHandlers(results, jobs.settled, jobs)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(
-    `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, source)
-     values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 'e2e')`,
+    `insert into app.model_price (model, effective_from, input_micros, output_micros, cache_read_micros, cache_write_micros, search_micros, source)
+     values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 10000, 'e2e')`,
     [today],
   )
+  // Live releases of both research agents, with the files this worker runs (ruling R9).
+  for (const [agent, dir] of [
+    ['research', RESEARCH_DIR],
+    ['research_merge', RESEARCH_MERGE_DIR],
+  ] as const) {
+    await db.admin.query(
+      `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+       values ($1, 1, 'claude-sonnet-5-5', 'medium', $2, true)`,
+      [agent, agentFilesHash(dir)],
+    )
+  }
   await db.admin.query(`select app.record_fx_rate($1::date - 1, 83500000, 'e2e')`, [today])
 
   const core = buildCore({
@@ -234,11 +249,17 @@ export async function startStack(env: Record<string, string | undefined> = proce
 
   const worker = await startWorker({
     core: httpCoreClient(coreUrl, config.workerSecret),
-    model: standInModel({ logFile: '/dev/null', replyFor: () => MODEL_REPLY }),
-    handlers: { 'summary.v1': summaryHandler, 'placeholder_check.v1': checkHandler },
+    model: withWebTools(
+      standInModel({
+        logFile: '/dev/null',
+        replyFor: (step) => researchReplyFor(step) ?? MODEL_REPLY,
+      }),
+    ),
+    handlers: defaultHandlers(),
     queueUrl: db.urlFor('queue'),
     workerId: 'e2e',
-    classes: ['interactive'],
+    // The summary agent runs as interactive, the research jobs as production.
+    classes: ['interactive', 'production'],
     processesPerClass: 1,
     superviseIntervalSeconds: 1,
     log: () => undefined,

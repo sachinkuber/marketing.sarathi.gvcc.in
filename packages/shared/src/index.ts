@@ -15,11 +15,36 @@ export {
   summaryPayload,
   summaryResultSchema,
   wrapBrief,
+  wrapData,
   type SummaryResult,
 } from './summary.ts'
+export {
+  CONFIDENCES,
+  EXTRACT_MAX,
+  MAX_FINDINGS,
+  MAX_SOURCES,
+  PROFILE_KEYS,
+  PROPOSED_MAX,
+  RESEARCH_RESULTS,
+  RESEARCH_SOURCE_KINDS,
+  researchGroupInputSchema,
+  researchGroupResultSchema,
+  researchMergeInputSchema,
+  researchResultSchema,
+  SOURCE_GROUPS,
+  WHY_MAX,
+  type ProfileKey,
+  type ResearchGroupInput,
+  type ResearchGroupResult,
+  type ResearchMergeInput,
+  type ResearchResult,
+  type ResearchSourceKind,
+  type SourceGroup,
+} from './research.ts'
 export {
   agentDefinitionSchema,
   loadAgentDefinition,
   type AgentDefinition,
   type LoadedAgent,
 } from './agent-definition.ts'
+export { agentFilesHash, setsHash } from './agent-files.ts'

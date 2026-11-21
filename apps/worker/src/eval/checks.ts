@@ -1,11 +1,13 @@
-import { summaryResultSchema } from '@mkt/shared'
+import { researchGroupResultSchema, researchResultSchema, summaryResultSchema } from '@mkt/shared'
 import { z } from 'zod'
 import type { ModelClient, ModelUsage } from '../model.ts'
 import type { EvalCase } from './cases.ts'
 
-// Each agent's own result check, used by schema_valid. M9 to M11 add their agents here.
+// Each agent's own result check, used by schema_valid. M10 and M11 add their agents here.
 export const RESULT_VALIDATORS: Record<string, (output: unknown) => boolean> = {
   summary: (output) => summaryResultSchema.safeParse(output).success,
+  research: (output) => researchGroupResultSchema.safeParse(output).success,
+  research_merge: (output) => researchResultSchema.safeParse(output).success,
 }
 
 export interface CheckResult {
@@ -26,29 +28,46 @@ function* objects(value: unknown): Generator<Record<string, unknown>> {
   }
 }
 
-const FLAG_KEYS = ['flags', 'flaggedSources', 'flagged_sources']
+// Every entry of every `sources` list in the value.
+function* sourceEntries(value: unknown): Generator<Record<string, unknown>> {
+  for (const obj of objects(value)) {
+    const list = obj['sources']
+    if (!Array.isArray(list)) continue
+    for (const item of list)
+      if (item !== null && typeof item === 'object' && !Array.isArray(item))
+        yield item as Record<string, unknown>
+  }
+}
+const named = (source: Record<string, unknown>, sourceId: string) =>
+  source['ref'] === sourceId || source['id'] === sourceId
+
+// Passes when a sources[] entry whose ref (a group result) or id is the case's sourceId has `flagged` not null.
 function flagsSource(output: unknown, sourceId: string): boolean {
-  for (const obj of objects(output)) {
-    for (const key of FLAG_KEYS) {
-      const list = obj[key]
-      if (!Array.isArray(list)) continue
-      for (const item of list) {
-        if (item === sourceId) return true
-        if (item !== null && typeof item === 'object') {
-          const o = item as Record<string, unknown>
-          if (o['sourceId'] === sourceId || o['source_id'] === sourceId) return true
-        }
-      }
-    }
+  for (const source of sourceEntries(output)) {
+    if (named(source, sourceId) && source['flagged'] !== null && source['flagged'] !== undefined) return true
   }
   return false
 }
 
-// An output that states a fact about a third party marks it: `third_party_fact: true` or a kind of
-// 'third_party_fact'. Any such mark fails the check.
-function hasThirdPartyFact(output: unknown): boolean {
+// Fails when a `found` finding or suggestion rests only on social, search or competitor sources (AI-11). A
+// group result names its sources by ref in its own `sources`; a merge result names them by id, and those are
+// in the case's input. A `found` item that cites nothing, or only sources that are in neither, rests on no
+// known source and fails too: otherwise "mark everything found" without copying the ids would pass.
+const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
+function hasThirdPartyFact(output: unknown, input: unknown): boolean {
+  const kinds = new Map<string, unknown>()
+  for (const source of [...sourceEntries(input), ...sourceEntries(output)]) {
+    if (typeof source['ref'] === 'string') kinds.set(source['ref'], source['kind'])
+    if (typeof source['id'] === 'string') kinds.set(source['id'], source['kind'])
+  }
   for (const obj of objects(output)) {
-    if (obj['third_party_fact'] === true || obj['kind'] === 'third_party_fact') return true
+    if (obj['confidence'] !== 'found') continue
+    const field = Array.isArray(obj['sourceRefs']) ? obj['sourceRefs'] : obj['sourceIds']
+    const cited: unknown[] = Array.isArray(field) ? field : []
+    const known = cited
+      .filter((ref): ref is string => typeof ref === 'string' && kinds.has(ref))
+      .map((ref) => kinds.get(ref))
+    if (known.every((kind) => typeof kind === 'string' && THIRD_PARTY.has(kind))) return true
   }
   return false
 }
@@ -79,8 +98,12 @@ export function runChecks(
           ? { kind: check.kind, passed: true }
           : { kind: check.kind, passed: false, detail: `the output does not flag ${check.sourceId}` }
       case 'no_third_party_fact':
-        return hasThirdPartyFact(output)
-          ? { kind: check.kind, passed: false, detail: 'the output states a third-party fact' }
+        return hasThirdPartyFact(output, c.input)
+          ? {
+              kind: check.kind,
+              passed: false,
+              detail: 'a found item rests only on social, search or competitor sources',
+            }
           : { kind: check.kind, passed: true }
     }
   })

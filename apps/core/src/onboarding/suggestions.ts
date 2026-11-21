@@ -1,8 +1,13 @@
 import { createHash } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
+import { RESEARCH_SOURCE_KINDS } from '@mkt/shared'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
+import { readStoredExtract } from './research-results.ts'
 import { qualifiesAsFactSource, type SourceKind } from './sources.ts'
+
+// The kinds whose stored extract research wrote (with its flag marker and cut); an owner statement is not one.
+const RESEARCH_KINDS: readonly string[] = RESEARCH_SOURCE_KINDS
 
 export type SuggestionStep = 'profile' | 'question' | 'fact' | 'rule' | 'choice'
 export type Confidence = 'found' | 'assumed' | 'unknown'
@@ -151,12 +156,23 @@ async function decideWithin(
   let createdId: string | null = null
 
   if (accepted && row.step === 'profile') {
+    // Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
+    // current item is locked first, so a decision on the same key elsewhere waits, then supersedes this one.
+    await client.query(
+      `select id from app.profile_item where brand_id = $1 and key = $2 and superseded_by is null for update`,
+      [input.brandId, row.key],
+    )
     const made = await client.query<{ id: string }>(
       `insert into app.profile_item (brand_id, key, value, status, source_ids, from_suggestion)
        values ($1, $2, $3::jsonb, $4, $5::uuid[], $6) returning id`,
       [input.brandId, row.key, JSON.stringify(chosen), row.confidence, row.source_ids, row.id],
     )
     createdId = made.rows[0]!.id
+    await client.query(
+      `update app.profile_item set superseded_by = $3
+        where brand_id = $1 and key = $2 and superseded_by is null and id <> $3`,
+      [input.brandId, row.key, createdId],
+    )
   } else if (accepted && row.step === 'fact') {
     createdId = await writeFact(client, input, row, chosen)
   } else if (accepted && row.step === 'rule') {
@@ -233,7 +249,7 @@ async function writeFact(
   if (input.decision === 'edited') {
     const added = await client.query<{ id: string }>(
       `insert into app.research_source (brand_id, kind, result, extract)
-       values ($1, 'owner_statement', 'owner_statement', $2) returning id`,
+       values ($1, 'owner_statement', 'stated', $2) returning id`,
       [input.brandId, statement],
     )
     sourceIds.push(added.rows[0]!.id)
@@ -340,7 +356,15 @@ export interface SuggestionView {
   decidedReason: string | null
   decidedAt: string | null
   createdAt: string
-  sources: { id: string; kind: SourceKind; address: string | null; extract: string }[]
+  // The extract as the owner reads it: the stored flag marker and escape are taken off, the flag kept apart.
+  sources: {
+    id: string
+    kind: SourceKind
+    address: string | null
+    readAt: string
+    extract: string
+    flagged: { reason: string } | null
+  }[]
 }
 
 export async function listSuggestions(
@@ -353,7 +377,8 @@ export async function listSuggestions(
       `select s.id, s.step, s.key, s.proposed, s.why, s.confidence, s.options, s.decision, s.decided_value,
               s.decided_reason, s.decided_at, s.created_at,
               coalesce((select json_agg(json_build_object('id', r.id, 'kind', r.kind, 'address', r.address,
-                                                         'extract', r.extract) order by r.read_at, r.id)
+                                                         'readAt', r.read_at, 'extract', r.extract)
+                                  order by r.read_at, r.id)
                           from app.research_source r
                          where r.brand_id = s.brand_id and r.id = any(s.source_ids)), '[]'::json) as sources
          from app.suggestion s
@@ -374,7 +399,23 @@ export async function listSuggestions(
       decidedReason: r.decided_reason,
       decidedAt: r.decided_at ? new Date(r.decided_at).toISOString() : null,
       createdAt: new Date(r.created_at).toISOString(),
-      sources: r.sources,
+      sources: (
+        r.sources as {
+          id: string
+          kind: SourceKind
+          address: string | null
+          readAt: string
+          extract: string
+        }[]
+      ).map((source) => ({
+        ...source,
+        readAt: new Date(source.readAt).toISOString(),
+        // Only research extracts carry the stored flag marker and the 500-character cut. An owner statement is
+        // the owner's own words, returned exactly as stated and never read as flagged.
+        ...(RESEARCH_KINDS.includes(source.kind)
+          ? readStoredExtract(source.extract)
+          : { extract: source.extract, flagged: null }),
+      })),
     }))
   })
 }

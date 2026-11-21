@@ -7,8 +7,9 @@ import { createS3Client, S3ExportStore } from './audit/s3-store.ts'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
-import { registerSummaryHandlers } from './agents/register.ts'
+import { registerResearchHandlers, registerSummaryHandlers } from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
+import type { SettledHooks } from './jobs/service.ts'
 import { ecbFxSource } from './triggers/fx.ts'
 
 export interface RunningServer {
@@ -23,6 +24,7 @@ export async function startServer(
   // The core's queue connection reads and writes jobs; it does not supervise (the workers do).
   const queue = await openQueue(config.queueDatabaseUrl)
   const results: ResultHandlers = new Map()
+  const settled: SettledHooks = new Map()
   const appPool = createPool(config.databaseUrl)
   const authPool = createPool(config.databaseUrl, { searchPath: 'auth' })
   // The owner-view role reads the audit log and records the exchange rate; the audit-writer role records the
@@ -43,6 +45,11 @@ export async function startServer(
     pool.on('error', (error) => deps.logger.error({ err: error, pool: name }, 'idle database client error'))
   }
   registerSummaryHandlers(results, { audit: deps.audit, queue, backlogLimit: config.queueBacklogLimit })
+  registerResearchHandlers(results, settled, {
+    audit: deps.audit,
+    queue,
+    backlogLimit: config.queueBacklogLimit,
+  })
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,
@@ -74,6 +81,7 @@ export async function startServer(
       backlogLimit: config.queueBacklogLimit,
       now: () => new Date(),
       results,
+      settled,
     },
   })
   let server: Server

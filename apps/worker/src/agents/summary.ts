@@ -5,7 +5,8 @@ import type { JobHandler } from '../runner.ts'
 
 // The agent's files are read when this module loads (the worker starting), not written into the code, so
 // the prompt, the model and the schema are the ones in agents/summary/.
-const loaded = loadAgentDefinition(fileURLToPath(new URL('../../../../agents/summary/', import.meta.url)))
+export const SUMMARY_DIR = fileURLToPath(new URL('../../../../agents/summary/', import.meta.url))
+const loaded = loadAgentDefinition(SUMMARY_DIR)
 
 // The provider's structured output does not take length, count or range limits. The stored schema keeps them
 // (and the core re-validates every result with summaryResultSchema); what is sent drops them. Names of

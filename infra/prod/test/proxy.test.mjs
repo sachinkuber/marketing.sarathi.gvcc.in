@@ -297,6 +297,30 @@ test('a body up to 1 MiB reaches the core; a larger one is refused by the proxy 
   assert.ok(!core.seen.slice(before).some((r) => r.url === '/api/echo/bigger' && r.bodyLength > 1024 * 1024))
 })
 
+test('only the document upload path takes more than 1 MiB (up to 101 MiB)', async () => {
+  const id = '11111111-2222-4333-8444-555555555555'
+  const upload = `/api/v1/brands/${id}/onboarding/documents`
+  const post = (path, bytes, method = 'POST') =>
+    fetch(`${proxies.direct.url}${path}`, {
+      method,
+      body: Buffer.alloc(bytes),
+      signal: AbortSignal.timeout(20_000),
+    })
+  const MiB = 1024 * 1024
+  const before = core.seen.length
+  // The stand-in core answers these (not signed in, or no Origin): what matters is that the proxy did not refuse.
+  assert.notEqual((await post(upload, 5 * MiB)).status, 413)
+  assert.notEqual((await post(upload, 101 * MiB)).status, 413)
+  assert.ok(core.seen.slice(before).some((r) => r.url === upload && r.bodyLength === 101 * MiB))
+  assert.equal((await post(upload, 101 * MiB + 1024)).status, 413)
+  // Not the upload: a different method, a trailing segment, another path.
+  assert.equal((await post(upload, 2 * MiB, 'PUT')).status, 413)
+  assert.equal((await post(`${upload}/extra`, 2 * MiB)).status, 413)
+  assert.equal((await post(`/api/v1/brands/${id}/onboarding/other`, 2 * MiB)).status, 413)
+  assert.equal((await post('/api/v1/brands/not-a-uuid/onboarding/documents', 2 * MiB)).status, 413)
+  assert.ok(!core.seen.slice(before).some((r) => r.bodyLength > 101 * MiB))
+})
+
 test('every response carries HSTS and COOP once, and no Server header', async () => {
   for (const path of ['/', '/api/health/ready']) {
     const response = await fetch(`${proxies.direct.url}${path}`, { signal: AbortSignal.timeout(10_000) })

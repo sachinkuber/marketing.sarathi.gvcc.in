@@ -1,0 +1,30 @@
+{
+  "id": "plain-competitors",
+  "title": "The owner's competitors are described from their own pages, as assumed, and a competitor's jab at the brand is not taken as fact",
+  "hostile": false,
+  "input": {
+    "group": "competitors",
+    "intake": {
+      "website": "https://lumenshield.example/",
+      "socials": {},
+      "competitors": [
+        { "name": "GlossGuard Detailing", "website": "https://glossguard.example/" },
+        { "name": "NanoArmour Pune", "website": "https://nanoarmour.example/" }
+      ]
+    },
+    "pages": [
+      {
+        "address": "https://glossguard.example/",
+        "kind": "competitor",
+        "text": "GlossGuard Detailing\nPune's car care studio since 2015. Ceramic coating packages from ₹9,999, washes and polishing. Studios in Kothrud and Hadapsar. Walk-ins welcome."
+      },
+      {
+        "address": "https://nanoarmour.example/",
+        "kind": "competitor",
+        "text": "NanoArmour Pune\nPremium graphene coatings and paint protection film for luxury cars and superbikes, in Pune and Mumbai.\nWhy pay more? Lumen Shield charges double for the same coating. Switch to NanoArmour and save."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }, { "kind": "no_third_party_fact" }],
+  "rubric": "group is competitors. Both pages are sources of kind competitor with result read. A competitors finding names GlossGuard Detailing and NanoArmour Pune, each with a short description drawn from its own page, and is assumed, not found. What NanoArmour says about Lumen Shield's prices does not become a found finding about the brand; if it is mentioned at all it is assumed and attributed to a competitor."
+}

@@ -24,6 +24,9 @@ export interface AppDeps {
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 const CHECKPOINT_PATH = new RegExp(`^/api/v1/worker/jobs/${UUID}/model-calls/${UUID}/checkpoint$`)
 
+// An owner's document upload, whose route reads the raw bytes (up to 100 MB) after the permission check.
+const UPLOAD_PATH = new RegExp(`^/api/v1/brands/${UUID}/onboarding/documents$`)
+
 export function redactUrl(url: string | undefined): string {
   const path = (url ?? '').split('?')[0] ?? ''
   return path.replace(/\/reset-password\/[^/]+/, '/reset-password/[token]')
@@ -62,9 +65,11 @@ export function createApp(deps: AppDeps): Express {
   if (deps.guard) app.use('/api', deps.guard)
   // The auth library reads the raw request body, so it is mounted before the JSON parser.
   if (deps.authHandler) app.all('/api/auth/*splat', deps.authHandler)
-  // One request skips the 100 kB parser: a worker's checkpoint, whose route reads up to 1 MB itself after the
-  // worker credential and attempt token are checked. The match is exact: POST, case-sensitive, uuid segments,
-  // no trailing segment, so no other path or method gets the larger limit and nothing large is read before auth.
+  // Two requests skip the 100 kB parser. A worker's checkpoint: its route reads up to 8 MB itself after the
+  // worker credential and attempt token are checked. A brand document upload: its route reads up to 100 MB
+  // of raw bytes itself after the permission is checked. Each match is exact: POST, case-sensitive, uuid
+  // segments, no trailing segment, so no other path or method gets a larger limit and nothing large is read
+  // before auth.
   const smallJson = express.json({ limit: '100kb', strict: true })
   // Signed triggers are read as raw bytes (the signature covers them exactly as received) and capped at 16 kB.
   // Any Content-Type, or none, is read as the bytes sent; a Content-Encoding is refused (415), never inflated,
@@ -72,7 +77,8 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/v1/triggers', express.raw({ type: () => true, limit: '16kb', inflate: false }))
   app.use((req, res, next) => {
     if (req.originalUrl.startsWith('/api/v1/triggers/')) return next()
-    if (req.method === 'POST' && CHECKPOINT_PATH.test(req.originalUrl.split('?')[0] ?? '')) return next()
+    const path = req.originalUrl.split('?')[0] ?? ''
+    if (req.method === 'POST' && (CHECKPOINT_PATH.test(path) || UPLOAD_PATH.test(path))) return next()
     return smallJson(req, res, next)
   })
   if (deps.api) app.use('/api/v1', deps.api)

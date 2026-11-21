@@ -41,10 +41,16 @@ describe('the replies the worker accepts from the core', () => {
       savedSteps: [],
       expectedResultType: 'x',
       jobClass: 'interactive',
+      agent: 'summary',
+      filesHash: 'abc',
     }
     expect(replySchemas.startAttempt.safeParse(started).success).toBe(true)
     expect(replySchemas.startAttempt.safeParse({ ...started, token: undefined }).success).toBe(false)
     expect(replySchemas.startAttempt.safeParse({ ...started, jobClass: 'other' }).success).toBe(false)
+    expect(replySchemas.startAttempt.safeParse({ ...started, agent: null, filesHash: null }).success).toBe(
+      true,
+    )
+    expect(replySchemas.startAttempt.safeParse({ ...started, agent: undefined }).success).toBe(false)
   })
 
   it('rejects a checkpoint or result reply that is not understood', () => {
@@ -134,5 +140,65 @@ describe('the HTTP core client', () => {
         body: { reason: 'held' },
       },
     ])
+  })
+
+  it('reads a document as its stored type and bytes, and raises the core error when there is none', async () => {
+    const seen: { url: string; token?: string }[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({ url, token: (init.headers as Record<string, string>)['x-attempt-token'] })
+      return url.endsWith('/missing')
+        ? new Response(JSON.stringify({ error: { code: 'not_found', message: 'nothing' } }), { status: 404 })
+        : new Response(Buffer.from('%PDF-1.7 body'), {
+            status: 200,
+            headers: { 'content-type': 'application/pdf' },
+          })
+    })
+    const client = httpCoreClient('http://core.test', 'secret')
+    const got = await client.document('j1', 'tok', 'd1')
+    expect(got.mediaType).toBe('application/pdf')
+    expect(got.bytes.toString()).toBe('%PDF-1.7 body')
+    expect(seen[0]).toEqual({ url: 'http://core.test/api/v1/worker/jobs/j1/documents/d1', token: 'tok' })
+    await expect(client.document('j1', 'tok', 'missing')).rejects.toMatchObject({
+      status: 404,
+      code: 'not_found',
+    })
+  })
+  it("lists a job's documents and reads a part with its page range", async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', async (url: string) => {
+      seen.push(url)
+      if (url.endsWith('/documents')) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: 'd1',
+              fileName: 'a.pdf',
+              mediaType: 'application/pdf',
+              sizeBytes: 9,
+              parts: [{ partNo: 1, firstPage: 1, lastPage: 3, sizeBytes: 5 }],
+            },
+          ]),
+          { status: 200 },
+        )
+      }
+      return url.endsWith('/parts/9')
+        ? new Response(JSON.stringify({ error: { code: 'not_found', message: 'nothing' } }), { status: 404 })
+        : new Response(Buffer.from('%PDF part'), {
+            status: 200,
+            headers: { 'content-type': 'application/pdf', 'x-first-page': '4', 'x-last-page': '6' },
+          })
+    })
+    const client = httpCoreClient('http://core.test', 'secret')
+    expect((await client.documents('j1', 'tok'))[0]?.parts).toEqual([
+      { partNo: 1, firstPage: 1, lastPage: 3, sizeBytes: 5 },
+    ])
+    const part = await client.documentPart('j1', 'tok', 'd1', 2)
+    expect(part).toMatchObject({ firstPage: 4, lastPage: 6 })
+    expect(part.bytes.toString()).toBe('%PDF part')
+    expect(seen).toEqual([
+      'http://core.test/api/v1/worker/jobs/j1/documents',
+      'http://core.test/api/v1/worker/jobs/j1/documents/d1/parts/2',
+    ])
+    await expect(client.documentPart('j1', 'tok', 'd1', 9)).rejects.toMatchObject({ status: 404 })
   })
 })

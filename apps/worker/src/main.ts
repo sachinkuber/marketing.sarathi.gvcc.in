@@ -1,18 +1,24 @@
-import { initErrorTracking } from '@mkt/shared'
+import { agentFilesHash, initErrorTracking } from '@mkt/shared'
 import { openQueue, type JobClass } from '@mkt/queue'
 import { anthropicModel } from './anthropic.ts'
 import { loadWorkerConfig, type WorkerConfig } from './config.ts'
 import { httpCoreClient, type CoreClient } from './core-client.ts'
 import type { ModelClient } from './model.ts'
 import { DEFAULT_MAX_WAIT_SECONDS, startMaintenance } from './maintenance.ts'
-import { runJob, type JobHandler } from './runner.ts'
+import { runJob, type HandlerEntry } from './runner.ts'
 import { checkHandler } from './agents/check.ts'
-import { summaryHandler } from './agents/summary.ts'
+import {
+  RESEARCH_DIR,
+  RESEARCH_MERGE_DIR,
+  researchGroupHandler,
+  researchMergeHandler,
+} from './agents/research.ts'
+import { SUMMARY_DIR, summaryHandler } from './agents/summary.ts'
 
 export interface WorkerOptions {
   core: CoreClient
   model: ModelClient
-  handlers: Record<string, JobHandler>
+  handlers: Record<string, HandlerEntry>
   queueUrl: string
   workerId: string
   classes: JobClass[]
@@ -73,6 +79,25 @@ export async function startWorker(
   }
 }
 
+// The production registry. The summary handler runs on agents/summary/; the placeholder check loads no agent
+// files and makes no model call (ruling R3), so it names no agent.
+export function defaultHandlers(): Record<string, HandlerEntry> {
+  return {
+    'summary.v1': { handler: summaryHandler, agent: 'summary', filesHash: agentFilesHash(SUMMARY_DIR) },
+    'research_group.v1': {
+      handler: researchGroupHandler,
+      agent: 'research',
+      filesHash: agentFilesHash(RESEARCH_DIR),
+    },
+    'research.v1': {
+      handler: researchMergeHandler,
+      agent: 'research_merge',
+      filesHash: agentFilesHash(RESEARCH_MERGE_DIR),
+    },
+    'placeholder_check.v1': { handler: checkHandler, agent: null, filesHash: null },
+  }
+}
+
 // What the stand-in answers when the worker runs it as a process (the compose stack test, the load test): a
 // result the summary contract accepts, so runs finish instead of being retried and dead-lettered.
 const STANDIN_SUMMARY = JSON.stringify({
@@ -99,10 +124,7 @@ if (import.meta.main) {
   const config = loadWorkerConfig(process.env)
   // First thing once the DSN is known: the config load is the only earlier step, and it never reports a value.
   initErrorTracking({ dsn: config.sentryDsn, service: 'worker', release: config.release ?? 'dev' })
-  const handlers: Record<string, JobHandler> = {
-    'summary.v1': summaryHandler,
-    'placeholder_check.v1': checkHandler,
-  }
+  const handlers = defaultHandlers()
   const model = await chooseModel(config)
   const worker = await startWorker({
     core: httpCoreClient(config.coreUrl, config.workerSecret),

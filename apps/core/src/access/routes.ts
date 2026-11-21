@@ -21,7 +21,7 @@ export type Access =
   | { kind: 'attempt' } // the worker credential and an attempt token
   | { kind: 'trigger' } // a signed call from n8n
 
-export type Method = 'get' | 'post' | 'patch' | 'delete'
+export type Method = 'get' | 'post' | 'put' | 'patch' | 'delete'
 
 export interface RouteDeclaration {
   method: Method

@@ -12,10 +12,18 @@ export const agentDefinitionSchema = z.strictObject({
   resultType: z.string().regex(/^[a-z_]+\.v[0-9]+$/),
   tools: z
     .array(
-      z.strictObject({
-        type: z.enum(['web_search_20260209', 'web_fetch_20260209']),
-        maxUses: z.number().int().min(1).max(50),
-      }),
+      z
+        .strictObject({
+          type: z.enum(['web_search_20260209', 'web_fetch_20260209']),
+          maxUses: z.number().int().min(1).max(50),
+          // web_fetch only: the most text of one fetched page the provider gives the model (its
+          // max_content_tokens), so one large page or PDF cannot fill a step's checkpoint (R42).
+          maxContentTokens: z.number().int().min(1000).max(100000).optional(),
+        })
+        .refine((tool) => tool.maxContentTokens === undefined || tool.type === 'web_fetch_20260209', {
+          message: 'only web_fetch_20260209 takes it',
+          path: ['maxContentTokens'],
+        }),
     )
     .optional(),
   caps: z

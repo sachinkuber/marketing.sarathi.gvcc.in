@@ -1,0 +1,14 @@
+{
+  "agent": "research",
+  "version": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "maxTokens": 16000,
+  "jobClass": "production",
+  "resultType": "research_group.v1",
+  "tools": [
+    { "type": "web_search_20260209", "maxUses": 20 },
+    { "type": "web_fetch_20260209", "maxUses": 30, "maxContentTokens": 40000 }
+  ],
+  "caps": { "searchesPerJob": 20, "fetchesPerJob": 30, "searchesPerBrandStep": 150 }
+}

@@ -24,6 +24,7 @@ const CHECKS = [
   'forged-sign-in',
   'delete-body',
   'checkpoint-body',
+  'document-body',
 ]
 const triggerSecret = randomBytes(32).toString('hex')
 let dir
@@ -149,6 +150,12 @@ test('a forged CF-Connecting-IP or X-Forwarded-For that is believed fails both l
 
 test('a DELETE whose body does not reach the core fails', async () => {
   assertOnlyFailed(await smokeAgainst({ faults: { dropDeleteBody: true } }), ['delete-body'])
+})
+
+test('a proxy that refuses a 2 MiB document upload fails', async () => {
+  const out = await smokeAgainst({ faults: { documentsBodyLimit: 1024 * 1024 } })
+  assertOnlyFailed(out, ['document-body'])
+  assert.match(out.stdout, /FAIL +document-body .*413/)
 })
 
 test('a proxy that refuses a 900 kB checkpoint body fails', async () => {

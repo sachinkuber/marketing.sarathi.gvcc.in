@@ -38,7 +38,7 @@ const modelCalls = new Map<string, number>()
 let gate: { entered: () => void; release: Promise<void> } | null = null
 const model: ModelClient = {
   async send(request) {
-    const jobId = request.messages[0]!.content
+    const jobId = request.messages[0]!.content as string
     modelCalls.set(jobId, (modelCalls.get(jobId) ?? 0) + 1)
     if (gate) {
       const g = gate
@@ -50,7 +50,14 @@ const model: ModelClient = {
       messageId: `msg_${Math.random().toString(36).slice(2, 10)}`,
       requestId: null,
       stopReason: 'end_turn',
-      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        serverToolSearches: 0,
+        serverToolFetches: 0,
+      },
     }
   },
 }
@@ -79,7 +86,7 @@ async function startTestWorker(id: string): Promise<void> {
   worker = await startWorker({
     core: httpCoreClient(stack.server.url, jobs.workerSecret),
     model,
-    handlers: { [RESULT_TYPE]: oneStep },
+    handlers: { [RESULT_TYPE]: { handler: oneStep, agent: null, filesHash: null } },
     queueUrl: stack.db.urlFor('queue'),
     workerId: id,
     classes: ['interactive'],
@@ -182,6 +189,18 @@ async function queueRows(jobId: string): Promise<string[]> {
     [jobId],
   )
   return rows.map((r) => r.state)
+}
+
+// A job's queue rows once none is waiting or running. The core marks a job finished inside the worker's result
+// post; the library completes the queue row only after the worker's handler returns, a few milliseconds later.
+// So a row read as soon as the job is finished can still be active.
+async function settledQueueRows(jobId: string): Promise<string[]> {
+  let states: string[] = []
+  await until(async () => {
+    states = await queueRows(jobId)
+    return states.every((s) => s === 'completed' || s === 'cancelled' || s === 'failed')
+  })
+  return states
 }
 
 async function finished(ids: string[]): Promise<number> {
@@ -394,7 +413,7 @@ describe('test 31: the kill switch set while a job is running', () => {
     expect(applied.filter((id) => id === jobId)).toHaveLength(1)
     // The step was checkpointed by the held attempt, so the new attempt makes no second model call.
     expect(modelCalls.get(jobId)).toBe(1)
-    expect(await queueRows(jobId)).toEqual(['completed', 'completed'])
+    expect(await settledQueueRows(jobId)).toEqual(['completed', 'completed'])
   }, 240_000)
 })
 
