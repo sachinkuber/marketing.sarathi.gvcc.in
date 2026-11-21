@@ -233,3 +233,28 @@ describe('the draft profile, driven', () => {
     expect(dom.text()).toContain('Only the platform owner')
   })
 })
+
+describe('the draft profile links on to the questionnaire', () => {
+  const dom = new Dom()
+  beforeEach(() => dom.start())
+  afterEach(() => dom.stop())
+  const link = () =>
+    dom.host.querySelector(`a[href="/b/${brandId}/onboarding/questionnaire"]`)?.textContent ?? null
+
+  it('shows Next: the questionnaire once nothing is open, and not before', async () => {
+    dom.replies.push(
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [item('business_name')] } },
+    )
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+    expect(link()).toBeNull()
+    dom.stop()
+    dom.start()
+    dom.replies.push(
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [item('business_name', { decision: 'accepted' })] } },
+    )
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+    expect(link()).toBe('Next: the questionnaire')
+  })
+})

@@ -404,11 +404,16 @@ describe('onboarding screens, driven', () => {
     )
   })
 
-  it('Continue leads to the questionnaire at the profile and questionnaire steps', async () => {
-    for (const step of ['profile', 'questionnaire']) {
-      dom.replies.push({ status: 200, body: overview({ step }) })
+  it('Continue leads to the draft profile while suggestions are open, then to the questionnaire', async () => {
+    const cases: [string, number, string][] = [
+      ['profile', 3, 'profile'],
+      ['profile', 0, 'questionnaire'],
+      ['questionnaire', 0, 'questionnaire'],
+    ]
+    for (const [step, openSuggestions, where] of cases) {
+      dom.replies.push({ status: 200, body: overview({ step, openSuggestions }) })
       await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
-      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/questionnaire"]`)?.textContent).toBe(
+      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/${where}"]`)?.textContent).toBe(
         'Continue',
       )
       dom.stop()

@@ -64,6 +64,8 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const chains = useRef(new Map<string, Promise<boolean>>())
   const live = useRef(true)
+  // Questions the owner has changed; a suggestion left alone is not one of them.
+  const touched = useRef(new Set<string>())
 
   const [confirming, setConfirming] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -174,6 +176,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   )
 
   function change(id: string, value: string) {
+    touched.current.add(id)
     valuesRef.current = { ...valuesRef.current, [id]: value }
     setValues(valuesRef.current)
     setStatus((s) => ({ ...s, [id]: { kind: 'pending' } }))
@@ -200,8 +203,11 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
 
   const questions = data?.questionnaire?.questions ?? []
   const shown = (q: Question) => valuesRef.current[q.id] ?? values[q.id] ?? startValue(q)
-  const answered = questions.filter((q) => (values[q.id] ?? startValue(q)).trim() !== '').length
-  const blank = questions.length - answered
+  // Three kinds: the owner's own answers (typed, chosen, or saved before), suggestions left as they were, blanks.
+  const filled = questions.filter((q) => (values[q.id] ?? startValue(q)).trim() !== '')
+  const kept = filled.filter((q) => q.answer === null && !touched.current.has(q.id)).length
+  const answered = filled.length - kept
+  const blank = questions.length - filled.length
 
   async function finish() {
     setFinishing(true)
@@ -345,7 +351,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
               ) : null}
               {confirming ? (
                 <>
-                  <p>{`${answered} answered, ${blank} blank. Blank questions stay unanswered. Finish now?`}</p>
+                  <p>{`${answered} answered by you, ${kept} suggested ${kept === 1 ? 'answer' : 'answers'} kept, ${blank} left blank. The kept suggestions become your answers. Finish now?`}</p>
                   <div className="wrap-row">
                     <button
                       className="btn primary onb-touch"

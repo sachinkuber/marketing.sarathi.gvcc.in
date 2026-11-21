@@ -18,12 +18,13 @@ const STEP_WORD: Record<string, string> = {
   choice: 'Choices',
 }
 
-// Where Continue leads: intake until research has started, progress while it runs, then the questionnaire (at
-// the profile and questionnaire steps). The draft profile stays one click away from the questionnaire's page.
-function nextPath(brandId: string, step: string): string {
+// Where Continue leads: intake until research has started, progress while it runs, then the draft profile while
+// suggestions wait, then the questionnaire.
+function nextPath(brandId: string, step: string, openSuggestions: number): string {
   const base = `/b/${brandId}/onboarding`
   if (step === 'intake') return `${base}/intake`
   if (step === 'research') return `${base}/research`
+  if (step === 'profile' && openSuggestions > 0) return `${base}/profile`
   if (step === 'profile' || step === 'questionnaire') return `${base}/questionnaire`
   return `${base}/profile`
 }
@@ -69,7 +70,7 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
             <p className="sub">{costWords(data.cost)}</p>
           </div>
           <div>
-            <Link className="btn primary onb-touch" href={nextPath(brandId, data.step)}>
+            <Link className="btn primary onb-touch" href={nextPath(brandId, data.step, data.openSuggestions)}>
               Continue
             </Link>
           </div>

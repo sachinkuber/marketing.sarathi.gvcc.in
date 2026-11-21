@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
@@ -314,6 +315,13 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
             </div>
           ) : null}
           {topics.length === 0 ? <p className="sub">Nothing is waiting for your decision.</p> : null}
+          {ordered.every((i) => i.decision !== null) ? (
+            <div>
+              <Link className="btn primary onb-touch" href={`/b/${brandId}/onboarding/questionnaire`}>
+                Next: the questionnaire
+              </Link>
+            </div>
+          ) : null}
           {topics.map((topic) => (
             <section key={topic.heading} className="panel" aria-label={topic.heading}>
               <h2 className="pad onb-h">{topic.heading}</h2>

@@ -121,12 +121,12 @@ describe('the questionnaire screen, driven', () => {
   it('finish shows answered and blank counts and is refused politely when already finished', async () => {
     await open(asking([question('q1', { answer: 'Aztek' }), question('q2', { position: 2 })]))
     await dom.click('Finish questionnaire')
-    expect(dom.text()).toContain('1 answered, 1 blank.')
+    expect(dom.text()).toContain('1 answered by you, 0 suggested answers kept, 1 left blank.')
     expect(dom.writes()).toEqual([])
 
     // A save still waiting is sent before the finish, and the counts follow what is typed.
     dom.type('a-q2', 'Pune')
-    expect(dom.text()).toContain('2 answered, 0 blank.')
+    expect(dom.text()).toContain('2 answered by you, 0 suggested answers kept, 0 left blank.')
     dom.replies.push(
       { status: 200, body: { answered: true } },
       { status: 200, body: { answered: 2, blank: 0 } },
@@ -160,6 +160,33 @@ describe('the questionnaire screen, driven', () => {
     expect(dom.text()).toContain(FINISHED_WORDS)
     expect(dom.text()).toContain('This questionnaire is finished. Its answers are kept.')
     expect(push).not.toHaveBeenCalled()
+  })
+
+  it('finish states the owner answers, the kept suggestions and the blanks separately', async () => {
+    await open(
+      asking([
+        question('q1', { answer: 'Aztek' }),
+        question('q2', { position: 2, suggestedAnswer: 'Pune' }),
+        question('q3', { position: 3, suggestedAnswer: 'Goa' }),
+        question('q4', { position: 4 }),
+      ]),
+    )
+    dom.type('a-q3', 'Goa, India')
+    await dom.click('Finish questionnaire')
+    expect(dom.text()).toContain(
+      '2 answered by you, 1 suggested answer kept, 1 left blank. The kept suggestions become your answers.',
+    )
+    dom.replies.push(
+      { status: 200, body: { answered: true } },
+      { status: 200, body: { answered: true } },
+      { status: 200, body: { answered: 3, blank: 1 } },
+    )
+    await dom.click('Yes, finish')
+    expect(dom.writes().map((w) => w.url)).toEqual([
+      `${base}/questionnaire/answers/q2`,
+      `${base}/questionnaire/answers/q3`,
+      `${base}/questionnaire/finish`,
+    ])
   })
 
   it('the questionnaire is owner-only', async () => {
