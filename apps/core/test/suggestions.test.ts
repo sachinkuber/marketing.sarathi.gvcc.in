@@ -96,7 +96,7 @@ describe('suggest then decide', () => {
       {
         step: 'fact',
         key: 'founded',
-        proposed: { statement: 'Founded in 1999', reviewDate: '2027-06-01' },
+        proposed: { statement: 'Founded in 1999', reviewDate: '2099-06-01' },
         sourceIds: [weak],
       },
     ])
@@ -114,7 +114,7 @@ describe('suggest then decide', () => {
     )[0]
     expect(fact.statement).toBe(wording)
     expect(fact.confirmed_by).toBe(ownerId)
-    expect(fact.review_date.toISOString().slice(0, 10)).toBe('2027-06-01')
+    expect(fact.review_date.toISOString().slice(0, 10)).toBe('2099-06-01')
     expect(fact.source_ids).toHaveLength(2)
     const added = await rows(
       `select kind, extract from app.research_source where brand_id = $1 and id = any($2::uuid[]) and kind = 'owner_statement'`,
@@ -131,7 +131,7 @@ describe('suggest then decide', () => {
       {
         step: 'fact',
         key: 'weak',
-        proposed: { statement: 'X', reviewDate: '2027-01-01' },
+        proposed: { statement: 'X', reviewDate: '2099-01-01' },
         sourceIds: sources,
       },
     ])
@@ -184,7 +184,7 @@ describe('suggest then decide', () => {
       {
         step: 'fact',
         key: 'ok',
-        proposed: { statement: 'Open daily', reviewDate: '2027-01-01' },
+        proposed: { statement: 'Open daily', reviewDate: '2099-01-01' },
         sourceIds: [s],
       },
     ])

@@ -222,6 +222,8 @@ export async function decideWithin(
     suggestionId: string
     decision: Decision
     value?: unknown
+    reviewDate?: string
+    today?: string
     reason?: string
     actor: { userId: string }
     ownAddition?: boolean
@@ -230,6 +232,10 @@ export async function decideWithin(
   if (input.value !== undefined && input.decision !== 'edited')
     throw new AppError(400, 'invalid_request', 'The request is not valid.', [
       { part: 'body', path: 'value', message: 'value is only used with "edited"' },
+    ])
+  if (input.reviewDate !== undefined && input.decision !== 'accepted')
+    throw new AppError(400, 'invalid_request', 'The request is not valid.', [
+      { part: 'body', path: 'reviewDate', message: 'reviewDate is only used with "accepted"' },
     ])
   const found = await client.query<SuggestionRow>(
     `select id, step, key, proposed, why, source_ids, confidence, decision, superseded_by
@@ -243,6 +249,10 @@ export async function decideWithin(
   if (row.superseded_by)
     throw new AppError(409, 'superseded', 'A newer run replaced this suggestion. Decide the newer one.')
 
+  if (input.reviewDate !== undefined && row.step !== 'fact')
+    throw new AppError(400, 'invalid_request', 'The request is not valid.', [
+      { part: 'body', path: 'reviewDate', message: 'reviewDate is only used with a fact' },
+    ])
   const accepted = input.decision !== 'rejected'
   const chosen = input.decision === 'edited' ? input.value : row.proposed
   let createdId: string | null = null
@@ -297,14 +307,27 @@ export async function decideWithin(
 
 async function writeFact(
   client: PoolClient,
-  input: { brandId: string; decision: Decision; actor: { userId: string } },
+  input: {
+    brandId: string
+    decision: Decision
+    actor: { userId: string }
+    reviewDate?: string
+    today?: string
+    ownAddition?: boolean
+  },
   row: SuggestionRow,
   chosen: unknown,
 ): Promise<string> {
   const statement = textOf(chosen, 'statement')
   if (!statement) throw invalid('Give the fact as a statement, in plain text.')
   const proposedDate = isObject(row.proposed) ? row.proposed.reviewDate : undefined
-  const given = isObject(chosen) && chosen.reviewDate !== undefined ? chosen.reviewDate : proposedDate
+  // A date sent with a plain accept is the owner's change of date only: the wording and the sources stay the agent's.
+  const given =
+    input.reviewDate !== undefined
+      ? input.reviewDate
+      : isObject(chosen) && chosen.reviewDate !== undefined
+        ? chosen.reviewDate
+        : proposedDate
   // Round-tripping rejects a date the calendar does not have, such as 2026-02-30.
   const realDate = (value: string): boolean => {
     const parsed = new Date(`${value}T00:00:00Z`)
@@ -314,7 +337,14 @@ async function writeFact(
     throw new AppError(
       422,
       'review_date_needed',
-      'This fact needs a review date. Give one as reviewDate in the form YYYY-MM-DD.',
+      'This fact needs a review date after today. Give a real date in the form YYYY-MM-DD.',
+    )
+  // An own addition was checked against the service clock at its route.
+  if (!input.ownAddition && given <= (input.today ?? new Date().toISOString().slice(0, 10)))
+    throw new AppError(
+      422,
+      'review_date_needed',
+      'This fact needs a review date after today. Give a real date in the form YYYY-MM-DD.',
     )
   // Before anything is written, so a refusal leaves the transaction clean (accept-all carries on).
   await refuseActiveFactTwin(client, input.brandId, statement)
@@ -332,7 +362,7 @@ async function writeFact(
     throw new AppError(
       422,
       'fact_needs_source',
-      'A fact needs a source from the brand site or an uploaded document. Edit it to state it in your own words, or reject it.',
+      'A fact needs a source from the brand site or an uploaded document. Edit it to state it in your own words, or drop it.',
     )
 
   const sourceIds = [...row.source_ids]
@@ -382,6 +412,8 @@ export async function decideSuggestion(
     brandId: string
     suggestionId: string
     decision: Decision
+    reviewDate?: string
+    today?: string
     value?: unknown
     reason?: string
     actor: { userId: string }
@@ -451,6 +483,7 @@ export interface SourceView {
   kind: SourceKind
   address: string | null
   readAt: string
+  documentName: string | null
   extract: string
   flagged: { reason: string } | null
 }
@@ -475,6 +508,8 @@ export interface SuggestionView {
 // they were read, for sourceViews below.
 export const sourcesJson = (row: string, ids: string) =>
   `coalesce((select json_agg(json_build_object('id', r.id, 'kind', r.kind, 'address', r.address,
+                                             'documentName', (select d.file_name from app.brand_document d
+                                                              where d.brand_id = r.brand_id and d.id = r.document_id),
                                              'readAt', r.read_at, 'extract', r.extract)
                       order by r.read_at, r.id)
               from app.research_source r
@@ -486,6 +521,7 @@ export function sourceViews(sources: unknown): SourceView[] {
       id: string
       kind: SourceKind
       address: string | null
+      documentName: string | null
       readAt: string
       extract: string
     }[]

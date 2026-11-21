@@ -23,6 +23,7 @@ const source = (over: Record<string, unknown> = {}) => ({
   id: 's1',
   kind: 'site',
   address: 'https://aztek.example/about',
+  documentName: null,
   readAt: '2026-11-20T08:30:00.000Z',
   extract: 'Aztek makes water pumps in Pune.',
   flagged: null,

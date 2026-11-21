@@ -42,11 +42,12 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
   const load = useLoad(() => api(onboardingReply, 'GET', `/brands/${brandId}/onboarding`), brandId)
   // The questions agents asked and are waiting on. Read apart from the overview: if it fails the overview still shows.
   const [asked, setAsked] = useState<Asked[]>([])
+  const [askedFailed, setAskedFailed] = useState(false)
   useEffect(() => {
     let on = true
     api(agentQuestionsReply, 'GET', `/brands/${brandId}/onboarding/agent-questions`).then(
       (list) => on && setAsked(list.questions.filter((q) => q.answer === null)),
-      () => {},
+      () => on && setAskedFailed(true),
     )
     return () => {
       on = false
@@ -79,17 +80,28 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
                 ? data.intake
                   ? 'Start research when the intake is right.'
                   : 'Save the intake: at least the website.'
-                : data.openSuggestions > 0
-                  ? `${data.openSuggestions} ${data.openSuggestions === 1 ? 'suggestion waits' : 'suggestions wait'} for your decision.`
-                  : data.step === 'research'
+                : [
+                    asked.length > 0 &&
+                      `${asked.length} ${asked.length === 1 ? 'question waits' : 'questions wait'} for your answer.`,
+                    data.openSuggestions > 0 &&
+                      `${data.openSuggestions} ${data.openSuggestions === 1 ? 'suggestion waits' : 'suggestions wait'} for your decision.`,
+                  ]
+                    .filter(Boolean)
+                    .join(' ') ||
+                  (data.step === 'research'
                     ? 'Nothing yet. The research is still running or has just finished.'
-                    : 'Nothing is waiting.'}
+                    : 'Nothing is waiting.')}
             </p>
           </div>
           <div>
             <b>Cost so far</b>
             <p className="sub">{costWords(data.cost)}</p>
           </div>
+          {askedFailed ? (
+            <p className="callout warn" role="status">
+              Questions from the agents could not be read. Reload the page to see them.
+            </p>
+          ) : null}
           {asked.map((q) => (
             <AgentQuestion key={q.id} brandId={brandId} question={q} />
           ))}

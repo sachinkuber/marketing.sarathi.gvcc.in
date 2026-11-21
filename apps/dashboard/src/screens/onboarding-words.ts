@@ -161,3 +161,36 @@ export const RULE_KIND_WORD: Record<string, string> = {
   tone_limit: 'tone limit',
   pause_dates: 'pause dates',
 }
+
+// A date as the screens show it: "1 Jan 2027". Dates of record (a review date) are calendar days, read as such.
+export const dayOn = (iso: string): string =>
+  new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: iso.length === 10 ? 'UTC' : 'Asia/Kolkata',
+  })
+
+// The first day a review date may have: tomorrow, UTC, as the core counts it.
+export const tomorrow = (): string => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
+
+// What kind of thing a source is, in a word or two.
+export const SOURCE_KIND_WORD: Record<string, string> = {
+  site: 'Your site',
+  document: 'Document',
+  social: 'Social',
+  search: 'Search',
+  competitor: 'Competitor page',
+  owner_statement: 'Stated by you',
+}
+
+// failureWords, except that a refused field says what is wrong with it: the core's per-field messages.
+export function refusalWords(error: unknown, otherwise: string): string {
+  if (error instanceof ApiError && error.code === 'invalid_request' && Array.isArray(error.details)) {
+    const messages = (error.details as { message?: unknown }[])
+      .map((d) => (typeof d.message === 'string' ? d.message : ''))
+      .filter((m) => m !== '')
+    if (messages.length > 0) return messages.join(' ')
+  }
+  return failureWords(error, otherwise)
+}

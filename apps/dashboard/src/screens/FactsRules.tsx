@@ -16,15 +16,25 @@ import {
 } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
-import { SourceRow } from './DraftProfile'
+import { Ask, SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
-import { OWNER_ONLY, RULE_KIND_WORD, failureWords, isForbidden } from './onboarding-words'
+import {
+  OWNER_ONLY,
+  RULE_KIND_WORD,
+  dayOn,
+  failureWords,
+  isForbidden,
+  refusalWords,
+  tomorrow,
+} from './onboarding-words'
 
 type Reply = z.infer<typeof factsRulesReply>
 type Item = z.infer<typeof suggestionItem>
 type Source = Item['sources'][number]
 type Asked = z.infer<typeof agentQuestion>
-type Decision = { decision: 'accepted' | 'rejected' } | { decision: 'edited'; value: Record<string, string> }
+type Decision =
+  | { decision: 'accepted' | 'rejected'; reviewDate?: string }
+  | { decision: 'edited'; value: Record<string, string> }
 
 // How often the screen asks again while the facts and rules job runs or waits.
 export const POLL_MS = 5000
@@ -74,7 +84,7 @@ function useSender(onChanged: () => void) {
     } catch (e) {
       if (e instanceof ApiError && STALE.has(e.code)) onChanged()
       setCode(e instanceof ApiError ? e.code : null)
-      setError(failureWords(e, otherwise))
+      setError(refusalWords(e, otherwise))
       return false
     } finally {
       sending.current = false
@@ -93,50 +103,6 @@ function Sources({ sources, id }: { sources: Source[]; id: string }) {
         <SourceRow key={s.id} source={s} />
       ))}
     </ul>
-  )
-}
-
-// Asks once, then does it.
-function Ask(props: {
-  label: string
-  question: string
-  yes: string
-  danger?: boolean
-  busy: boolean
-  onYes: () => void
-}) {
-  const [asking, setAsking] = useState(false)
-  if (!asking)
-    return (
-      <button
-        className={`btn onb-touch${props.danger ? ' danger' : ''}`}
-        type="button"
-        disabled={props.busy}
-        onClick={() => setAsking(true)}
-      >
-        {props.label}
-      </button>
-    )
-  return (
-    <div className="stack">
-      <p className="onb-wrap">{props.question}</p>
-      <div style={row}>
-        <button
-          className="btn danger onb-touch"
-          type="button"
-          disabled={props.busy}
-          onClick={() => {
-            props.onYes()
-            setAsking(false)
-          }}
-        >
-          {props.yes}
-        </button>
-        <button className="btn onb-touch" type="button" onClick={() => setAsking(false)}>
-          Keep it
-        </button>
-      </div>
-    </div>
   )
 }
 
@@ -187,6 +153,7 @@ function FactCard({ item, base, onChanged }: { item: Item; base: string; onChang
           id={`date-${item.id}`}
           className="input"
           type="date"
+          min={tomorrow()}
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />
@@ -219,7 +186,7 @@ function FactCard({ item, base, onChanged }: { item: Item; base: string; onChang
                 void decide(
                   date === suggestedDate
                     ? { decision: 'accepted' }
-                    : { decision: 'edited', value: { statement, reviewDate: date } },
+                    : { decision: 'accepted', reviewDate: date },
                 )
               }
             >
@@ -377,7 +344,7 @@ function ActiveFact({
   return (
     <li className="dp-item" data-id={fact.id}>
       <p className="dp-value onb-wrap">{fact.statement}</p>
-      <p className="muted small">{`Review by ${fact.reviewDate}`}</p>
+      <p className="muted small">{`Review by ${dayOn(fact.reviewDate)}`}</p>
       <Sources sources={fact.sources} id={fact.id} />
       {replacing ? (
         <div className="stack">
@@ -397,6 +364,7 @@ function ActiveFact({
               id={`replace-${fact.id}-date`}
               className="input"
               type="date"
+              min={tomorrow()}
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
@@ -522,6 +490,7 @@ function AddFact({ base, onChanged }: { base: string; onChanged: () => void }) {
           id="own-fact-date"
           className="input"
           type="date"
+          min={tomorrow()}
           value={date}
           onChange={(e) => setDate(e.target.value)}
         />
@@ -656,7 +625,7 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
           if (!on) return
           const open = list.questions.filter((q) => q.answer === null)
           const found = open.find((q) => q.id === fresh.job?.questionId) ?? open[0]
-          if (found) setAsked(found)
+          setAsked(found ?? null)
         } else {
           setAsked(null)
         }
@@ -758,7 +727,7 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
                 {job?.state === 'failed'
                   ? 'Facts and rules could not be written. Start them again. If they fail again, check that the facts and rules agent has a live release.'
                   : facts.length + rules.length > 0
-                    ? 'Start again to look for more facts and rules from the latest profile and answers.'
+                    ? 'Start again to look for more facts and rules from the latest profile and answers. Suggestions still waiting for your decision are replaced by the new ones; what you confirmed stays.'
                     : 'The platform reads the confirmed profile and your answers, and suggests facts and safety rules.'}
               </p>
               <Problem text={startError} />

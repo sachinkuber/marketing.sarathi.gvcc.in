@@ -96,9 +96,19 @@ const decisionBody = z
   .strictObject({
     decision: z.enum(['accepted', 'edited', 'rejected']),
     value: z.unknown().optional(),
+    // A fact confirmed as it stands but reviewed on another date; its wording and sources stay the agent's.
+    reviewDate: z.iso.date({ error: REVIEW_DATE }).optional(),
     reason: z.string().max(2000).optional(),
   })
   .superRefine((b, ctx) => {
+    if (b.reviewDate !== undefined && b.decision !== 'accepted') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reviewDate'],
+        message: 'reviewDate is only used with "accepted"',
+      })
+      return
+    }
     if (b.value !== undefined && b.decision !== 'edited') {
       ctx.addIssue({ code: 'custom', path: ['value'], message: 'value is only used with "edited"' })
       return
@@ -501,6 +511,8 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
             decision: body.decision,
             value: body.value,
             reason: body.reason,
+            reviewDate: body.reviewDate,
+            today: (deps.now ?? (() => new Date()))().toISOString().slice(0, 10),
             actor: { userId: principalOf(res).userId },
           }),
         )

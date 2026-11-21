@@ -543,6 +543,7 @@ describe('the result', () => {
             id: f.site,
             kind: 'site',
             address: 'https://aztek.example/about',
+            documentName: null,
             readAt: expect.any(String),
             extract: 'Aztek coats cars in Pune.',
             flagged: null,
@@ -1377,5 +1378,119 @@ describe('the review date and the rule kind (ruling R22)', () => {
       })
       expect(later.status, JSON.stringify(later.json)).toBe(200)
     })
+  })
+})
+
+describe('a fact confirmed with a changed review date, and a rule edited (R27)', () => {
+  const suggested = async (f: Fresh, step: string) =>
+    (await suggestionsOf(f.brandId)).find((s) => s.step === step)!
+
+  it('a competitor-only fact accepted with a review date is still refused: no source, no fact', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([fact('Aztek gives a 15-year warranty.', [f.competitor])]))
+    const s = await suggested(f, 'fact')
+    expect(s.confidence).toBe('assumed')
+    const before = (
+      await q('select count(*)::int as n from app.research_source where brand_id = $1', [f.brandId])
+    )[0].n
+    const refused = await decide(f.brandId, s.id, { decision: 'accepted', reviewDate: day(100) })
+    expect(refused.status).toBe(422)
+    expect(refused.json.error.code).toBe('fact_needs_source')
+    expect(refused.json.error.message).toContain('drop it')
+    expect((await q('select id from app.verified_fact where brand_id = $1', [f.brandId])).length).toBe(0)
+    expect(
+      (await q('select count(*)::int as n from app.research_source where brand_id = $1', [f.brandId]))[0].n,
+    ).toBe(before)
+  })
+
+  it('a site-sourced fact accepted with a review date takes the date and nothing else changes', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([fact('Aztek coats cars in Pune.', [f.site], day(365))]))
+    const s = await suggested(f, 'fact')
+    const before = (
+      await q('select count(*)::int as n from app.research_source where brand_id = $1', [f.brandId])
+    )[0].n
+    const reviewDate = day(100)
+    const done = await decide(f.brandId, s.id, { decision: 'accepted', reviewDate })
+    expect(done.status, JSON.stringify(done.json)).toBe(200)
+    const made = (
+      await q(
+        'select statement, source_ids, review_date::text as review_date from app.verified_fact where id = $1',
+        [done.json.createdId],
+      )
+    )[0]
+    expect(made).toMatchObject({
+      statement: 'Aztek coats cars in Pune.',
+      source_ids: [f.site],
+      review_date: reviewDate,
+    })
+    expect(
+      (await q('select count(*)::int as n from app.research_source where brand_id = $1', [f.brandId]))[0].n,
+    ).toBe(before)
+    const audit = await q(
+      `select detail from audit.log where action = 'onboarding.suggestion_decided' and subject = $1`,
+      [s.id],
+    )
+    expect(audit.map((r) => r.detail)).toEqual([expect.objectContaining({ decision: 'accepted' })])
+    expect((await suggested(f, 'fact')).decision).toBe('accepted')
+  })
+
+  it('a review date not after today on a decision gets the date error, and nothing is written', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([fact('Aztek coats cars in Pune.', [f.site], day(365))]))
+    const s = await suggested(f, 'fact')
+    for (const body of [
+      { decision: 'accepted', reviewDate: day(-3) },
+      { decision: 'accepted', reviewDate: day(0) },
+      { decision: 'edited', value: { statement: 'Own words.', reviewDate: day(-3) } },
+    ]) {
+      const refused = await decide(f.brandId, s.id, body)
+      expect(refused.status).toBe(422)
+      expect(refused.json.error.code).toBe('review_date_needed')
+      expect(refused.json.error.message).not.toContain('reviewDate')
+    }
+    // A date that is not a date, or sent with another decision, is a bad request.
+    expect((await decide(f.brandId, s.id, { decision: 'accepted', reviewDate: 'soon' })).status).toBe(400)
+    expect((await decide(f.brandId, s.id, { decision: 'rejected', reviewDate: day(5) })).status).toBe(400)
+    expect((await q('select id from app.verified_fact where brand_id = $1', [f.brandId])).length).toBe(0)
+    expect((await suggested(f, 'fact')).decision).toBeNull()
+  })
+
+  it('an edited rule stores the changed kind, text and why', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([], [rule('forbidden_word', 'Cheap', [f.statements[1]!])]))
+    const s = await suggested(f, 'rule')
+    const done = await decide(f.brandId, s.id, {
+      decision: 'edited',
+      value: { kind: 'forbidden_claim', text: 'Cheapest in Pune', why: 'We cannot prove it.' },
+    })
+    expect(done.status, JSON.stringify(done.json)).toBe(200)
+    const made = (
+      await q('select kind, text, why from app.safety_rule where id = $1', [done.json.createdId])
+    )[0]
+    expect(made).toEqual({ kind: 'forbidden_claim', text: 'Cheapest in Pune', why: 'We cannot prove it.' })
+  })
+
+  it('a document source is read with its file name', async () => {
+    const f = await fresh()
+    const doc = await q(
+      `insert into app.brand_document (brand_id, file_name, media_type, bytes, size_bytes, sha256, uploaded_by)
+       values ($1, 'brochure.pdf', 'application/pdf', '\\x255044462d', 5, 'h', $2) returning id`,
+      [f.brandId, ownerId],
+    )
+    const brochure = await source(f.brandId, 'document', 'Certified by the Guild.', {
+      address: 'brochure.pdf, pages 1-4',
+      documentId: doc[0].id,
+    })
+    const { jobId } = await started(f.brandId)
+    await post(jobId, result([fact('Certified by the Guild.', [brochure, f.statements[0]!])]))
+    const view = await read(f.brandId)
+    const sources = view.facts.suggestions[0].sources as { kind: string; documentName: string | null }[]
+    expect(sources.find((s) => s.kind === 'document')?.documentName).toBe('brochure.pdf')
+    expect(sources.find((s) => s.kind === 'owner_statement')?.documentName).toBeNull()
   })
 })

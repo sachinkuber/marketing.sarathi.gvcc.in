@@ -14,7 +14,8 @@ const base = `/api/v1/brands/${brandId}/onboarding`
 const T = '2026-11-20T10:00:00.000Z'
 const source = (id: string, over: Record<string, unknown> = {}) => ({
   id,
-  kind: 'website_page',
+  kind: 'site',
+  documentName: null,
   address: `https://aztek.example/${id}`,
   readAt: T,
   extract: `Extract of ${id}`,
@@ -118,15 +119,108 @@ describe('the facts and rules screen, driven', () => {
     })
   })
 
-  it('a changed review date on Confirm is sent as an edit', async () => {
+  it('a changed review date on Confirm is a plain accept with the date, never an edit (R27)', async () => {
     await open(reply({ facts: [fact('f1')] }))
+    expect(dom.field('date-f1')?.getAttribute('min')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     dom.type('date-f1', '2027-09-09')
     dom.replies.push({ status: 200, body: { createdId: 'x' } }, { status: 200, body: reply() })
     await press('Confirm')
-    expect(dom.writes()[0]!.body).toEqual({
-      decision: 'edited',
-      value: { statement: 'Statement f1', reviewDate: '2027-09-09' },
+    expect(dom.writes()[0]!.body).toEqual({ decision: 'accepted', reviewDate: '2027-09-09' })
+  })
+
+  it('a double press on a fact card and on a rule card sends once', async () => {
+    await open(reply({ facts: [fact('f1')], rules: [rule('r1')] }))
+    dom.replies.push(
+      { status: 200, body: { createdId: 'x' } },
+      { status: 200, body: reply({ rules: [rule('r1')] }) },
+    )
+    const confirmFact = dom.button('Confirm', 0)
+    act(() => {
+      confirmFact.click()
+      confirmFact.click()
     })
+    await dom.settle()
+    expect(dom.writes()).toHaveLength(1)
+    dom.replies.push({ status: 200, body: { createdId: 'y' } }, { status: 200, body: reply() })
+    const confirmRule = dom.button('Confirm', 0)
+    act(() => {
+      confirmRule.click()
+      confirmRule.click()
+    })
+    await dom.settle()
+    expect(dom.writes()).toHaveLength(2)
+    expect(dom.writes()[1]!.url).toBe(`${base}/suggestions/r1/decision`)
+  })
+
+  it('editing a rule sends its kind, text and why', async () => {
+    await open(reply({ rules: [rule('r1')] }))
+    await press('Edit')
+    dom.type('edit-kind-r1', 'forbidden_word')
+    dom.type('edit-r1', 'cheapest')
+    dom.type('edit-why-r1', 'We cannot prove it')
+    dom.replies.push({ status: 200, body: { createdId: 'x' } }, { status: 200, body: reply() })
+    await press('Save edit')
+    expect(dom.writes()[0]).toEqual({
+      url: `${base}/suggestions/r1/decision`,
+      method: 'POST',
+      body: {
+        decision: 'edited',
+        value: { kind: 'forbidden_word', text: 'cheapest', why: 'We cannot prove it' },
+      },
+    })
+  })
+
+  it('sources say what they are: a document by its name, an owner statement as stated by you', async () => {
+    await open(
+      reply({
+        facts: [
+          fact('f1', {
+            sources: [
+              source('d1', {
+                kind: 'document',
+                address: 'brochure.pdf, pages 1-4',
+                documentName: 'brochure.pdf',
+              }),
+              source('o1', { kind: 'owner_statement', address: null }),
+              source('c1', { kind: 'competitor' }),
+            ],
+          }),
+        ],
+      }),
+    )
+    const text = dom.text()
+    expect(text).toContain('brochure.pdf')
+    expect(text).toContain('Document')
+    expect(text).toContain('Stated by you')
+    expect(text).not.toContain('No address')
+    expect(text).toContain('Competitor page')
+    expect(text).toContain('Read 20 Nov 2026')
+  })
+
+  it('a past date on Add fact shows the core date message', async () => {
+    await open(reply())
+    await press('Add your own fact')
+    expect(dom.field('own-fact-date')?.getAttribute('min')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    dom.type('own-fact-statement', 'We are open 9 to 6')
+    dom.type('own-fact-date', '2020-01-01')
+    dom.replies.push({
+      status: 400,
+      body: {
+        error: {
+          code: 'invalid_request',
+          message: 'The request is not valid.',
+          details: [
+            {
+              part: 'body',
+              path: 'reviewDate',
+              message: 'Give the review date as YYYY-MM-DD, a real date after today.',
+            },
+          ],
+        },
+      },
+    })
+    await press('Add fact')
+    expect(dom.text()).toContain('Give the review date as YYYY-MM-DD, a real date after today.')
   })
 
   it('a fact needing a source offers edit', async () => {
@@ -203,7 +297,7 @@ describe('the facts and rules screen, driven', () => {
     const activeRule = { id: 'ar1', kind: 'competitor_not_named', text: 'Never name Acme', why: 'Legal' }
     await open(reply({ active: [active], activeRules: [activeRule] }))
     expect(dom.text()).toContain('Open daily')
-    expect(dom.text()).toContain('2027-01-01')
+    expect(dom.text()).toContain('Review by 1 Jan 2027')
     expect(dom.text()).toContain('competitor not to name')
 
     await press('Replace')
@@ -312,6 +406,29 @@ describe('the facts and rules screen, driven', () => {
     expect(text).toContain('Is the Pune office open?')
     expect(text).not.toContain('Done one')
     expect(text.indexOf('Is the Pune office open?')).toBeLessThan(text.indexOf('Continue'))
+    expect(text).toContain('1 question waits for your answer.')
+  })
+
+  it('the overview says so when the agent questions cannot be read', async () => {
+    dom.replies.push(
+      {
+        status: 200,
+        body: {
+          step: 'facts_rules',
+          intake: null,
+          documents: 0,
+          research: null,
+          openSuggestions: 0,
+          questionnaire: null,
+          factsRules: null,
+          cost: { usdMicros: '0', inrMicros: '0' },
+        },
+      },
+      err(500, 'internal_error', 'x'),
+    )
+    await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.text()).toContain('Questions from the agents could not be read. Reload the page to see them.')
+    expect(dom.text()).toContain('Continue')
   })
 
   it('facts and rules are owner-only', async () => {

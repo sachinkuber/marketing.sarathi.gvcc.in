@@ -5,11 +5,11 @@ import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import { suggestionDecisionReply, onboardingReply, suggestionItem, suggestionsReply } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
+import { SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import { KEY_LABEL, TOPICS, failureWords, isForbidden } from './onboarding-words'
 
 type Item = z.infer<typeof suggestionItem>
-type Source = Item['sources'][number]
 type Gap = { key: string; why: string }
 
 const label = (key: string) => KEY_LABEL[key] ?? key
@@ -18,29 +18,8 @@ const label = (key: string) => KEY_LABEL[key] ?? key
 const textOf = (value: unknown): string =>
   typeof value === 'string' ? value : value === null || value === undefined ? '' : JSON.stringify(value)
 
-const readOn = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  })
-
 const sourceCount = (n: number) => (n === 0 ? 'no sources' : `${n} ${n === 1 ? 'source' : 'sources'}`)
 const confidenceTag = (c: Item['confidence']) => (c === 'found' ? 'ok' : c === 'assumed' ? 'warn' : 'plain')
-
-export function SourceRow({ source }: { source: Source }) {
-  return (
-    <li className="onb-group">
-      <div className="wrap-row">
-        <div className="grow onb-wrap">{source.address ?? 'No address'}</div>
-        {source.flagged ? <span className="tag warn">{`Flagged: ${source.flagged.reason}`}</span> : null}
-      </div>
-      <div className="muted small">{`Read ${readOn(source.readAt)}`}</div>
-      <p className="dp-extract small">{source.extract}</p>
-    </li>
-  )
-}
 
 function ItemCard(props: {
   item: Item

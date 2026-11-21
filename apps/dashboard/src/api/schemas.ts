@@ -574,6 +574,8 @@ export const suggestionSource = z.strictObject({
   id: z.string(),
   kind: z.string(),
   address: z.string().nullable(),
+  // The uploaded file's name, for a document source.
+  documentName: z.string().nullable(),
   readAt: z.string(),
   extract: z.string(),
   flagged: z.strictObject({ reason: z.string() }).nullable(),

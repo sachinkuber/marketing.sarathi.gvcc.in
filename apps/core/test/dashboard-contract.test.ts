@@ -561,7 +561,12 @@ describe('the dashboard schemas accept the core’s replies', () => {
           statement: 'Open since 2019.',
           reviewDate,
           sources: [
-            expect.objectContaining({ kind: 'owner_statement', extract: 'Open since 2019.', flagged: null }),
+            expect.objectContaining({
+              kind: 'owner_statement',
+              documentName: null,
+              extract: 'Open since 2019.',
+              flagged: null,
+            }),
           ],
         },
       ])
