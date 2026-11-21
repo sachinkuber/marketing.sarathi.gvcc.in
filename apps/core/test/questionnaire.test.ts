@@ -175,20 +175,27 @@ describe('starting the questionnaire', () => {
     await src('social', 'https://instagram.com/aztek', 'blocked')
     await src('document', null, 'error')
     // The latest done merge's gaps (an older merge's gaps are not used).
-    const merge = async (gaps: unknown, at: string) => {
-      const run = await q(
-        `insert into app.run (brand_id, agent, definition_version_id, state, started_by_kind)
-         values ($1, 'research_merge', $2, 'succeeded', 'system') returning id`,
-        [brandId, definitionId],
-      )
+    // Only the merge of the brand's current research run counts: a newer merge of another run is not used.
+    const merge = async (runId: string, gaps: unknown, at: string) => {
       await q(
         `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type, outcome, finished_at)
          values (gen_random_uuid(), $1, $2, 'production', '{}', 'research.v1', $3::jsonb, $4::timestamptz)`,
-        [brandId, run[0].id, JSON.stringify({ suggestions: 1, gaps }), at],
+        [brandId, runId, JSON.stringify({ suggestions: 1, gaps }), at],
       )
     }
-    await merge([{ key: 'capacity_old', why: 'old' }], '2026-11-01T00:00:00Z')
-    await merge([{ key: 'price_position', why: 'No prices were found.' }], '2026-11-02T00:00:00Z')
+    const otherRun = (
+      await q(
+        `insert into app.run (brand_id, agent, definition_version_id, state, started_by_kind)
+         values ($1, 'research', $2, 'succeeded', 'system') returning id`,
+        [brandId, definitionId],
+      )
+    )[0].id as string
+    await merge(
+      researchRunId,
+      [{ key: 'price_position', why: 'No prices were found.' }],
+      '2026-11-01T00:00:00Z',
+    )
+    await merge(otherRun, [{ key: 'certifications', why: 'Another run.' }], '2026-11-02T00:00:00Z')
 
     const started = await start(brandId)
     expect(started.status).toBe(200)
@@ -241,7 +248,21 @@ describe('starting the questionnaire', () => {
   })
 
   it('trims the input to the schema caps and gives no gaps when no merge is done', async () => {
-    const { brandId } = await fresh()
+    const { brandId, researchRunId } = await fresh()
+    await q(`update app.onboarding set intake = $2::jsonb where brand_id = $1`, [
+      brandId,
+      JSON.stringify({
+        ...INTAKE,
+        competitors: Array.from({ length: 7 }, (_, i) => ({ name: `Rival ${i}` })),
+      }),
+    ])
+    for (let i = 0; i < 65; i += 1) {
+      await q(
+        `insert into app.research_source (brand_id, run_id, kind, address, result, extract)
+         values ($1, $2, 'search', $3, 'blocked', 'x')`,
+        [brandId, researchRunId, `https://page${i}.example/`],
+      )
+    }
     for (let i = 0; i < 45; i += 1) {
       await q(
         `insert into app.suggestion (brand_id, step, key, proposed, why, confidence)
@@ -253,6 +274,12 @@ describe('starting the questionnaire', () => {
     const input = (await q(`select input from app.job_input where job_id = $1`, [started.json.jobId]))[0]
       .input
     expect(input.open).toHaveLength(40)
+    // The newest 40 are kept: values 5 to 44.
+    expect(input.open.map((o: { proposed: string }) => o.proposed).sort()).toEqual(
+      Array.from({ length: 40 }, (_, i) => `value ${i + 5}`).sort(),
+    )
+    expect(input.unreadable).toHaveLength(60)
+    expect(input.competitors).toHaveLength(5)
     expect(input.gaps).toEqual([])
     expect(() => questionnaireInputSchema.parse(input)).not.toThrow()
   })
@@ -288,7 +315,12 @@ describe('starting the questionnaire', () => {
     // The job has not produced questions yet.
     const again = await start(brandId)
     expect(again.status).toBe(409)
-    expect(again.json).toMatchObject({ error: { code: 'questionnaire_open' } })
+    expect(again.json).toMatchObject({
+      error: {
+        code: 'questionnaire_open',
+        message: 'The questionnaire is still being written. Wait for it, or answer its question.',
+      },
+    })
     expect(
       (await q('select 1 from app.run where brand_id = $1 and agent = $2', [brandId, 'questionnaire']))
         .length,
@@ -479,12 +511,16 @@ describe('answers and finishing', () => {
       expect(s).toMatchObject({ result: 'stated', stated_by: ownerId, run_id: runId })
       expect(s.run_id).not.toBe(researchRunId)
     }
-    const answers = await q(`select value, source_id from app.answer where brand_id = $1 order by value`, [
-      brandId,
-    ])
+    const answers = await q(
+      `select value, source_id, answered_at from app.answer where brand_id = $1 order by value`,
+      [brandId],
+    )
     expect(answers).toHaveLength(4)
     for (const a of answers) {
-      expect(statements.find((s) => s.id === a.source_id)?.extract).toBe(a.value)
+      const statement = statements.find((s) => s.id === a.source_id)
+      expect(statement?.extract).toBe(a.value)
+      // The statement is dated when the owner answered.
+      expect(new Date(statement!.read_at).getTime()).toBe(new Date(a.answered_at).getTime())
     }
     // Profile items: business_name and tone_of_voice are profile keys; goals and never_say are not.
     const items = await q(
@@ -574,5 +610,37 @@ describe('answers and finishing', () => {
     const { ids } = await startAndResult(mine.brandId)
     expect((await put(brandId, ids[0]!, 'x')).status).toBe(404)
     expect((await q('select 1 from app.answer where brand_id = $1', [mine.brandId])).length).toBe(0)
+  })
+})
+
+describe('a restart after finish', () => {
+  it('a restart after finish does not move the step back, and shows no questionnaire until the new questions arrive', async () => {
+    const { brandId } = await fresh()
+    const first = await startAndResult(brandId)
+    await put(brandId, first.ids[0]!, 'Aztek')
+    expect((await finish(brandId)).status).toBe(200)
+
+    const started = await start(brandId)
+    expect(started.status).toBe(200)
+    // The new job has no questions yet: the view is empty, not the finished questionnaire.
+    const waiting = await owner.request('GET', base(brandId))
+    expect(waiting.json).toEqual({ questionnaire: null, job: { state: 'waiting' } })
+    const overview = await owner.request('GET', `/api/v1/brands/${brandId}/onboarding`)
+    expect(overview.json.questionnaire).toEqual({ state: 'waiting', total: 0, answered: 0, finished: false })
+
+    const posted = await postResult(jobs, await claim(started.json.jobId), {
+      type: 'questionnaire.v1',
+      result: RESULT,
+    })
+    expect(posted).toMatchObject({ status: 'applied', outcome: { questions: 10 } })
+    expect((await q('select step from app.onboarding where brand_id = $1', [brandId]))[0].step).toBe(
+      'facts_rules',
+    )
+    const read = await owner.request('GET', base(brandId))
+    expect(read.json.questionnaire.finishedAt).toBeNull()
+    expect(read.json.questionnaire.questions.every((x: { answer: unknown }) => x.answer === null)).toBe(true)
+    expect(read.json.questionnaire.id).not.toBe(
+      (await q('select id from app.questionnaire where run_id = $1', [first.runId]))[0].id,
+    )
   })
 })

@@ -3,7 +3,7 @@ import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { RESEARCH_SOURCE_KINDS, SAFETY_RULE_KINDS } from '@mkt/shared'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
-import { readStoredExtract } from './research-results.ts'
+import { readStoredExtract } from './stored-extract.ts'
 import { qualifiesAsFactSource, type SourceKind } from './sources.ts'
 
 // The kinds whose stored extract research wrote (with its flag marker and cut); an owner statement is not one.

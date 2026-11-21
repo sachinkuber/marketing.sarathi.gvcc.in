@@ -9,6 +9,7 @@ import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-que
 import { inputOf, validate } from '../validate.ts'
 import type { JobsDeps } from '../jobs/service.ts'
 import {
+  ANSWER_MAX,
   finishQuestionnaire,
   readQuestionnaire,
   saveAnswer,
@@ -40,11 +41,10 @@ const answerBody = z.strictObject({
 })
 
 // Saved as typed: at most 2000 characters (the facts agent's input limit); empty deletes the answer.
-const answerParams = z.strictObject({ brandId: z.uuid(), questionId: z.uuid() })
 const savedAnswerBody = z.strictObject({
   value: z
     .string()
-    .max(2000, 'An answer can be at most 2000 characters.')
+    .max(ANSWER_MAX, `An answer can be at most ${ANSWER_MAX} characters.`)
     .refine((v) => !v.includes('\u0000'), 'must not contain U+0000'),
 })
 
@@ -175,10 +175,10 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
     access: { kind: 'permission', permission: 'onboard_brand' },
     summary: 'Save an answer as typed; an empty value deletes it; refused once the questionnaire is finished',
     handlers: [
-      validate({ params: answerParams, body: savedAnswerBody }),
+      validate({ params: questionParams, body: savedAnswerBody }),
       async (_req, res) => {
         const { params, body } = inputOf<{
-          params: z.infer<typeof answerParams>
+          params: z.infer<typeof questionParams>
           body: z.infer<typeof savedAnswerBody>
         }>(res)
         res.json(

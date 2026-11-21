@@ -3,7 +3,7 @@ import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { splitPdfOneAtATime, type PdfPart } from './pdf-parts.ts'
-import { researchRunIsOpen } from './research.ts'
+import { researchRunIsOpen } from './runs.ts'
 
 // Brand documents (spec 13, test 51). The size limits are the owner's decision (a PDF up to 100 MB, which
 // supersedes the spec's 10 MB) and match migration 0026's check.

@@ -486,6 +486,13 @@ describe('the dashboard schemas accept the core’s replies', () => {
           answer: 'Aztek',
         },
       ])
+      // A job waiting on a question carries its id.
+      expect(
+        questionnaireReply.parse({
+          questionnaire: null,
+          job: { state: 'waiting_for_answer', questionId: asked.rows[0].id },
+        }).job?.questionId,
+      ).toBe(asked.rows[0].id)
       expect((await overview()).questionnaire).toMatchObject({ total: 1, answered: 1, finished: false })
       const finished = await owner.request('POST', `${base()}/questionnaire/finish`, { body: {} })
       expect(finished.status).toBe(200)

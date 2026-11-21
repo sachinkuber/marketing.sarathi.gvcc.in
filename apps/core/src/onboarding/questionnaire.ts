@@ -17,8 +17,10 @@ import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import { enqueueNotification } from '../notify/notifications.ts'
 import { platformOwnersOf } from '../notify/recipients.ts'
 import type { AuditSink } from '../ports.ts'
-import { jobState, type AgentJobState } from './agent-questions.ts'
-import { researchRunIsOpen, type Intake } from './research.ts'
+import type { AgentJobState } from './agent-questions.ts'
+import { MERGE_RESULT_TYPE, type Intake } from './research.ts'
+import { latestQuestionnaireJob, QUESTIONNAIRE_AGENT } from './questionnaire-state.ts'
+import { researchRunIsOpen } from './runs.ts'
 import { supersedeProfileItem } from './suggestions.ts'
 
 // The questionnaire (spec 4, 12): the core builds the job's input from the draft profile, stores the agent's
@@ -27,7 +29,6 @@ import { supersedeProfileItem } from './suggestions.ts'
 // startResearch does), then the questionnaire, then the rows below it.
 
 export const QUESTIONNAIRE_RESULT_TYPE = 'questionnaire.v1'
-const QUESTIONNAIRE_AGENT = 'questionnaire'
 export const ANSWER_MAX = 2000
 
 const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS)
@@ -40,86 +41,6 @@ const clip = (value: string, max: number): string | null => {
   return safe === '' ? null : safe
 }
 const asText = (value: unknown): string => (typeof value === 'string' ? value : (JSON.stringify(value) ?? ''))
-
-// ---- The job's state, as the screens show it ----
-
-export interface QuestionnaireJob {
-  runId: string
-  state: AgentJobState
-  questionId?: string
-}
-
-// The job of the brand's latest questionnaire run; null when none was ever started.
-export async function latestQuestionnaireJob(
-  client: PoolClient,
-  brandId: string,
-): Promise<QuestionnaireJob | null> {
-  const found = await client.query<{
-    run_id: string
-    finished: boolean
-    dead: boolean
-    cancelled: boolean
-    attempts: number
-    question_id: string | null
-  }>(
-    `select r.id as run_id, i.finished_at is not null as finished,
-            coalesce(c.dead_at is not null, false) as dead, coalesce(c.cancel_requested, false) as cancelled,
-            (select count(*) from app.job_attempt a where a.job_id = i.job_id)::int as attempts,
-            (select q.id from app.agent_question q
-              where q.brand_id = i.brand_id and q.job_id = i.job_id and q.answer is null limit 1) as question_id
-       from app.run r
-       join app.job_input i on i.brand_id = r.brand_id and i.run_id = r.id
-       left join app.job_control c on c.job_id = i.job_id
-      where r.brand_id = $1 and r.agent = $2
-      order by r.started_at desc, r.id desc, i.created_at desc limit 1`,
-    [brandId, QUESTIONNAIRE_AGENT],
-  )
-  const row = found.rows[0]
-  if (!row) return null
-  const state = jobState({
-    finished: row.finished,
-    dead: row.dead,
-    cancelled: row.cancelled,
-    attempts: row.attempts,
-    openQuestion: row.question_id !== null,
-  })
-  return {
-    runId: row.run_id,
-    state,
-    ...(state === 'waiting_for_answer' && row.question_id ? { questionId: row.question_id } : {}),
-  }
-}
-
-export interface QuestionnaireBlock {
-  state: AgentJobState
-  total: number
-  answered: number
-  finished: boolean
-}
-
-// The overview's block: null before the first start.
-export async function readQuestionnaireBlock(
-  client: PoolClient,
-  brandId: string,
-): Promise<QuestionnaireBlock | null> {
-  const job = await latestQuestionnaireJob(client, brandId)
-  if (!job) return null
-  const counts = await client.query<{ total: number; answered: number; finished: boolean }>(
-    `select (select count(*) from app.question where brand_id = $1 and questionnaire_id = z.id)::int as total,
-            (select count(*) from app.answer a join app.question q on q.brand_id = a.brand_id and q.id = a.question_id
-              where a.brand_id = $1 and q.questionnaire_id = z.id)::int as answered,
-            z.finished_at is not null as finished
-       from app.questionnaire z where z.brand_id = $1 order by z.created_at desc, z.id desc limit 1`,
-    [brandId],
-  )
-  const c = counts.rows[0]
-  return {
-    state: job.state,
-    total: c?.total ?? 0,
-    answered: c?.answered ?? 0,
-    finished: c?.finished ?? false,
-  }
-}
 
 // ---- Starting ----
 
@@ -148,13 +69,15 @@ async function buildInput(
       order by created_at desc, id limit $2`,
     [brandId, MAX_FINDINGS],
   )
-  // The gaps come from the latest done merge job's outcome.
-  const merge = await client.query<{ outcome: { gaps?: unknown } | null }>(
-    `select outcome from app.job_input
-      where brand_id = $1 and expected_result_type = 'research.v1' and finished_at is not null
-      order by finished_at desc, job_id limit 1`,
-    [brandId],
-  )
+  // The gaps come from the done merge job of the brand's current research run.
+  const merge = researchRunId
+    ? await client.query<{ outcome: { gaps?: unknown } | null }>(
+        `select outcome from app.job_input
+          where brand_id = $1 and run_id = $2 and expected_result_type = $3 and finished_at is not null
+          order by finished_at desc, job_id limit 1`,
+        [brandId, researchRunId, MERGE_RESULT_TYPE],
+      )
+    : { rows: [] }
   const rawGaps = merge.rows[0]?.outcome?.gaps
   const unreadable = researchRunId
     ? await client.query<{ kind: string; address: string | null }>(
@@ -221,11 +144,18 @@ export async function startQuestionnaire(
       [input.brandId],
     )
     const job = await latestQuestionnaireJob(client, input.brandId)
-    if (unfinished.rows.length > 0 || (job && (await researchRunIsOpen(client, job.runId)))) {
+    if (unfinished.rows.length > 0) {
       throw new AppError(
         409,
         'questionnaire_open',
         'A questionnaire is already open for this brand. Finish it before starting another.',
+      )
+    }
+    if (job && (await researchRunIsOpen(client, job.runId))) {
+      throw new AppError(
+        409,
+        'questionnaire_open',
+        'The questionnaire is still being written. Wait for it, or answer its question.',
       )
     }
     if (onboarding.research_run_id && (await researchRunIsOpen(client, onboarding.research_run_id))) {
@@ -317,7 +247,11 @@ export function questionnaireResultHandler(): ResultHandler {
         ],
       )
     }
-    await client.query(`update app.onboarding set step = 'questionnaire' where brand_id = $1`, [ctx.brandId])
+    // A restart after a finish never moves the step back from facts and rules or later (ruling R15).
+    await client.query(
+      `update app.onboarding set step = 'questionnaire' where brand_id = $1 and step in ('profile', 'questionnaire')`,
+      [ctx.brandId],
+    )
     for (const userId of await platformOwnersOf(client)) {
       await enqueueNotification(client, {
         brandId: ctx.brandId,
@@ -357,8 +291,8 @@ export async function readQuestionnaire(pool: Pool, brandId: string): Promise<Qu
       ? { state: job.state, ...(job.questionId ? { questionId: job.questionId } : {}) }
       : null
     const found = await client.query<{ id: string; finished_at: Date | null }>(
-      `select id, finished_at from app.questionnaire where brand_id = $1 order by created_at desc, id desc limit 1`,
-      [brandId],
+      `select id, finished_at from app.questionnaire where brand_id = $1 and run_id = $2`,
+      [brandId, job?.runId ?? null],
     )
     const z = found.rows[0]
     if (!z) return { questionnaire: null, job: jobView }
@@ -466,8 +400,9 @@ export async function finishQuestionnaire(
       key: string
       value: string | null
       answered_by: string | null
+      answered_at: Date | null
     }>(
-      `select q.id as question_id, q.key, a.value, a.answered_by
+      `select q.id as question_id, q.key, a.value, a.answered_by, a.answered_at
          from app.question q left join app.answer a on a.brand_id = q.brand_id and a.question_id = q.id
         where q.brand_id = $1 and q.questionnaire_id = $2 order by q.position`,
       [input.brandId, questionnaire.id],
@@ -477,9 +412,9 @@ export async function finishQuestionnaire(
       if (row.value === null || row.value.trim() === '') continue
       answered += 1
       const source = await client.query<{ id: string }>(
-        `insert into app.research_source (brand_id, run_id, kind, result, extract, stated_by)
-         values ($1, $2, 'owner_statement', 'stated', $3, $4) returning id`,
-        [input.brandId, questionnaire.run_id, row.value, row.answered_by],
+        `insert into app.research_source (brand_id, run_id, kind, result, extract, stated_by, read_at)
+         values ($1, $2, 'owner_statement', 'stated', $3, $4, $5) returning id`,
+        [input.brandId, questionnaire.run_id, row.value, row.answered_by, row.answered_at],
       )
       const sourceId = source.rows[0]!.id
       await client.query('update app.answer set source_id = $3 where brand_id = $1 and question_id = $2', [
@@ -491,7 +426,7 @@ export async function finishQuestionnaire(
         await supersedeProfileItem(client, {
           brandId: input.brandId,
           key: row.key,
-          value: row.value,
+          value: row.value.trim(),
           status: 'found',
           sourceIds: [sourceId],
           fromSuggestion: null,

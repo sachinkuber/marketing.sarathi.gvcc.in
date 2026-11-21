@@ -454,6 +454,8 @@ export const overdueAllReply = z.strictObject({
 // it past 300 characters.
 
 const maybeMoney = z.strictObject({ usdMicros: micros.nullable(), inrMicros: micros.nullable() })
+// The state of a job as the onboarding screens show it (spec 9): a job with an open question waits for the owner.
+const agentJobState = z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed'])
 const groupState = z.enum(['waiting', 'running', 'done', 'failed'])
 
 export const intakeShape = z.strictObject({
@@ -501,7 +503,7 @@ export const onboardingReply = z.strictObject({
   openSuggestions: z.number().int().nonnegative(),
   questionnaire: z
     .strictObject({
-      state: z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed']),
+      state: agentJobState,
       total: z.number().int().nonnegative(),
       answered: z.number().int().nonnegative(),
       finished: z.boolean(),
@@ -534,7 +536,7 @@ export const questionnaireReply = z.strictObject({
     .nullable(),
   job: z
     .strictObject({
-      state: z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed']),
+      state: agentJobState,
       questionId: z.string().optional(),
     })
     .nullable(),
