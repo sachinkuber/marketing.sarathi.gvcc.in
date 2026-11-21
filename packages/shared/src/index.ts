@@ -78,3 +78,21 @@ export {
   type LoadedAgent,
 } from './agent-definition.ts'
 export { agentFilesHash, setsHash } from './agent-files.ts'
+export {
+  BASELINE_NEEDED,
+  briefChoicesInputSchema,
+  briefChoicesResultSchema,
+  CHOICE_KEYS,
+  type BriefChoicesInput,
+  type BriefChoicesResult,
+  type ChoiceKey,
+} from './brief-choices.ts'
+export {
+  strategistInputSchema,
+  strategyBriefAgainstInput,
+  strategyBriefPayload,
+  strategyBriefResultSchema,
+  type StrategistInput,
+  type StrategyBrief,
+  type StrategyBriefResult,
+} from './strategy-brief.ts'
