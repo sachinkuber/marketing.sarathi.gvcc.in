@@ -10,6 +10,7 @@ import { createJob, createRun, type JobsDeps } from '../src/jobs/service.ts'
 import { releaseHeldJobs } from '../src/killswitch/release.ts'
 import { releaseSwitch, setSwitch } from '../src/killswitch/service.ts'
 import { jobState, remindAgentQuestions } from '../src/onboarding/agent-questions.ts'
+import type { NotifyDeps } from '../src/notify/ports.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
 // Task 2 of M10 (spec 9, test 47): an agent that cannot settle something asks the owner instead of guessing. The
@@ -90,15 +91,18 @@ afterAll(async () => {
 })
 
 // Interactive jobs are the real worker's; production jobs are claimed by hand (no worker serves that class).
-async function newJob(jobClass: 'interactive' | 'production'): Promise<{ runId: string; jobId: string }> {
-  return withBrand(stack.appPool, brandId, async (client) => {
-    const runId = await createRun(client, brandId, {
+async function newJob(
+  jobClass: 'interactive' | 'production',
+  brand = brandId,
+): Promise<{ runId: string; jobId: string }> {
+  return withBrand(stack.appPool, brand, async (client) => {
+    const runId = await createRun(client, brand, {
       agent: 'test-agent',
       definitionVersionId: definitionId,
       startedByKind: 'system',
       startedById: null,
     })
-    const jobId = await createJob(client, jobs, brandId, {
+    const jobId = await createJob(client, jobs, brand, {
       runId,
       jobClass,
       input: {},
@@ -545,7 +549,11 @@ describe('without a worker (the job is claimed by hand)', () => {
       t0,
     ])
     const at = (ms: number) => new Date(t0.getTime() + ms)
-    const remind = (ms: number) => remindAgentQuestions(stack.appPool, at(ms))
+    const remind = async (ms: number) => {
+      const swept = await remindAgentQuestions(stack.appPool, at(ms))
+      expect(swept.failedBrands).toBe(0)
+      return swept.reminded
+    }
     const reminders = async (job: string) =>
       (
         await q(
@@ -580,6 +588,7 @@ describe('without a worker (the job is claimed by hand)', () => {
         overdue: 0,
         escalated: 0,
         agentQuestionsReminded: 1,
+        agentQuestionsFailedBrands: 0,
       })
     } finally {
       clockAt = null
@@ -590,6 +599,158 @@ describe('without a worker (the job is claimed by hand)', () => {
     expect(await stateOf(jobId)).toBe('waiting_for_answer')
     expect(await reminders(cancelled.jobId)).toBe(0)
     expect((await questionsOf(cancelled.jobId))[0]!.reminded_at).toBeNull()
+  })
+
+  it('reminds brand by brand: only brands with a due question are listed, and a failing brand is counted', async () => {
+    const other = await addBrand(stack, 'agent-questions-other')
+    const mine = await newJob('production')
+    const theirs = await newJob('production', other)
+    const ids = [await raised(mine.jobId), await raised(theirs.jobId)]
+    // Further in the past than any other test's question, so only these two are due at these times.
+    const t1 = new Date('2019-06-01T00:00:00Z')
+    await q('update app.agent_question set created_at = $2 where id = any($1::uuid[])', [ids, t1])
+    const at = (ms: number) => new Date(t1.getTime() + ms)
+    const dueBrands = async (ms: number) =>
+      (
+        await stack.appPool.query<{ id: string }>('select app.brands_with_due_agent_questions($1) as id', [
+          new Date(at(ms).getTime() - 72 * HOUR),
+        ])
+      ).rows
+        .map((r) => r.id)
+        .sort()
+    const remindedAt = async (questionId: string) =>
+      (await q('select reminded_at from app.agent_question where id = $1', [questionId]))[0]!.reminded_at
+    const remindersIn = async (brand: string, jobId: string) =>
+      (
+        await q(
+          `select 1 from app.notification where brand_id = $1 and kind = 'agent_question_reminder' and subject_id = $2`,
+          [brand, jobId],
+        )
+      ).length
+
+    expect(await dueBrands(71 * HOUR)).toEqual([])
+    expect(await dueBrands(73 * HOUR)).toEqual([brandId, other].sort())
+    expect(await remindAgentQuestions(stack.appPool, at(73 * HOUR))).toEqual({ reminded: 2, failedBrands: 0 })
+    expect(await remindersIn(brandId, mine.jobId)).toBe(2)
+    expect(await remindersIn(other, theirs.jobId)).toBe(2)
+    expect(await dueBrands(73 * HOUR)).toEqual([])
+
+    // One brand's reminders fail: that brand is rolled back and counted, the other is still reminded.
+    const logged: string[] = []
+    const logger = {
+      warn: () => undefined,
+      error: (_fields: unknown, message: string) => void logged.push(message),
+    } as unknown as NotifyDeps['logger']
+    await q(`create function public.refuse_reminder() returns trigger language plpgsql as $$
+      begin
+        if new.kind = 'agent_question_reminder' and new.brand_id = '${brandId}' then
+          raise exception 'reminder refused';
+        end if;
+        return new;
+      end $$`)
+    await q(
+      'create trigger refuse_reminder before insert on app.notification for each row execute function public.refuse_reminder()',
+    )
+    try {
+      expect(await remindAgentQuestions(stack.appPool, at(146 * HOUR), logger)).toEqual({
+        reminded: 1,
+        failedBrands: 1,
+      })
+    } finally {
+      await q('drop trigger refuse_reminder on app.notification')
+      await q('drop function public.refuse_reminder()')
+    }
+    expect(logged).toEqual(['agent question reminders failed for a brand'])
+    expect(await remindedAt(ids[0]!)).toEqual(at(73 * HOUR))
+    expect(await remindedAt(ids[1]!)).toEqual(at(146 * HOUR))
+    expect(await remindersIn(brandId, mine.jobId)).toBe(2)
+    expect(await remindersIn(other, theirs.jobId)).toBe(4)
+    // The failed brand catches up on the next sweep.
+    expect(await remindAgentQuestions(stack.appPool, at(146 * HOUR))).toEqual({
+      reminded: 1,
+      failedBrands: 0,
+    })
+    expect(await remindersIn(brandId, mine.jobId)).toBe(4)
+  })
+
+  it('a reminder sweep that cannot list the brands never fails the tick', async () => {
+    // The brand list fails (here: the function is not allowed). The approvals part still answers, and the sweep
+    // reports that it could not run instead of turning the tick into a 500.
+    await q('revoke execute on function app.brands_with_due_agent_questions(timestamptz) from mkt_app')
+    try {
+      const res = await worker('POST', '/worker/approvals/tick', undefined, { workerId: 'aq-timer' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        failedBrands: 0,
+        reminded: 0,
+        overdue: 0,
+        escalated: 0,
+        agentQuestionsReminded: 0,
+        agentQuestionsFailedBrands: null,
+      })
+    } finally {
+      await q('grant execute on function app.brands_with_due_agent_questions(timestamptz) to mkt_app')
+    }
+    expect(
+      stack.logs.some((line) => line.includes('agent question reminders could not list the brands')),
+    ).toBe(true)
+  })
+
+  it('a job waiting for an answer is never marked dead, and its run keeps running', async () => {
+    const { runId, jobId } = await newJob('production')
+    const questionId = await raised(jobId)
+    // The queue gives up on the row that asked: the raise's reply was lost, or the worker died before the row
+    // completed, on its last retry. The dead-letter watcher reports it.
+    await q(`update pgboss.job set state = 'failed' where id = $1`, [jobId])
+    const res = await worker('POST', `/worker/jobs/${jobId}/dead`, undefined, {})
+    expect(res.status).toBe(204)
+    expect((await q('select dead_at from app.job_control where job_id = $1', [jobId]))[0]!.dead_at).toBeNull()
+    expect(await runStateOf(runId)).toBe('running')
+    expect(await stateOf(jobId)).toBe('waiting_for_answer')
+    expect(await q(`select 1 from audit.log where action = 'jobs.dead' and subject = $1`, [jobId])).toEqual(
+      [],
+    )
+    const list = await owner.request('GET', `/api/v1/brands/${brandId}/onboarding/agent-questions`)
+    expect(
+      list.json.questions.some(
+        (x: { id: string; answer: string | null }) => x.id === questionId && !x.answer,
+      ),
+    ).toBe(true)
+
+    // The answer still resumes it.
+    expect((await answer(questionId, 'Pune')).status).toBe(200)
+    const next = await claim(jobId)
+    expect(next.status).toBe(200)
+    expect(next.body).toMatchObject({
+      attemptNumber: 2,
+      answers: [
+        { question: QUESTION.question, why: QUESTION.why, options: QUESTION.options, answer: 'Pune' },
+      ],
+    })
+    expect(await runStateOf(runId)).toBe('running')
+  })
+
+  it('a finished job may not ask (job_finished), nor a cancelled one (job_cancelled)', async () => {
+    const done = await newJob('production')
+    const doneToken = await claimed(done.jobId)
+    const posted = await worker('POST', `/worker/jobs/${done.jobId}/result`, doneToken, {
+      type: RESULT_TYPE,
+      result: { text: 'done', answers: [] },
+    })
+    expect(posted.status).toBe(200)
+    const late = await raise(done.jobId, doneToken)
+    expect(late.status).toBe(409)
+    expect((await late.json()).error.code).toBe('job_finished')
+    expect(await questionsOf(done.jobId)).toHaveLength(0)
+
+    const stopped = await newJob('production')
+    const stoppedToken = await claimed(stopped.jobId)
+    await q('update app.job_control set cancel_requested = true where job_id = $1', [stopped.jobId])
+    const refused = await raise(stopped.jobId, stoppedToken)
+    expect(refused.status).toBe(409)
+    expect((await refused.json()).error.code).toBe('job_cancelled')
+    expect(await questionsOf(stopped.jobId)).toHaveLength(0)
+    expect(await attemptsOf(stopped.jobId)).toMatchObject([{ attempt_number: 1, state: 'active' }])
   })
 
   it('a brand admin gets 403', async () => {

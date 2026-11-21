@@ -184,6 +184,26 @@ export async function currentQueueId(client: PoolClient, jobId: string): Promise
   return rows[0]?.queue_id ?? jobId
 }
 
+// Sends a job to the queue again under a new queue id, recorded in job_control.queue_id, on the caller's client
+// (so in its transaction: the job is sent if and only if the caller's change commits). The queue library completes
+// the row of a job that ended without a result (held, or waiting for an answer) and ignores a send or a retry of a
+// completed id, so a new row is the only way to run the job again. startAttempt accepts only the current queue id,
+// so a late copy of an older row is turned away as superseded: exactly one copy can run the job. The caller holds
+// the job's input row lock, so an attempt start (which reads the queue id under it) sees the committed id.
+export async function resendJob(
+  client: PoolClient,
+  deps: Pick<JobsDeps, 'queue'>,
+  job: { jobId: string; jobClass: JobClass; scheduleKey: string },
+): Promise<string> {
+  const queueId = randomUUID()
+  await client.query('update app.job_control set queue_id = $2, updated_at = now() where job_id = $1', [
+    job.jobId,
+    queueId,
+  ])
+  await deps.queue.send(client, { ...job, queueId })
+  return queueId
+}
+
 // Whether the job has a question the owner has not answered (at most one: index agent_question_one_open).
 export async function hasOpenQuestion(client: PoolClient, brandId: string, jobId: string): Promise<boolean> {
   const { rowCount } = await client.query(

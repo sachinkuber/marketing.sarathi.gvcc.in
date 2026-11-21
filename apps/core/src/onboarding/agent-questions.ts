@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import type { JobClass } from '@mkt/queue'
 import { AppError } from '../errors.ts'
@@ -7,6 +6,7 @@ import {
   hasOpenQuestion,
   readControl,
   requireCurrentAttempt,
+  resendJob,
   type JobsDeps,
 } from '../jobs/service.ts'
 import type { AttemptClaims } from '../jobs/token.ts'
@@ -198,9 +198,9 @@ export async function listAgentQuestions(pool: Pool, brandId: string): Promise<A
 // click re-queues the job once and writes one statement.
 //
 // The job's queue row completed when the question was asked (the worker ends a waiting job without a result), and
-// the queue library ignores a retry of a completed row, so the job is sent again under a new queue id, recorded in
-// job_control.queue_id, as a kill-switch release does (killswitch/release.ts). The send is in this transaction, so
-// the job runs again if and only if the answer is stored; a late copy of the old row is turned away as superseded.
+// the queue library ignores a retry of a completed row, so the job is sent again under a new queue id (resendJob,
+// as a kill-switch release does). The send is in this transaction, so the job runs again if and only if the answer
+// is stored; a late copy of the old row is turned away as superseded.
 // A job held by a kill switch is sent too: its next start is then held, and the switch's release runs it.
 export async function answerAgentQuestion(
   deps: JobsDeps,
@@ -250,16 +250,10 @@ export async function answerAgentQuestion(
         where brand_id = $1 and id = $2`,
       [input.brandId, input.questionId, input.answer, input.actor.userId, source.rows[0]!.id],
     )
-    const queueId = randomUUID()
-    await client.query('update app.job_control set queue_id = $2, updated_at = now() where job_id = $1', [
-      jobId,
-      queueId,
-    ])
-    await deps.queue.send(client, {
+    await resendJob(client, deps, {
       jobId,
       jobClass: job.rows[0]!.class,
       scheduleKey: brand.rows[0]!.schedule_key,
-      queueId,
     })
     await deps.audit.record(
       {
@@ -278,34 +272,53 @@ export async function answerAgentQuestion(
 
 // ---- Reminders (the worker's timer, through the approvals tick) ----
 
+// What one sweep did: the questions reminded, and the brands whose reminders failed (rolled back whole and logged;
+// they are retried on the next sweep). failedBrands is null when the sweep could not start at all (the platform
+// owners or the brands could not be listed): that is logged, and nothing was tried.
+export interface ReminderSweep {
+  reminded: number
+  failedBrands: number | null
+}
+
 // Every question unanswered for 72 hours since it was asked, or since its last reminder, is reminded to each
-// platform owner, and its reminded_at set to `now` (the caller's clock, passed as a value). Returns how many were
-// reminded. The sweep has no brand context: it walks the brands a platform owner sees (every brand), each in its
-// own transaction, so one brand's failure (rolled back whole, and logged) does not starve the others. A question's
-// row is locked (skip locked) for its reminder, so two overlapping sweeps never send the same one. With no platform
-// owner there is nobody to tell, and nothing is marked reminded.
+// platform owner, and its reminded_at set to `now` (the caller's clock, passed as a value). The sweep has no brand
+// context: it lists only the brands with a question due (app.brands_with_due_agent_questions, a definer function
+// that returns brand ids alone), then works each in its own transaction, so one brand's failure does not starve the
+// others. A question's row is locked (skip locked) for its reminder, so two overlapping sweeps never send the same
+// one. With no platform owner there is nobody to tell, and nothing is marked reminded. It never throws: it runs on
+// the approvals timer, whose counts are already committed and must still be answered.
 export async function remindAgentQuestions(
   pool: Pool,
   now: Date,
   logger?: NotifyDeps['logger'],
-): Promise<number> {
-  const owners = await platformOwnersOf(pool)
-  if (owners.length === 0) return 0
-  const brands = await pool.query<{ id: string }>('select id from app.brands_for_platform_owner($1)', [
-    owners[0],
-  ])
+): Promise<ReminderSweep> {
   const cutoff = new Date(now.getTime() - REMIND_EVERY_MS)
+  let owners: string[]
+  let brands: string[]
+  try {
+    owners = await platformOwnersOf(pool)
+    if (owners.length === 0) return { reminded: 0, failedBrands: 0 }
+    const due = await pool.query<{ id: string }>('select app.brands_with_due_agent_questions($1) as id', [
+      cutoff,
+    ])
+    brands = due.rows.map((r) => r.id)
+  } catch (error) {
+    logger?.error({ err: errorName(error) }, 'agent question reminders could not list the brands')
+    return { reminded: 0, failedBrands: null }
+  }
   let reminded = 0
-  for (const { id: brandId } of brands.rows) {
+  let failedBrands = 0
+  for (const brandId of brands) {
     try {
       reminded += await withBrand(pool, brandId, (client) =>
         remindBrand(client, brandId, owners, now, cutoff),
       )
     } catch (error) {
+      failedBrands += 1
       logger?.error({ err: errorName(error), brand: brandId }, 'agent question reminders failed for a brand')
     }
   }
-  return reminded
+  return { reminded, failedBrands }
 }
 
 async function remindBrand(
@@ -315,20 +328,16 @@ async function remindBrand(
   now: Date,
   cutoff: Date,
 ): Promise<number> {
-  const due = `from app.agent_question q
-                 join app.job_input i on i.brand_id = q.brand_id and i.job_id = q.job_id
-                 join app.job_control c on c.job_id = q.job_id
-                where q.brand_id = $1 and q.answer is null and coalesce(q.reminded_at, q.created_at) < $2
-                  and ${WAITING}`
-  // Most brands have nothing due: they are passed over without a lock.
-  const any = await client.query<{ due: boolean }>(`select exists (select 1 ${due}) as due`, [
-    brandId,
-    cutoff,
-  ])
-  if (!any.rows[0]?.due) return 0
   await client.query('select 1 from app.brand where id = $1 for share', [brandId])
   const found = await client.query<{ id: string; job_id: string }>(
-    `select q.id, q.job_id ${due} order by q.created_at, q.id for update of q skip locked`,
+    `select q.id, q.job_id
+       from app.agent_question q
+       join app.job_input i on i.brand_id = q.brand_id and i.job_id = q.job_id
+       join app.job_control c on c.job_id = q.job_id
+      where q.brand_id = $1 and q.answer is null and coalesce(q.reminded_at, q.created_at) < $2
+        and ${WAITING}
+      order by q.created_at, q.id
+        for update of q skip locked`,
     [brandId, cutoff],
   )
   for (const row of found.rows) {

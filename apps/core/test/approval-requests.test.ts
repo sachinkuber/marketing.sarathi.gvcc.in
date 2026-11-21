@@ -483,6 +483,7 @@ describe('worker route', () => {
       overdue: 0,
       escalated: 0,
       agentQuestionsReminded: 0,
+      agentQuestionsFailedBrands: 0,
     })
     expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
     const anonymous = await fetch(`${stack.server.url}/api/v1/worker/approvals/tick`, { method: 'POST' })

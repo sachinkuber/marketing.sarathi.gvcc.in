@@ -360,13 +360,14 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
             notify.logger?.error({ err: errorName(error) }, 'worker heartbeat not stamped')
           }
           const approvals = await approvalsTick(notify.pool, notify)
-          // Agent questions unanswered for 72 hours ride the same timer (spec 9).
-          const agentQuestionsReminded = await remindAgentQuestions(
-            notify.pool,
-            notify.clock.now(),
-            notify.logger,
-          )
-          res.json({ ...approvals, agentQuestionsReminded })
+          // Agent questions unanswered for 72 hours ride the same timer (spec 9). The sweep never throws, so the
+          // approvals counts above, already committed, are always answered.
+          const questions = await remindAgentQuestions(notify.pool, notify.clock.now(), notify.logger)
+          res.json({
+            ...approvals,
+            agentQuestionsReminded: questions.reminded,
+            agentQuestionsFailedBrands: questions.failedBrands,
+          })
         },
       ],
     })

@@ -132,10 +132,13 @@ export interface JobContext {
   input: unknown
   // When the attempt's token expires: nothing may be started that cannot end before it.
   deadline: Date
-  // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9).
+  // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9). The step that
+  // decides whether to ask must carry them in its request (in its messages, say): a step whose request is unchanged
+  // replays its checkpoint on the next attempt, decides the same way again, and asks again after every answer.
   answers: AgentAnswer[]
   // Asks the owner instead of guessing what blocks the job's output: the question is posted, and JobWaiting ends
-  // the job without a result. Its next attempt, started by the answer, finds the answer in `answers`.
+  // the job without a result. Its next attempt, started by the answer, finds the answer in `answers`; the step that
+  // led to the question must then see it in its request (above), or it replays and asks again.
   ask(question: AgentQuestion): Promise<never>
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
   modelStep(step: string, request: ModelRequest): Promise<ModelStepResult>

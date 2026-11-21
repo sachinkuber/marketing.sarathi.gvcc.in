@@ -103,13 +103,15 @@ export interface CoreClient {
     partNo: number,
   ): Promise<{ firstPage: number; lastPage: number; bytes: Buffer }>
   // The approvals timer: the core sends due reminders and marks and escalates overdue requests.
-  // Unanswered agent questions are reminded on the same call (absent from a core that does not).
+  // Unanswered agent questions are reminded on the same call (absent from a core that does not). Their failed
+  // brands are null when that sweep could not start.
   approvalsTick(workerId: string): Promise<{
     reminded: number
     overdue: number
     escalated: number
     failedBrands: number
     agentQuestionsReminded?: number
+    agentQuestionsFailedBrands?: number | null
   }>
 }
 
@@ -169,6 +171,7 @@ export const replySchemas = {
     escalated: z.number().int().min(0),
     failedBrands: z.number().int().min(0),
     agentQuestionsReminded: z.number().int().min(0).optional(),
+    agentQuestionsFailedBrands: z.number().int().min(0).nullable().optional(),
   }),
   unmarkedDead: z.object({ jobIds: z.array(z.string()) }),
   documents: z.array(
