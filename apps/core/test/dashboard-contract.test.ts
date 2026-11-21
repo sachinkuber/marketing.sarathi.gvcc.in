@@ -21,6 +21,7 @@ import {
   briefChoicesReply,
   briefChoicesStartedReply,
   briefStartedReply,
+  changesRequestedReply,
   decisionReply,
   homeReply,
   intakeSavedReply,
@@ -714,6 +715,8 @@ describe('the dashboard schemas accept the core’s replies', () => {
           state: 'awaiting_approval',
           revision: 0,
           needsDecision: false,
+          // The strategist job started above has not been picked up.
+          job: { state: 'waiting' },
         },
         gate1: false,
       })
@@ -731,6 +734,38 @@ describe('the dashboard schemas accept the core’s replies', () => {
       expect(() =>
         onboardingReply.shape.brief.parse({ itemId: 'x', versionId: 'y', number: 0, state: 'approved' }),
       ).toThrow()
+
+      // Ask for changes on a later version: the version closes; this stack starts no rewrite.
+      const later = await withBrand(stack.appPool, brand, async (client) => {
+        const actor = { kind: 'agent' as const, runId: started.json.runId as string }
+        const deps = { audit: stack.jobs!.audit }
+        const v = await createVersion(client, deps, {
+          brandId: brand,
+          contentItemId: briefItem,
+          payload: {
+            kind: 'strategy_brief',
+            language: 'en',
+            body: [{ type: 'paragraph', text: 'Shine on.' }],
+          },
+          createdBy: actor,
+          provenance: { source: 'strategist', revision: 0 },
+        })
+        await moveState(client, deps, v.versionId, 'in_checks', actor)
+        await moveState(client, deps, v.versionId, 'awaiting_approval', actor)
+        return v
+      })
+      const changes = await owner.request(
+        'POST',
+        api(brand, `/content/${briefItem}/versions/${later.versionId}/changes`),
+        { body: { comment: 'Lead with fleets.' } },
+      )
+      expect(changes.status, JSON.stringify(changes.json)).toBe(201)
+      expect(changesRequestedReply.parse(changes.json).runId).toBeNull()
+      expect(await overview()).toMatchObject({
+        brief: { versionId: later.versionId, state: 'rejected', needsDecision: false },
+        gate1: false,
+      })
+      expect(() => changesRequestedReply.parse({ approvalId: 'x' })).toThrow()
     })
   })
 

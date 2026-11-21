@@ -4,13 +4,15 @@ import { errorName, type NotifyDeps } from '../notify/ports.ts'
 import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify/recipients.ts'
 
 // THE lock order of the service, for every path that takes more than one of these (tests: lock-order.test.ts):
-//   1. the brand row (a release takes it FOR UPDATE; job creation, a result post and this tick take it FOR SHARE)
-//   2. job_input   3. run   4. content rows (item, version, state)   5. approval_request   6. the audit chain
+//   1. the brand row (a release takes it FOR UPDATE; job creation, a result post, a decision, a fact change and this
+//      tick take it FOR SHARE)
+//   2. job_input   3. run   4. the onboarding row (lockOnboarding)   5. content rows (item, version, state)
+//   6. approval_request   7. the audit chain
 // A path takes the locks it needs in that order and never goes back. The tick below takes the brand row first,
 // then locks request rows, then writes audit entries and notifications (a notification's brand reference
 // would otherwise ask for the brand row after the audit chain is held, against a release that holds the
 // brand row and asks for the chain). A result handler that moves a version to awaiting_approval reaches
-// approval_request (5) after job_input and run; a kill-switch release writes its own entry (6) last.
+// approval_request (6) after job_input and run; a kill-switch release writes its own entry (7) last.
 //
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 
@@ -55,6 +57,7 @@ export const OVERDUE_KIND = 'approval_overdue'
 interface OpenRow {
   id: string
   content_version_id: string
+  kind: string
   reminder_due: boolean
   overdue_due: boolean
   escalate_due: boolean
@@ -68,7 +71,9 @@ interface OpenRow {
 // Per request, at most one step per call: a reminder (number n is due at requested_at + first + (n-1) * gap, while
 // fewer than `reminder_count` have gone), or, once all reminders have gone and one gap has passed since the last,
 // overdue plus escalation to the brand admins, or, one gap after that, escalation to the platform owners. After a
-// long outage one call therefore sends one reminder and the next call the next one, never a burst.
+// long outage one call therefore sends one reminder and the next call the next one, never a burst. Who is reminded
+// depends on the item's kind, as for the arrival (approvalRecipientsOf): a strategy brief is the platform owners'
+// alone, so they are reminded and, there being no one above them, it is marked overdue without escalation.
 //
 // The time is the injected clock's, passed to the database as a value (never now()), and the settings are read
 // in the same statement, so a change made a moment ago is used. Each request row is locked (skip locked) for its
@@ -88,8 +93,9 @@ export async function tick(
         // Lock order, step 1: the brand row, shared like job creation takes it, so a release (FOR UPDATE)
         // finishes first and this brand's tick never holds a later lock while waiting for it.
         await client.query('select 1 from app.brand where id = $1 for share', [brandId])
+        // The item's kind is read with the request (the item and version are not locked: neither changes).
         const open = await client.query<OpenRow>(
-          `select r.id, r.content_version_id, r.escalated_to,
+          `select r.id, r.content_version_id, r.escalated_to, i.kind,
                 (r.reminders_sent < s.reminder_count
                  and $2 >= greatest(r.requested_at + s.first_reminder_after + r.reminders_sent * s.reminder_gap,
                                     coalesce(r.last_reminder_at + s.reminder_gap, r.requested_at))) as reminder_due,
@@ -100,6 +106,8 @@ export async function tick(
            from app.approval_request r
            join app.content_version_state st
              on st.content_version_id = r.content_version_id and st.brand_id = r.brand_id
+           join app.content_version v on v.id = r.content_version_id and v.brand_id = r.brand_id
+           join app.content_item i on i.id = v.content_item_id and i.brand_id = v.brand_id
            join app.approval_setting s on s.brand_id = r.brand_id
           where r.brand_id = $1 and r.closed_at is null and st.state = 'awaiting_approval'
           order by r.requested_at, r.id
@@ -107,7 +115,15 @@ export async function tick(
           [brandId, now],
         )
         if (open.rows.length === 0) return
-        const approvers = await approvalRecipientsOf(client, brandId)
+        // Who may approve, by kind; read once per kind.
+        const byKind = new Map<string, string[]>()
+        const approversOf = async (kind: string) => {
+          const known = byKind.get(kind)
+          if (known) return known
+          const found = await approvalRecipientsOf(client, brandId, kind)
+          byKind.set(kind, found)
+          return found
+        }
         const admins = await brandAdminsOf(client, brandId)
         const subject = (row: OpenRow) => ({ kind: 'content_version', id: row.content_version_id })
         const tell = async (users: string[], kind: string, row: OpenRow) => {
@@ -121,6 +137,7 @@ export async function tick(
             client,
           )
         for (const row of open.rows) {
+          const approvers = await approversOf(row.kind)
           if (row.reminder_due) {
             if (approvers.length === 0) {
               // Nobody can approve here (no approver, brand admin or platform owner): the reminder is not

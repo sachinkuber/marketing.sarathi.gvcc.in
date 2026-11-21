@@ -386,6 +386,7 @@ describe('the strategy brief', () => {
       state: 'awaiting_approval',
       revision: 0,
       needsDecision: false,
+      job: { state: 'done' },
     })
     expect(seen.gate1).toBe(false)
 
@@ -504,6 +505,16 @@ describe('the strategy brief', () => {
       revision: 1,
       needsDecision: false,
     })
+    // A change request names the brief's latest version: an earlier one is refused before anything is written.
+    const runs = await q(`select id from app.run where brand_id = $1 order by id`, [first.brandId])
+    await expect(
+      startStrategist(stack.appPool, jobs, {
+        brandId: first.brandId,
+        actor: { userId: ownerId },
+        changeRequest: { comment: 'Lead with fleets.', previousVersionId: first.versionId },
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'not_current_version' })
+    expect(await q(`select id from app.run where brand_id = $1 order by id`, [first.brandId])).toEqual(runs)
   })
 
   it('the overview says a brief closed by a change request at the revision limit needs a decision', async () => {
@@ -679,6 +690,44 @@ describe('the strategy brief', () => {
     expect(await stepOf(made.brandId)).toBe('done')
     expect(await passed()).toEqual([{ versionId: made.versionId }, { versionId: next.versionId }])
     expect((await overview(made.brandId)).gate1).toBe(true)
+  })
+
+  it('the platform owner rejects a brief and the step stays brief', async () => {
+    const made = await withBrief()
+    const rejected = await owner.request(
+      'POST',
+      contentApi(made.brandId, `/${made.itemId}/versions/${made.versionId}/reject`),
+      { body: { reason: 'Not the direction we want.' } },
+    )
+    expect(rejected.status, JSON.stringify(rejected.json)).toBe(201)
+    expect(await stateOf(made.versionId)).toBe('rejected')
+    expect(await stepOf(made.brandId)).toBe('brief')
+    const seen = await overview(made.brandId)
+    expect(seen.brief).toMatchObject({ versionId: made.versionId, state: 'rejected', needsDecision: false })
+    expect(seen.gate1).toBe(false)
+    expect(
+      await q(`select 1 from audit.log where action = 'onboarding.gate_passed' and brand_id = $1`, [
+        made.brandId,
+      ]),
+    ).toEqual([])
+  })
+
+  it('approving a brief while onboarding is at another step passes no gate', async () => {
+    const made = await withBrief()
+    // Not reachable through the routes; the approval must not claim a gate it did not pass.
+    await q(`update app.onboarding set step = 'brief_choices' where brand_id = $1`, [made.brandId])
+    const approved = await owner.request(
+      'POST',
+      contentApi(made.brandId, `/${made.itemId}/versions/${made.versionId}/approve`),
+      { body: { hash: made.hash, hash_scheme: 'cv1' } },
+    )
+    expect(approved.status, JSON.stringify(approved.json)).toBe(201)
+    expect(await stepOf(made.brandId)).toBe('brief_choices')
+    expect(
+      await q(`select 1 from audit.log where action = 'onboarding.gate_passed' and brand_id = $1`, [
+        made.brandId,
+      ]),
+    ).toEqual([])
   })
 
   it('an edit of a brief is refused', async () => {

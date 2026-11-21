@@ -9,12 +9,13 @@ import {
   type ChoiceKey,
   type StrategistInput,
 } from '@mkt/shared'
+import { refusalInSavepoint, type ChangeHandler, type ChangeHandlers } from '../content/change-handlers.ts'
 import { createVersion, moveState } from '../content/versions.ts'
 import { AppError } from '../errors.ts'
 import type { ResultHandler } from '../jobs/results.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import { buildBriefChoicesInput } from './brief-choices.ts'
-import { latestStrategistJob, STRATEGIST_AGENT } from './brief-state.ts'
+import { BRIEF_REVISION_LIMIT, latestStrategistJob, STRATEGIST_AGENT } from './brief-state.ts'
 import { clip } from './input-text.ts'
 import { researchRunIsOpen } from './runs.ts'
 import { lockOnboarding } from './suggestions.ts'
@@ -111,14 +112,14 @@ async function derivedRevision(
 }
 
 // The change request as the strategist reads it: the comment and the text of the version it is about, which must
-// be a version of the brand's brief.
+// be the brand's brief's current version (the revision is counted from it).
 async function changeRequestOf(
   client: PoolClient,
   brandId: string,
   request: ChangeRequest,
 ): Promise<NonNullable<StrategistInput['changeRequest']>> {
-  const found = await client.query<{ payload_canonical: string }>(
-    `select v.payload_canonical
+  const found = await client.query<{ payload_canonical: string; current: boolean }>(
+    `select v.payload_canonical, i.current_version_id = v.id as current
        from app.content_version v
        join app.content_item i on i.brand_id = v.brand_id and i.id = v.content_item_id
       where v.brand_id = $1 and v.id = $2 and i.kind = 'strategy_brief'`,
@@ -126,6 +127,13 @@ async function changeRequestOf(
   )
   const row = found.rows[0]
   if (!row) throw notFound()
+  if (!row.current) {
+    throw new AppError(
+      409,
+      'not_current_version',
+      "This is not the brief's latest version. Ask for changes on the latest one.",
+    )
+  }
   const payload = JSON.parse(row.payload_canonical) as { body?: BodyBlock[] }
   const previous = clip(briefText(payload.body ?? []), PREVIOUS_MAX)
   const comment = clip(request.comment.trim(), COMMENT_MAX)
@@ -245,6 +253,47 @@ export async function startStrategistWithin(
     client,
   )
   return { runId, jobId, revision }
+}
+
+// ---- Ask for changes (Task 7, app flow 5.6) ----
+
+// Below the revision limit, asking for changes on a brief starts the strategist again with the owner's comment and
+// the closed version's text, in the decision's transaction; the new version's revision is one more than the closed
+// one's. At the limit nothing starts, and the overview says the brief needs the owner's decision. A refusal of the
+// start (no live release, the queue full, a brief already being written, a choice open, no fact in force...) rolls
+// back only the start, in its savepoint: the decision stands, nothing starts, and the refusal is audited by its code.
+export function briefChangeHandler(deps: StrategistDeps): ChangeHandler {
+  return async (client, ctx) => {
+    const found = await client.query<{ revision: number | null }>(
+      `select (provenance->>'revision')::int as revision from app.content_version where brand_id = $1 and id = $2`,
+      [ctx.brandId, ctx.versionId],
+    )
+    if ((found.rows[0]?.revision ?? 0) >= BRIEF_REVISION_LIMIT) return null
+    const outcome = await refusalInSavepoint(client, () =>
+      startStrategistWithin(client, deps, {
+        brandId: ctx.brandId,
+        actor: ctx.actor,
+        changeRequest: { comment: ctx.comment, previousVersionId: ctx.versionId },
+      }),
+    )
+    if ('done' in outcome) return { runId: outcome.done.runId }
+    await deps.audit.record(
+      {
+        action: 'onboarding.brief_revision_not_started',
+        actor: ctx.actor.userId,
+        subject: ctx.versionId,
+        brandId: ctx.brandId,
+        outcome: 'failure',
+        detail: { reason: outcome.refused.code },
+      },
+      client,
+    )
+    return null
+  }
+}
+
+export function registerBriefChangeHandler(handlers: ChangeHandlers, deps: StrategistDeps): void {
+  handlers.set('strategy_brief', briefChangeHandler(deps))
 }
 
 // ---- The result (strategy_brief.v1) ----

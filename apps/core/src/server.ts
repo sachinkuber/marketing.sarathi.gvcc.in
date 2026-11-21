@@ -15,8 +15,10 @@ import {
   registerStrategistHandlers,
   registerSummaryHandlers,
 } from './agents/register.ts'
+import type { ChangeHandlers } from './content/change-handlers.ts'
 import type { ResultHandlers } from './jobs/results.ts'
 import type { SettledHooks } from './jobs/service.ts'
+import { registerBriefChangeHandler } from './onboarding/brief.ts'
 import { ecbFxSource } from './triggers/fx.ts'
 
 export interface RunningServer {
@@ -70,6 +72,14 @@ export async function startServer(
   registerFactsRulesHandlers(results, { audit: deps.audit })
   registerBriefChoicesHandlers(results, { audit: deps.audit })
   registerStrategistHandlers(results, { audit: deps.audit })
+  // Ask for changes on a strategy brief starts the strategist again (app flow 5.6).
+  const changeHandlers: ChangeHandlers = new Map()
+  registerBriefChangeHandler(changeHandlers, {
+    audit: deps.audit,
+    queue,
+    backlogLimit: config.queueBacklogLimit,
+    now: () => new Date(),
+  })
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,
@@ -103,6 +113,7 @@ export async function startServer(
       results,
       settled,
     },
+    changeHandlers,
   })
   let server: Server
   try {

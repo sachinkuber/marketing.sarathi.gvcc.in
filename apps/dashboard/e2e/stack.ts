@@ -38,6 +38,7 @@ import { DbAudit } from '../../core/src/audit/db-audit.ts'
 import { AttemptLimiter } from '../../core/src/auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from '../../core/src/auth/policy.ts'
 import type { Config } from '../../core/src/config.ts'
+import type { ChangeHandlers } from '../../core/src/content/change-handlers.ts'
 import { createVersion, moveState } from '../../core/src/content/versions.ts'
 import { buildCore } from '../../core/src/core.ts'
 import { createLogger } from '../../core/src/logger.ts'
@@ -45,6 +46,7 @@ import type { Clock } from '../../core/src/notify/ports.ts'
 import type { Mailer, MailMessage, SendReceipt } from '../../core/src/ports.ts'
 import type { JobsDeps } from '../../core/src/jobs/service.ts'
 import type { ResultHandlers } from '../../core/src/jobs/results.ts'
+import { registerBriefChangeHandler } from '../../core/src/onboarding/brief.ts'
 import { addBrand, addUser, enrol, TestClient, totp } from '../../core/test/support.ts'
 import { httpCoreClient } from '../../worker/src/core-client.ts'
 import { BRIEF_CHOICES_DIR } from '../../worker/src/agents/brief-choices.ts'
@@ -193,6 +195,9 @@ export async function startStack(env: Record<string, string | undefined> = proce
   registerFactsRulesHandlers(results, jobs)
   registerBriefChoicesHandlers(results, jobs)
   registerStrategistHandlers(results, jobs)
+  // Ask for changes on a brief starts the strategist again, as in server.ts.
+  const changeHandlers: ChangeHandlers = new Map()
+  registerBriefChangeHandler(changeHandlers, jobs)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(
@@ -226,6 +231,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
     mailer: new FileMailer(mailFile(env)),
     audit,
     jobs,
+    changeHandlers,
     clock,
     daily: {
       ownerViewPool,

@@ -18,6 +18,7 @@ import {
   type FactsRulesInput,
   type SafetyRuleKind,
 } from '@mkt/shared'
+import { invalidateFactCitations } from '../content/invalidate.ts'
 import { AppError } from '../errors.ts'
 import type { ResultHandler } from '../jobs/results.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
@@ -547,6 +548,12 @@ const factNotActive = () =>
     'This fact is no longer in force: it was replaced or retired. Change the fact that is in force instead.',
   )
 
+// A change of a fact can invalidate content citing it, which writes notifications (they reference the brand row). So
+// the brand row is taken first, shared, as approvals/requests.ts orders the locks: a kill-switch release holding it
+// while it applies a held result that wants the onboarding row then finishes first instead of deadlocking.
+const lockBrand = (client: PoolClient, brandId: string) =>
+  client.query('select 1 from app.brand where id = $1 for share', [brandId])
+
 async function lockActiveFact(
   client: PoolClient,
   brandId: string,
@@ -585,6 +592,7 @@ export async function replaceFact(
 ): Promise<{ factId: string }> {
   try {
     return await withBrand(pool, input.brandId, async (client) => {
+      await lockBrand(client, input.brandId)
       await lockOnboarding(client, input.brandId)
       const old = await lockActiveFact(client, input.brandId, input.factId)
       await refuseActiveFactTwin(client, input.brandId, input.statement, input.factId)
@@ -608,6 +616,15 @@ export async function replaceFact(
         input.factId,
         newFactId,
       ])
+      // A new wording leaves every citation of the old one behind (spec 10); a new review date alone keeps it.
+      if (!dateOnly) {
+        await invalidateFactCitations(client, deps, {
+          brandId: input.brandId,
+          factId: input.factId,
+          reason: 'fact_changed',
+          actor: { kind: 'user', userId: input.actor.userId },
+        })
+      }
       await deps.audit.record(
         {
           action: 'onboarding.fact_changed',
@@ -626,19 +643,26 @@ export async function replaceFact(
   }
 }
 
-// A retired fact is kept, marked expired; nothing may cite it from then on.
+// A retired fact is kept, marked expired; nothing may cite it from then on, and what cited it loses its standing.
 export async function retireFact(
   pool: Pool,
   deps: { audit: AuditSink },
   input: { brandId: string; factId: string; actor: { userId: string } },
 ): Promise<{ factId: string }> {
   return withBrand(pool, input.brandId, async (client) => {
+    await lockBrand(client, input.brandId)
     await lockOnboarding(client, input.brandId)
     await lockActiveFact(client, input.brandId, input.factId)
     await client.query(`update app.verified_fact set status = 'expired' where brand_id = $1 and id = $2`, [
       input.brandId,
       input.factId,
     ])
+    await invalidateFactCitations(client, deps, {
+      brandId: input.brandId,
+      factId: input.factId,
+      reason: 'fact_changed',
+      actor: { kind: 'user', userId: input.actor.userId },
+    })
     await deps.audit.record(
       {
         action: 'onboarding.fact_changed',

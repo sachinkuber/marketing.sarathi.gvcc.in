@@ -331,6 +331,8 @@ export const contentItemReply = z.strictObject({
 })
 
 export const decisionReply = z.strictObject({ approvalId: z.string() })
+// Ask for changes: the version is closed; runId is the rewrite it started (a strategy brief's), or null.
+export const changesRequestedReply = z.strictObject({ approvalId: z.string(), runId: z.string().nullable() })
 export const commentReply = z.strictObject({ ok: z.literal(true) })
 export const versionCreatedReply = z.strictObject({
   versionId: z.uuid(),
@@ -526,7 +528,8 @@ export const onboardingReply = z.strictObject({
     })
     .nullable(),
   // The strategy brief's latest version; null before the first brief. needsDecision: closed by a change request
-  // at the revision limit, so no new version comes until the owner decides.
+  // at the revision limit, so no new version comes until the owner decides. job: the latest strategist job, so
+  // the screen can show a new version being written (or waiting on a question).
   brief: z
     .strictObject({
       itemId: z.string(),
@@ -535,6 +538,7 @@ export const onboardingReply = z.strictObject({
       state: versionState,
       revision: z.number().int().nonnegative(),
       needsDecision: z.boolean(),
+      job: z.strictObject({ state: agentJobState, questionId: z.string().optional() }).nullable(),
     })
     .nullable(),
   // Gate 1: the latest brief version is approved.

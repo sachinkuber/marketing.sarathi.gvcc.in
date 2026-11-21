@@ -5,6 +5,7 @@ import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { registerSummaryHandlers } from '../src/agents/register.ts'
 import { tick } from '../src/approvals/requests.ts'
+import { approve } from '../src/approvals/service.ts'
 import { ManualClock } from '../src/notify/doubles.ts'
 import { createVersion, moveState } from '../src/content/versions.ts'
 import { createJob, createRun, postResult, type JobsDeps } from '../src/jobs/service.ts'
@@ -182,6 +183,54 @@ describe('one lock order across release, the approvals tick and results', () => 
       [versionId],
     )
     expect(state.rows[0].state).toBe('superseded')
+  }, 60_000)
+
+  it('a decision on a brief takes the brand row before the onboarding row: a release that holds the brand row and then applies a held strategist result does not deadlock it', async () => {
+    await stack.db.admin.query(
+      `insert into app.onboarding (brand_id, step) values ($1, 'brief') on conflict (brand_id) do nothing`,
+      [brand],
+    )
+    const item = (
+      await stack.db.admin.query(
+        `insert into app.content_item (brand_id, kind) values ($1, 'strategy_brief') returning id`,
+        [brand],
+      )
+    ).rows[0].id as string
+    const version = await withBrand(stack.appPool, brand, async (client) => {
+      const created = await createVersion(client, jobs, {
+        brandId: brand,
+        contentItemId: item,
+        payload: { kind: 'strategy_brief', language: 'en', body: [{ type: 'paragraph', text: 'Shine.' }] },
+        createdBy: { kind: 'system' },
+      })
+      await moveState(client, jobs, created.versionId, 'in_checks', { kind: 'system' })
+      await moveState(client, jobs, created.versionId, 'awaiting_approval', { kind: 'system' })
+      return created
+    })
+    const holding = await holder()
+    try {
+      // A release holds the brand row; applying the held brief result then takes the onboarding row.
+      await holding.query('select 1 from app.brand where id = $1 for update', [brand])
+      const deciding = approve(stack.appPool, jobs, {
+        brandId: brand,
+        itemId: item,
+        versionId: version.versionId,
+        actor: { kind: 'user', userId: adminId },
+        role: 'platform_owner',
+        hash: version.hash,
+        scheme: 'cv1',
+      }).then(
+        (value) => value,
+        (error: unknown) => error,
+      )
+      await untilSomeoneWaitsOnALock()
+      await holding.query('select 1 from app.onboarding where brand_id = $1 for update', [brand])
+      await holding.query('commit')
+      expect(await deciding).toMatchObject({ approvalId: expect.any(String) })
+    } finally {
+      await holding.query('rollback').catch(() => undefined)
+      holding.release()
+    }
   }, 60_000)
 
   it('a result post takes the brand row before the job row: a holder of the brand row that then wants the job row does not deadlock it', async () => {

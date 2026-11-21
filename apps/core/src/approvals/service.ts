@@ -1,11 +1,16 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { grantFor, type Actor as Role } from '../access/permissions.ts'
+import type { ChangeHandlers } from '../content/change-handlers.ts'
+import { invalidateVersion, staleCitation } from '../content/invalidate.ts'
 import { moveState, type Actor, type VersionDeps } from '../content/versions.ts'
 import type { VersionState } from '../content/states.ts'
 import { AppError } from '../errors.ts'
 import { lockOnboarding } from '../onboarding/suggestions.ts'
 
 export interface ApprovalDeps extends VersionDeps {
+  // What "ask for changes" starts, by content kind (built at server start). Unset or without the kind: the comment
+  // is kept and nothing starts.
+  changeHandlers?: ChangeHandlers
   // For tests only: runs right after the approval row is inserted, so a test can make the decision fail
   // half way. Production never sets it.
   afterApprovalInsert?: () => void
@@ -50,14 +55,17 @@ async function lockVersion(client: PoolClient, target: DecisionTarget): Promise<
 // approvers or admins, whatever approve_content gives them elsewhere.
 const OWNER_DECIDES: ReadonlySet<string> = new Set(['strategy_brief'])
 
-// Before any lock: the item's kind (it never changes) says who may decide, so a person who may not is refused
-// whatever the version's state. A brief's decision changes onboarding, so for a brief the onboarding row is locked
-// first, in the order the strategist's result takes them (onboarding, then the content rows). Then the version.
-// Ask for changes (Task 7) decides the same way.
+// The lock order of approvals/requests.ts: first the brand row, shared, as a result post and the approvals tick take
+// it, so a kill-switch release (which holds it FOR UPDATE and then applies held results, a strategist's among them)
+// finishes first and a decision never holds a later lock while waiting for it. Then the item's kind (it never
+// changes) says who may decide, so a person who may not is refused whatever the version's state. A brief's decision
+// changes onboarding, so for a brief the onboarding row is locked next, in the order the strategist's result takes
+// them (onboarding, then the content rows). Then the version. Approve, reject and ask for changes decide this way.
 export async function lockForDecision(
   client: PoolClient,
   target: DecisionTarget,
 ): Promise<Locked & { kind: string }> {
+  await client.query('select 1 from app.brand where id = $1 for share', [target.brandId])
   const found = await client.query<{ kind: string }>(
     `select i.kind from app.content_item i
        join app.content_version v on v.brand_id = i.brand_id and v.content_item_id = i.id
@@ -117,17 +125,36 @@ async function auditRefusal(
   }
 }
 
+const factChanged = () =>
+  new AppError(409, 'fact_changed', 'A fact this brief cites changed. Ask for a new version.')
+
 export async function approve(
   pool: Pool,
   deps: ApprovalDeps,
   input: DecisionTarget & { hash: string; scheme: string },
 ): Promise<{ approvalId: string }> {
   try {
-    return await withBrand(pool, input.brandId, async (client) => {
+    const done = await withBrand(pool, input.brandId, async (client) => {
       const locked = await lockForDecision(client, input)
       requireAwaiting(locked.state)
       if (locked.hash !== input.hash || locked.hashScheme !== input.scheme) {
         throw new AppError(409, 'stale_hash', 'The content has changed since it was shown; review it again.')
+      }
+      if (locked.kind === 'strategy_brief') {
+        // Spec 10: a brief is approved only while every fact it cites is current. One that is not is invalidated
+        // here, as a fact change would have done, and that is kept: the refusal is thrown once it has committed.
+        const factId = await staleCitation(client, input.brandId, input.versionId)
+        if (factId !== null) {
+          await invalidateVersion(client, deps, {
+            brandId: input.brandId,
+            versionId: input.versionId,
+            from: locked.state,
+            factId,
+            reason: 'fact_changed',
+            actor: input.actor,
+          })
+          return null
+        }
       }
       const inserted = await client.query<{ id: string }>(
         `insert into app.approval (brand_id, content_version_id, version_hash, hash_scheme, decision, decided_by)
@@ -156,25 +183,30 @@ export async function approve(
       )
       if (locked.kind === 'strategy_brief') {
         // Gate 1 (spec 10): the approved brief completes onboarding, and a later brief's approval passes it again.
-        await client.query(
+        // Only an onboarding at the brief (or done) passes it, and only then is it audited.
+        const passed = await client.query(
           `update app.onboarding set step = 'done', completed_at = now()
             where brand_id = $1 and step in ('brief', 'done')`,
           [input.brandId],
         )
-        await deps.audit.record(
-          {
-            action: 'onboarding.gate_passed',
-            actor: input.actor.userId,
-            subject: input.versionId,
-            brandId: input.brandId,
-            outcome: 'success',
-            detail: { versionId: input.versionId },
-          },
-          client,
-        )
+        if ((passed.rowCount ?? 0) > 0) {
+          await deps.audit.record(
+            {
+              action: 'onboarding.gate_passed',
+              actor: input.actor.userId,
+              subject: input.versionId,
+              brandId: input.brandId,
+              outcome: 'success',
+              detail: { versionId: input.versionId },
+            },
+            client,
+          )
+        }
       }
       return { approvalId }
     })
+    if (done === null) throw factChanged()
+    return done
   } catch (error) {
     await auditRefusal(deps, 'approval.approved', input, error)
     throw error
@@ -213,6 +245,61 @@ export async function reject(
     })
   } catch (error) {
     await auditRefusal(deps, 'approval.rejected', input, error)
+    throw error
+  }
+}
+
+// Ask for changes (app flow 5.6): the comment is recorded as an approval of decision changes_requested on the version's
+// own hash, and the version is closed (rejected, cause changes_requested), which closes its request. Then the item's
+// kind may start new work from the comment in the same transaction (a strategy brief's next revision): its run, or
+// null when nothing started. The comment is kept in the approval row only; the audit carries ids and the version's
+// revision (null for a version that has none).
+export async function askForChanges(
+  pool: Pool,
+  deps: ApprovalDeps,
+  input: DecisionTarget & { comment: string },
+): Promise<{ approvalId: string; runId: string | null }> {
+  try {
+    return await withBrand(pool, input.brandId, async (client) => {
+      const locked = await lockForDecision(client, input)
+      requireAwaiting(locked.state)
+      const inserted = await client.query<{ id: string }>(
+        `insert into app.approval
+           (brand_id, content_version_id, version_hash, hash_scheme, decision, decided_by, comment)
+         values ($1, $2, $3, $4, 'changes_requested', $5, $6) returning id`,
+        [input.brandId, input.versionId, locked.hash, locked.hashScheme, input.actor.userId, input.comment],
+      )
+      const approvalId = inserted.rows[0]!.id
+      await moveState(client, deps, input.versionId, 'rejected', input.actor, 'changes_requested')
+      const version = await client.query<{ revision: number | null }>(
+        `select (provenance->>'revision')::int as revision from app.content_version where brand_id = $1 and id = $2`,
+        [input.brandId, input.versionId],
+      )
+      await deps.audit.record(
+        {
+          action: 'approval.changes_requested',
+          actor: input.actor.userId,
+          subject: input.versionId,
+          brandId: input.brandId,
+          outcome: 'success',
+          detail: { approvalId, revision: version.rows[0]?.revision ?? null },
+        },
+        client,
+      )
+      const handler = deps.changeHandlers?.get(locked.kind)
+      const started = handler
+        ? await handler(client, {
+            brandId: input.brandId,
+            itemId: input.itemId,
+            versionId: input.versionId,
+            comment: input.comment,
+            actor: input.actor,
+          })
+        : null
+      return { approvalId, runId: started?.runId ?? null }
+    })
+  } catch (error) {
+    await auditRefusal(deps, 'approval.changes_requested', input, error)
     throw error
   }
 }

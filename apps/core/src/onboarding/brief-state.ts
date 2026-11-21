@@ -1,6 +1,6 @@
 import type { PoolClient } from '@mkt/db'
 import type { VersionState } from '../content/states.ts'
-import { latestAgentJob, type AgentJob } from './agent-questions.ts'
+import { latestAgentJob, type AgentJob, type AgentJobState } from './agent-questions.ts'
 
 // What the overview needs of the strategy brief, kept apart from brief.ts so that research.ts (the overview)
 // imports nothing that imports it back.
@@ -25,6 +25,9 @@ export interface BriefBlock {
   revision: number
   // Closed by a change request at the revision limit: no new version comes until the owner decides.
   needsDecision: boolean
+  // The latest strategist job, so a screen can show that a new version is being written (or waits on a question);
+  // null when none was started.
+  job: { state: AgentJobState; questionId?: string } | null
 }
 
 // The overview's part: the brand's brief item's latest version (null before the first brief), and gate 1, which
@@ -54,6 +57,7 @@ export async function readBriefBlock(
   )
   const row = found.rows[0]
   if (!row) return { brief: null, gate1: false }
+  const job = await latestStrategistJob(client, brandId)
   return {
     brief: {
       itemId: row.item_id,
@@ -63,6 +67,7 @@ export async function readBriefBlock(
       revision: row.revision,
       needsDecision:
         row.state === 'rejected' && row.changes_requested && row.revision >= BRIEF_REVISION_LIMIT,
+      job: job ? { state: job.state, ...(job.questionId ? { questionId: job.questionId } : {}) } : null,
     },
     gate1: row.state === 'approved',
   }

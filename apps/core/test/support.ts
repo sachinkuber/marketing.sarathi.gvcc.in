@@ -7,6 +7,7 @@ import { openQueue } from '@mkt/queue'
 import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase, totp } from '@mkt/test-support'
 import type { Config } from '../src/config.ts'
+import type { ChangeHandlers } from '../src/content/change-handlers.ts'
 import { buildCore, type CoreDeps } from '../src/core.ts'
 import { DbAudit } from '../src/audit/db-audit.ts'
 import { createLogger } from '../src/logger.ts'
@@ -59,6 +60,8 @@ export interface Stack {
   core: ReturnType<typeof buildCore>
   // The work engine's dependencies; null unless the stack was built with withQueue.
   jobs: JobsDeps | null
+  // What "ask for changes" starts, by content kind: empty, a test registers what it needs.
+  changeHandlers: ChangeHandlers
   server: TestServer
   // What the service logged at level warn and above, one JSON line each.
   logs: string[]
@@ -138,6 +141,7 @@ export async function createStack(
         settled: new Map(),
       }
     : null
+  const changeHandlers: ChangeHandlers = new Map()
   const core = buildCore({
     config,
     logger: createLogger('warn', { write: (line: string) => void logs.push(line) }),
@@ -146,6 +150,7 @@ export async function createStack(
     mailer,
     audit: sink,
     jobs: jobs ?? undefined,
+    changeHandlers,
     alertChannel: options.alertChannel,
     clock: options.clock,
     daily:
@@ -175,6 +180,7 @@ export async function createStack(
     limiter,
     core,
     jobs,
+    changeHandlers,
     server,
     logs,
     newClient: () => new TestClient(server.url, ORIGIN),
