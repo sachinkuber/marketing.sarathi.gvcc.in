@@ -10,7 +10,7 @@ import {
   type LoadedAgent,
 } from '@mkt/shared'
 import { buildFactsRulesRequest } from '../agents/facts-rules.ts'
-import { buildQuestionnaireRequest } from '../agents/questionnaire.ts'
+import { buildQuestionnaireRequest, withoutLoneOptions } from '../agents/questionnaire.ts'
 import { buildResearchGroupRequest, buildResearchMergeRequest } from '../agents/research.ts'
 import { buildSummaryRequest } from '../agents/summary.ts'
 import { extractJsonObject } from '../json-reply.ts'
@@ -146,7 +146,11 @@ export const EVAL_RUNNERS: Record<string, { inputSchema: ZodType; run: EvalRunne
     inputSchema: questionnaireCaseSchema,
     run: async (model, def, input) => {
       const { answers, ...questionnaireInput } = questionnaireCaseSchema.parse(input)
-      return graded(await model.send(buildQuestionnaireRequest(def, questionnaireInput, answers ?? [])))
+      const reply = graded(
+        await model.send(buildQuestionnaireRequest(def, questionnaireInput, answers ?? [])),
+      )
+      // Graded as the job handler would store it: a lone option becomes the suggestion first.
+      return { ...reply, output: withoutLoneOptions(reply.output) }
     },
   },
   facts_rules: {
