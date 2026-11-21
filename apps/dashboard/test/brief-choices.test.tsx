@@ -159,6 +159,48 @@ describe('the brief choices screen, driven', () => {
     expect(dom.text()).toContain('Decide the open facts and rules first.')
   })
 
+  it('a decided pick that is one of the options says Your pick; typed text says Your own words', async () => {
+    await open(
+      choices([
+        choice('c1', { decision: 'edited', picked: 'Beta c1' }),
+        choice('c2', { decision: 'edited', picked: 'Neither, schools only' }),
+        choice('c3', { decision: 'accepted', picked: 'Alpha c3' }),
+      ]),
+    )
+    const tags = [...dom.host.querySelectorAll('.tag.ok')].map((t) => t.textContent)
+    expect(tags).toEqual(['Your pick', 'Your own words', 'Accepted'])
+  })
+
+  it('a failed strategist job says so and offers Write the strategy brief', async () => {
+    await open(choices([choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]), {
+      briefJob: { state: 'failed' },
+    })
+    expect(dom.text()).toContain(
+      "The brief could not be written. Write it again, or check the agents' releases.",
+    )
+    dom.replies.push(
+      { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
+      { status: 200, body: choices([choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]) },
+      { status: 200, body: overview({ briefJob: { state: 'running' } }) },
+    )
+    await dom.click('Write the strategy brief')
+    expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
+  })
+
+  it('Write the brief again shows only for an invalidated brief or one that needs a decision', async () => {
+    const decided = [choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]
+    await open(choices(decided), { brief: brief({ state: 'rejected', needsDecision: false }) })
+    expect(dom.text()).not.toContain('Write the brief again')
+    dom.stop()
+    dom.start()
+    await open(choices(decided), { brief: brief({ state: 'invalidated' }) })
+    expect(dom.text()).toContain('Write the brief again')
+    dom.stop()
+    dom.start()
+    await open(choices(decided), { brief: brief({ state: 'rejected', needsDecision: true }) })
+    expect(dom.text()).toContain('Write the brief again')
+  })
+
   it('links to the brief while it waits for approval', async () => {
     await open(choices([choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]), {
       brief: brief(),
@@ -260,6 +302,25 @@ describe('the overview, brief and examples', () => {
     )
     await dom.click('Write the brief again')
     expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
+  })
+
+  it('a failed strategist job on the overview says so and offers Write the strategy brief', async () => {
+    await show({ step: 'brief', briefJob: { state: 'failed' } })
+    expect(dom.text()).toContain(
+      "The brief could not be written. Write it again, or check the agents' releases.",
+    )
+    dom.replies.push(
+      { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
+      { status: 200, body: overview({ briefJob: { state: 'running' } }) },
+      { status: 200, body: { questions: [] } },
+    )
+    await dom.click('Write the strategy brief')
+    expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
+  })
+
+  it('a rejected brief that is being revised offers no Write the brief again on the overview', async () => {
+    await show({ step: 'brief', brief: brief({ state: 'rejected', needsDecision: false }) })
+    expect(dom.text()).not.toContain('Write the brief again')
   })
 
   it('shows the revision limit, and Continue leads to the brief in the inbox', async () => {

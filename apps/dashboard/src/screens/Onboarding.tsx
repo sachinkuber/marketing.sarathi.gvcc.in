@@ -9,7 +9,7 @@ import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
 import { OwnerOnly } from './OwnerOnly'
 import { CASE_ADDED } from './onboarding-parts'
-import { costWords, isForbidden, refusalWords } from './onboarding-words'
+import { BRIEF_FAILED, costWords, isForbidden, refusalWords } from './onboarding-words'
 
 type Asked = z.infer<typeof agentQuestionsReply>['questions'][number]
 
@@ -83,7 +83,8 @@ function BriefStatus({
     }
   }
   const invalidated = brief?.state === 'invalidated'
-  const showAgain = !writing && (invalidated || brief?.needsDecision === true)
+  const failed = briefJob?.state === 'failed'
+  const showAgain = !writing && (failed || invalidated || brief?.needsDecision === true)
   if (!data.gate1 && !brief && !briefJob) return null
   return (
     <div className="stack">
@@ -112,6 +113,11 @@ function BriefStatus({
           The brief was revised three times. Approve it, reject it, or write it again.
         </p>
       ) : null}
+      {failed ? (
+        <p className="callout warn" role="alert">
+          {BRIEF_FAILED}
+        </p>
+      ) : null}
       {problem ? (
         <p className="errtext" role="alert">
           {problem}
@@ -120,7 +126,7 @@ function BriefStatus({
       {showAgain ? (
         <div>
           <button className="btn onb-touch" type="button" disabled={busy} onClick={() => void again()}>
-            Write the brief again
+            {failed ? 'Write the strategy brief' : 'Write the brief again'}
           </button>
         </div>
       ) : null}

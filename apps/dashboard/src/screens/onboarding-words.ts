@@ -206,3 +206,6 @@ export function refusalWords(error: unknown, otherwise: string): string {
   }
   return failureWords(error, otherwise)
 }
+
+// Said when the latest strategist job failed, on the overview and on the brief choices screen.
+export const BRIEF_FAILED = "The brief could not be written. Write it again, or check the agents' releases."

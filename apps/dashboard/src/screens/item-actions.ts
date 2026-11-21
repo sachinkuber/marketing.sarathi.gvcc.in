@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import {
+  changesRequestedReply,
   commentReply,
   contentItemReply,
   decisionReply,
@@ -21,6 +22,16 @@ const CONFLICTS: Record<string, string> = {
   stale_hash: STALE_MESSAGE,
   already_decided: 'This version has already been decided. The item has been reloaded.',
   not_awaiting_approval: 'This version is no longer waiting for approval. The item has been reloaded.',
+  fact_changed: 'A fact this brief cites changed. Write the brief again from onboarding.',
+}
+
+export const BRIEF_KIND = 'strategy_brief'
+export const BRIEF_OWNER_ONLY = 'Only the platform owner decides on the strategy brief.'
+
+// Who may decide on an item: the owner, brand admins and approvers; on the strategy brief, the platform owner alone.
+export function canDecideOn(kind: string, role: string | null | undefined): boolean {
+  if (kind === BRIEF_KIND) return role === 'owner'
+  return role === 'owner' || role === 'brand_admin' || role === 'approver'
 }
 
 // `reloaded` carries the fresh item, or null when the reload itself failed: the decision's answer still stands.
@@ -112,6 +123,31 @@ export async function commentOn(
   if (problem) return { kind: 'invalid', message: problem }
   await api(commentReply, 'POST', `${versionPath(brandId, itemId, shown.id)}/comments`, { text: text.trim() })
   return { kind: 'commented' }
+}
+
+// Ask for changes: the version is closed with the comment. For a strategy brief the core starts a rewrite
+// (`runId`), or none once the revision limit is reached (`runId` null).
+export async function askForChanges(
+  brandId: string,
+  itemId: string,
+  shown: Pick<Version, 'id'>,
+  comment: string,
+): Promise<Outcome<never> | { kind: 'changes_requested'; runId: string | null }> {
+  const problem = textProblem(comment, 'Write what should change first.')
+  if (problem) return { kind: 'invalid', message: problem }
+  try {
+    const reply = await api(
+      changesRequestedReply,
+      'POST',
+      `${versionPath(brandId, itemId, shown.id)}/changes`,
+      {
+        comment: comment.trim(),
+      },
+    )
+    return { kind: 'changes_requested', runId: reply.runId }
+  } catch (error) {
+    return onConflict(error, brandId, itemId)
+  }
 }
 
 export interface EditValues {

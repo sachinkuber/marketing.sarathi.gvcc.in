@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { EditForm } from './EditForm'
 import { formatTime, stateLabel, words } from './format'
 import {
+  BRIEF_KIND,
+  BRIEF_OWNER_ONLY,
   editValues,
   keywordsOf,
   TEXT_MAX,
@@ -109,7 +111,30 @@ function History({ item }: { item: ContentItem }) {
   )
 }
 
-type Mode = 'none' | 'reject' | 'comment' | 'edit'
+type Mode = 'none' | 'reject' | 'comment' | 'changes' | 'edit'
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+
+// Every body block of a strategy brief, in order: headings, paragraphs, quotes and lists.
+function BriefBody({ body }: { body: NonNullable<Version['payload']['body']> }) {
+  return (
+    <>
+      {body.map((block, i) => {
+        const text = typeof block['text'] === 'string' ? block['text'] : ''
+        if (block.type === 'heading')
+          return block['level'] === 1 ? <h3 key={i}>{text}</h3> : <h4 key={i}>{text}</h4>
+        if (block.type === 'paragraph') return <p key={i}>{text}</p>
+        if (block.type === 'quote') return <blockquote key={i}>{text}</blockquote>
+        if (block.type === 'list') {
+          const items = strings(block['items']).map((entry, j) => <li key={`${j}-${entry}`}>{entry}</li>)
+          return block['ordered'] === true ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>
+        }
+        return null
+      })}
+    </>
+  )
+}
 
 // The item as it will appear, its checks and history, and the four decisions (app-flow 5.6). Approve applies to
 // exactly the version on screen and is offered only while that version awaits approval.
@@ -123,17 +148,20 @@ export function ItemReview(props: {
   onApprove: (shown: Version) => void
   onReject: (shown: Version, reason: string) => void
   onComment: (shown: Version, text: string) => void
+  onAskChanges: (shown: Version, text: string) => void
   onEdit: (shown: Version, values: EditValues) => void
 }) {
   const { brandId, item, canDecide, busy } = props
   const [mode, setMode] = useState<Mode>('none')
   const [reason, setReason] = useState('')
   const [comment, setComment] = useState('')
+  const [changes, setChanges] = useState('')
   const shown = shownVersion(item)
   if (!shown) {
     return <p className="muted">This item has no version yet.</p>
   }
   const payload = shown.payload
+  const isBrief = item.kind === BRIEF_KIND
   const keywords = keywordsOf(payload)
   const awaiting = shown.state === 'awaiting_approval'
   const toggle = (next: Mode) => setMode((now) => (now === next ? 'none' : next))
@@ -170,8 +198,9 @@ export function ItemReview(props: {
             </h2>
             <article className="panel pad preview">
               {payload.title ? <h3 className="preview-title">{payload.title}</h3> : null}
-              {payload.summary ? <p>{payload.summary}</p> : null}
-              {keywords.length > 0 ? (
+              {isBrief ? <BriefBody body={payload.body ?? []} /> : null}
+              {!isBrief && payload.summary ? <p>{payload.summary}</p> : null}
+              {!isBrief && keywords.length > 0 ? (
                 <>
                   <p className="muted small mt-4">Keywords</p>
                   <ul className="keywords">
@@ -245,7 +274,42 @@ export function ItemReview(props: {
             </form>
           ) : null}
 
-          {canDecide && mode === 'edit' ? (
+          {canDecide && mode === 'changes' ? (
+            <form
+              className="panel pad stack"
+              onSubmit={(event) => {
+                event.preventDefault()
+                props.onAskChanges(shown, changes)
+              }}
+            >
+              <label htmlFor="changes-text" className="strong">
+                What should change?
+              </label>
+              <span className="hint muted small">
+                {isBrief
+                  ? 'The strategist writes a new version from your comment.'
+                  : 'Kept with this version in the audit log.'}
+              </span>
+              <textarea
+                id="changes-text"
+                className="input"
+                required
+                maxLength={TEXT_MAX}
+                value={changes}
+                onChange={(event) => setChanges(event.target.value)}
+              />
+              <div className="row">
+                <button className="btn primary" type="submit" disabled={busy || changes.trim() === ''}>
+                  Send the comment
+                </button>
+                <button className="btn" type="button" onClick={() => setMode('none')}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {canDecide && !isBrief && mode === 'edit' ? (
             <EditForm
               initial={editValues(payload)}
               busy={busy}
@@ -272,11 +336,21 @@ export function ItemReview(props: {
               : null}
           </span>
           <span className="sp row">
-            <button className="btn" type="button" disabled={busy} onClick={() => toggle('edit')}>
-              Edit
-            </button>
+            {isBrief ? null : (
+              <button className="btn" type="button" disabled={busy} onClick={() => toggle('edit')}>
+                Edit
+              </button>
+            )}
             <button className="btn" type="button" disabled={busy} onClick={() => toggle('comment')}>
               Comment
+            </button>
+            <button
+              className="btn"
+              type="button"
+              disabled={busy || !awaiting}
+              onClick={() => toggle('changes')}
+            >
+              Ask for changes
             </button>
             <button
               className="btn danger"
@@ -296,6 +370,10 @@ export function ItemReview(props: {
             </button>
           </span>
         </div>
+      ) : isBrief ? (
+        <p className="callout" role="status">
+          {BRIEF_OWNER_ONLY}
+        </p>
       ) : null}
     </>
   )

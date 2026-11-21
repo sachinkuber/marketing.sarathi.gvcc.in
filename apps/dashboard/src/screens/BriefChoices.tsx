@@ -17,7 +17,7 @@ import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
 import { AddAsCase } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
-import { OWNER_ONLY, isForbidden, refusalWords } from './onboarding-words'
+import { BRIEF_FAILED, OWNER_ONLY, isForbidden, refusalWords } from './onboarding-words'
 
 type Reply = z.infer<typeof briefChoicesReply>
 type Overview = z.infer<typeof onboardingReply>
@@ -88,7 +88,13 @@ function ChoiceCard(props: {
       {choice.decision ? (
         <>
           <p className="sub onb-wrap">
-            <span className="tag ok">{choice.decision === 'accepted' ? 'Accepted' : 'Your own words'}</span>
+            <span className="tag ok">
+              {choice.decision === 'accepted'
+                ? 'Accepted'
+                : choice.options.some((o) => o.value === choice.picked)
+                  ? 'Your pick'
+                  : 'Your own words'}
+            </span>
             {` ${choice.picked ?? ''}`}
           </p>
           {choice.decision === 'edited' ? <AddAsCase base={props.base} suggestionId={choice.id} /> : null}
@@ -246,7 +252,7 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
   const brief = overview?.brief ?? null
   const choicesOpen = isOpenJob(job?.state)
   const briefOpen = isOpenJob(briefJob?.state)
-  const settledBrief = brief !== null && (brief.state === 'awaiting_approval' || brief.state === 'approved')
+  const failed = briefJob?.state === 'failed'
 
   const find = () =>
     void send(
@@ -374,6 +380,11 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
               {!briefOpen && brief?.state === 'invalidated' ? (
                 <p className="sub">The brief needs re-approval: a fact it cites changed.</p>
               ) : null}
+              {!briefOpen && briefJob?.state === 'failed' ? (
+                <p className="callout warn" role="alert">
+                  {BRIEF_FAILED}
+                </p>
+              ) : null}
               {brief ? (
                 <div>
                   <Link className="btn onb-touch" href={`/b/${brandId}/inbox/${brief.itemId}`}>
@@ -381,7 +392,7 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
                   </Link>
                 </div>
               ) : null}
-              {!briefOpen && !(settledBrief && !brief?.needsDecision) ? (
+              {!briefOpen && (!brief || failed || brief.state === 'invalidated' || brief.needsDecision) ? (
                 <div>
                   <button
                     className="btn primary onb-touch"
@@ -389,7 +400,7 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
                     disabled={busy}
                     onClick={writeBrief}
                   >
-                    {brief ? 'Write the brief again' : 'Write the strategy brief'}
+                    {brief && !failed ? 'Write the brief again' : 'Write the strategy brief'}
                   </button>
                 </div>
               ) : null}
