@@ -154,6 +154,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       ['post', 'onboarding/rules/:ruleId/turn-off'],
       ['post', 'onboarding/brief-choices'],
       ['get', 'onboarding/brief-choices'],
+      ['post', 'onboarding/brief'],
     ] as const) {
       expect(
         scoped.some((r) => r.method === method && r.path === `/brands/:brandId/${path}`),

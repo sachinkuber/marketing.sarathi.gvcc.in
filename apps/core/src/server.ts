@@ -12,6 +12,7 @@ import {
   registerFactsRulesHandlers,
   registerQuestionnaireHandlers,
   registerResearchHandlers,
+  registerStrategistHandlers,
   registerSummaryHandlers,
 } from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
@@ -68,6 +69,7 @@ export async function startServer(
   registerQuestionnaireHandlers(results)
   registerFactsRulesHandlers(results, { audit: deps.audit })
   registerBriefChoicesHandlers(results, { audit: deps.audit })
+  registerStrategistHandlers(results, { audit: deps.audit })
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,

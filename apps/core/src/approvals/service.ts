@@ -1,7 +1,9 @@
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
+import { grantFor, type Actor as Role } from '../access/permissions.ts'
 import { moveState, type Actor, type VersionDeps } from '../content/versions.ts'
 import type { VersionState } from '../content/states.ts'
 import { AppError } from '../errors.ts'
+import { lockOnboarding } from '../onboarding/suggestions.ts'
 
 export interface ApprovalDeps extends VersionDeps {
   // For tests only: runs right after the approval row is inserted, so a test can make the decision fail
@@ -14,6 +16,8 @@ export interface DecisionTarget {
   itemId: string
   versionId: string
   actor: Actor & { userId: string }
+  // The person's role in this brand (the route's access check found it): who may decide depends on the kind.
+  role: Role
 }
 
 export const COMMENT_MAX = 2000
@@ -42,6 +46,39 @@ async function lockVersion(client: PoolClient, target: DecisionTarget): Promise<
   return { state: row.state, hash: row.hash, hashScheme: row.hash_scheme }
 }
 
+// A strategy brief is decided by the platform owner alone (the holder of onboard_brand), never by the brand's
+// approvers or admins, whatever approve_content gives them elsewhere.
+const OWNER_DECIDES: ReadonlySet<string> = new Set(['strategy_brief'])
+
+// Before any lock: the item's kind (it never changes) says who may decide, so a person who may not is refused
+// whatever the version's state. A brief's decision changes onboarding, so for a brief the onboarding row is locked
+// first, in the order the strategist's result takes them (onboarding, then the content rows). Then the version.
+// Ask for changes (Task 7) decides the same way.
+export async function lockForDecision(
+  client: PoolClient,
+  target: DecisionTarget,
+): Promise<Locked & { kind: string }> {
+  const found = await client.query<{ kind: string }>(
+    `select i.kind from app.content_item i
+       join app.content_version v on v.brand_id = i.brand_id and v.content_item_id = i.id
+      where i.brand_id = $1 and i.id = $2 and v.id = $3`,
+    [target.brandId, target.itemId, target.versionId],
+  )
+  const kind = found.rows[0]?.kind
+  if (kind === undefined) throw notFound()
+  if (OWNER_DECIDES.has(kind)) {
+    if (!grantFor(target.role, 'onboard_brand')) {
+      throw new AppError(
+        403,
+        'forbidden',
+        'Only the platform owner decides on a strategy brief. Ask them to review it.',
+      )
+    }
+    await lockOnboarding(client, target.brandId)
+  }
+  return { ...(await lockVersion(client, target)), kind }
+}
+
 function requireAwaiting(state: VersionState): void {
   if (state === 'awaiting_approval') return
   if (state === 'approved' || state === 'rejected') {
@@ -57,14 +94,15 @@ function requireAwaiting(state: VersionState): void {
   throw new AppError(409, 'not_awaiting_approval', 'This version is not waiting for approval.')
 }
 
-// A refusal is audited after the transaction has rolled back, so the failed attempt leaves nothing else.
+// A refusal (a 409, or the 403 of a person who may not decide on this kind) is audited after the transaction has
+// rolled back, so the failed attempt leaves nothing else.
 async function auditRefusal(
   deps: ApprovalDeps,
   action: string,
   target: DecisionTarget,
   error: unknown,
 ): Promise<void> {
-  if (!(error instanceof AppError) || error.status !== 409) return
+  if (!(error instanceof AppError) || (error.status !== 409 && error.status !== 403)) return
   try {
     await deps.audit.record({
       action,
@@ -86,7 +124,7 @@ export async function approve(
 ): Promise<{ approvalId: string }> {
   try {
     return await withBrand(pool, input.brandId, async (client) => {
-      const locked = await lockVersion(client, input)
+      const locked = await lockForDecision(client, input)
       requireAwaiting(locked.state)
       if (locked.hash !== input.hash || locked.hashScheme !== input.scheme) {
         throw new AppError(409, 'stale_hash', 'The content has changed since it was shown; review it again.')
@@ -116,6 +154,25 @@ export async function approve(
         },
         client,
       )
+      if (locked.kind === 'strategy_brief') {
+        // Gate 1 (spec 10): the approved brief completes onboarding, and a later brief's approval passes it again.
+        await client.query(
+          `update app.onboarding set step = 'done', completed_at = now()
+            where brand_id = $1 and step in ('brief', 'done')`,
+          [input.brandId],
+        )
+        await deps.audit.record(
+          {
+            action: 'onboarding.gate_passed',
+            actor: input.actor.userId,
+            subject: input.versionId,
+            brandId: input.brandId,
+            outcome: 'success',
+            detail: { versionId: input.versionId },
+          },
+          client,
+        )
+      }
       return { approvalId }
     })
   } catch (error) {
@@ -131,7 +188,7 @@ export async function reject(
 ): Promise<{ approvalId: string }> {
   try {
     return await withBrand(pool, input.brandId, async (client) => {
-      const locked = await lockVersion(client, input)
+      const locked = await lockForDecision(client, input)
       requireAwaiting(locked.state)
       const inserted = await client.query<{ id: string }>(
         `insert into app.approval

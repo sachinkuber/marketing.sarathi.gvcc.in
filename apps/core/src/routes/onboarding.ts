@@ -10,6 +10,7 @@ import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/su
 import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
 import { inputOf, validate } from '../validate.ts'
 import type { JobsDeps } from '../jobs/service.ts'
+import { startStrategist } from '../onboarding/brief.ts'
 import { readBriefChoices, startBriefChoices } from '../onboarding/brief-choices.ts'
 import {
   addOwnFact,
@@ -299,6 +300,25 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
         async (_req, res) => {
           res.json(
             await startBriefChoices(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
+    // No change request from here: a revision starts only from "ask for changes" on the brief (Task 7).
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/brief',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary:
+        'Start the strategy brief: one strategist job, from what the brief choices were made from and the owner’s picks',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startStrategist(deps.pool, jobs, {
               brandId: brandContextOf(res).brandId,
               actor: { userId: principalOf(res).userId },
             }),

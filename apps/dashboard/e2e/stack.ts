@@ -30,6 +30,7 @@ import {
   registerFactsRulesHandlers,
   registerQuestionnaireHandlers,
   registerResearchHandlers,
+  registerStrategistHandlers,
   registerSummaryHandlers,
 } from '../../core/src/agents/register.ts'
 import { tick } from '../../core/src/approvals/requests.ts'
@@ -50,6 +51,7 @@ import { BRIEF_CHOICES_DIR } from '../../worker/src/agents/brief-choices.ts'
 import { FACTS_RULES_DIR } from '../../worker/src/agents/facts-rules.ts'
 import { QUESTIONNAIRE_DIR } from '../../worker/src/agents/questionnaire.ts'
 import { RESEARCH_DIR, RESEARCH_MERGE_DIR } from '../../worker/src/agents/research.ts'
+import { STRATEGIST_DIR } from '../../worker/src/agents/strategist.ts'
 import { defaultHandlers, startWorker } from '../../worker/src/main.ts'
 import { standInModel } from '../../worker/src/standin.ts'
 import { decisionReplyFor } from './decision-script.ts'
@@ -190,6 +192,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
   registerQuestionnaireHandlers(results)
   registerFactsRulesHandlers(results, jobs)
   registerBriefChoicesHandlers(results, jobs)
+  registerStrategistHandlers(results, jobs)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(
@@ -197,14 +200,15 @@ export async function startStack(env: Record<string, string | undefined> = proce
      values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 10000, 'e2e')`,
     [today],
   )
-  // Live releases of the research, questionnaire, facts and rules and brief choices agents, with the files this worker runs
-  // (ruling R9).
+  // Live releases of the research, questionnaire, facts and rules, brief choices and strategist agents, with the
+  // files this worker runs (ruling R9).
   for (const [agent, dir] of [
     ['research', RESEARCH_DIR],
     ['research_merge', RESEARCH_MERGE_DIR],
     ['questionnaire', QUESTIONNAIRE_DIR],
     ['facts_rules', FACTS_RULES_DIR],
     ['brief_choices', BRIEF_CHOICES_DIR],
+    ['strategist', STRATEGIST_DIR],
   ] as const) {
     await db.admin.query(
       `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)

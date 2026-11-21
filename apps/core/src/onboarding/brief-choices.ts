@@ -34,7 +34,11 @@ const MAX_FACTS = 60
 const MAX_RULES = 60
 const MAX_ANSWERS = 30
 
-async function buildInput(client: PoolClient, brandId: string): Promise<BriefChoicesInput> {
+// The brief choices job's input. The strategist's input starts from the same (brief.ts).
+export async function buildBriefChoicesInput(
+  client: PoolClient,
+  brandId: string,
+): Promise<BriefChoicesInput> {
   const brand = await client.query<{ name: string }>('select name from app.brand where id = $1', [brandId])
   const profileRows = await client.query<{ key: string; value: unknown; status: string }>(
     `select distinct on (key) key, value, status from app.profile_item
@@ -157,7 +161,7 @@ export async function startBriefChoices(
         'The brief choices agent has no live release yet. Release it, then start the brief choices again.',
       )
     }
-    const jobInput = await buildInput(client, input.brandId)
+    const jobInput = await buildBriefChoicesInput(client, input.brandId)
     const runId = await createRun(client, input.brandId, {
       agent: BRIEF_CHOICES_AGENT,
       definitionVersionId: live.rows[0].id,

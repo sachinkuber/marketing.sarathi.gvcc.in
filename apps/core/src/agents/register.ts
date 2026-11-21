@@ -6,6 +6,7 @@ import {
   researchGroupResultHandler,
   researchResultHandler,
 } from '../onboarding/research-results.ts'
+import { STRATEGY_BRIEF_RESULT_TYPE, strategyBriefResultHandler } from '../onboarding/brief.ts'
 import { BRIEF_CHOICES_RESULT_TYPE, briefChoicesResultHandler } from '../onboarding/brief-choices.ts'
 import { FACTS_RULES_RESULT_TYPE, factsRulesResultHandler } from '../onboarding/facts-rules.ts'
 import { QUESTIONNAIRE_RESULT_TYPE, questionnaireResultHandler } from '../onboarding/questionnaire.ts'
@@ -49,4 +50,10 @@ export function registerFactsRulesHandlers(results: ResultHandlers, deps: Pick<J
 // The brief choices agent's result type (spec 4, 6): the choices become suggestions for the owner to settle.
 export function registerBriefChoicesHandlers(results: ResultHandlers, deps: Pick<JobsDeps, 'audit'>): void {
   results.set(BRIEF_CHOICES_RESULT_TYPE, briefChoicesResultHandler(deps))
+}
+
+// The strategist's result type (spec 10): the brief becomes a version of the brand's strategy_brief item, waiting
+// for the platform owner's approval.
+export function registerStrategistHandlers(results: ResultHandlers, deps: Pick<JobsDeps, 'audit'>): void {
+  results.set(STRATEGY_BRIEF_RESULT_TYPE, strategyBriefResultHandler(deps))
 }

@@ -20,6 +20,8 @@ import {
   factsRulesStartedReply,
   briefChoicesReply,
   briefChoicesStartedReply,
+  briefStartedReply,
+  decisionReply,
   homeReply,
   intakeSavedReply,
   inviteCreatedReply,
@@ -62,7 +64,8 @@ import {
   type Cast,
 } from './reads-support.ts'
 import { fileURLToPath } from 'node:url'
-import { agentFilesHash } from '@mkt/db'
+import { agentFilesHash, withBrand } from '@mkt/db'
+import { createVersion, moveState } from '../src/content/versions.ts'
 import { pdfOf } from './pdf-fixtures.ts'
 import { addBrand, addUser, enrolledClient, totp, type Stack, type TestClient } from './support.ts'
 
@@ -656,6 +659,78 @@ describe('the dashboard schemas accept the core’s replies', () => {
       expect((await read()).choices[0]).toMatchObject({ decision: 'edited', picked: 'Fleet managers' })
       expect((await overview()).briefChoices).toEqual({ state: 'waiting', total: 1, decided: 1 })
       expect(() => briefChoicesReply.parse({ job: null, choices: [{ id: 'x' }] })).toThrow()
+    })
+
+    it('the brief: start, the overview block, the approval and gate 1', async () => {
+      // The brief choices run of the test above ends; the owner's pick stands.
+      await q(`update app.job_input set finished_at = coalesce(finished_at, now()) where brand_id = $1`, [
+        brand,
+      ])
+      await q(`update app.run set state = 'succeeded', finished_at = now() where brand_id = $1`, [brand])
+      await q(`update app.onboarding set step = 'brief_choices' where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('strategist', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/strategist', import.meta.url)))],
+      )
+      expect(await overview()).toMatchObject({ brief: null, gate1: false })
+      const started = await owner.request('POST', `${base()}/brief`, { body: {} })
+      expect(started.status, JSON.stringify(started.json)).toBe(200)
+      expect(briefStartedReply.parse(started.json).revision).toBe(0)
+
+      // The brief arrives as the strategist's result makes it: a version waiting for approval.
+      const item = await q(
+        `insert into app.content_item (brand_id, kind) values ($1, 'strategy_brief') returning id`,
+        [brand],
+      )
+      const briefItem = item.rows[0].id as string
+      const made = await withBrand(stack.appPool, brand, async (client) => {
+        const actor = { kind: 'agent' as const, runId: started.json.runId as string }
+        const v = await createVersion(
+          client,
+          { audit: stack.jobs!.audit },
+          {
+            brandId: brand,
+            contentItemId: briefItem,
+            payload: {
+              kind: 'strategy_brief',
+              language: 'en',
+              body: [{ type: 'paragraph', text: 'Shine.' }],
+            },
+            createdBy: actor,
+            provenance: { source: 'strategist', revision: 0 },
+          },
+        )
+        await moveState(client, { audit: stack.jobs!.audit }, v.versionId, 'in_checks', actor)
+        await moveState(client, { audit: stack.jobs!.audit }, v.versionId, 'awaiting_approval', actor)
+        return v
+      })
+      await q(`update app.onboarding set step = 'brief' where brand_id = $1`, [brand])
+      expect(await overview()).toMatchObject({
+        brief: {
+          itemId: briefItem,
+          versionId: made.versionId,
+          number: 1,
+          state: 'awaiting_approval',
+          revision: 0,
+          needsDecision: false,
+        },
+        gate1: false,
+      })
+      const shown = await owner.request('GET', api(brand, `/content/${briefItem}`))
+      expect(shown.status).toBe(200)
+      contentItemReply.parse(shown.json)
+      const approved = await owner.request(
+        'POST',
+        api(brand, `/content/${briefItem}/versions/${made.versionId}/approve`),
+        { body: { hash: made.hash, hash_scheme: 'cv1' } },
+      )
+      expect(approved.status, JSON.stringify(approved.json)).toBe(201)
+      decisionReply.parse(approved.json)
+      expect(await overview()).toMatchObject({ step: 'done', brief: { state: 'approved' }, gate1: true })
+      expect(() =>
+        onboardingReply.shape.brief.parse({ itemId: 'x', versionId: 'y', number: 0, state: 'approved' }),
+      ).toThrow()
     })
   })
 

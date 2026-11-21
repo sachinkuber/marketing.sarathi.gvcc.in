@@ -19,11 +19,14 @@ const commentBody = z.strictObject({ text })
 type P = z.infer<typeof params>
 
 export function registerApprovalRoutes(table: RouteTable, deps: ApprovalRouteDeps): void {
+  // The route needs approve_content; the service also checks the item's kind against the person's role (only the
+  // platform owner decides on a strategy brief).
   const target = (res: Parameters<typeof brandContextOf>[0], p: P) => ({
     brandId: brandContextOf(res).brandId,
     itemId: p.itemId,
     versionId: p.versionId,
     actor: { kind: 'user' as const, userId: principalOf(res).userId },
+    role: brandContextOf(res).actor,
   })
   const base = '/brands/:brandId/content/:itemId/versions/:versionId'
 

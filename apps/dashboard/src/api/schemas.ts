@@ -525,6 +525,20 @@ export const onboardingReply = z.strictObject({
       decided: z.number().int().nonnegative(),
     })
     .nullable(),
+  // The strategy brief's latest version; null before the first brief. needsDecision: closed by a change request
+  // at the revision limit, so no new version comes until the owner decides.
+  brief: z
+    .strictObject({
+      itemId: z.string(),
+      versionId: z.string(),
+      number: z.number().int().positive(),
+      state: versionState,
+      revision: z.number().int().nonnegative(),
+      needsDecision: z.boolean(),
+    })
+    .nullable(),
+  // Gate 1: the latest brief version is approved.
+  gate1: z.boolean(),
   cost: maybeMoney,
 })
 
@@ -655,6 +669,13 @@ export const briefChoice = z.strictObject({
 export const briefChoicesReply = z.strictObject({
   job: z.strictObject({ state: agentJobState, questionId: z.string().optional() }).nullable(),
   choices: z.array(briefChoice),
+})
+// --- the strategy brief (M11, spec 10) ---------------------------------------------------------------------
+// The brief itself is a content item: the inbox's item reply shows it. revision: 0 for a brief started on its own.
+export const briefStartedReply = z.strictObject({
+  runId: z.string(),
+  jobId: z.string(),
+  revision: z.number().int().nonnegative(),
 })
 export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId: z.string() })
 export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })

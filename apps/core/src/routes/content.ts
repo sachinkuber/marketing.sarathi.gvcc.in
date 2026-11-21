@@ -165,14 +165,26 @@ export function registerContentRoutes(table: RouteTable, deps: ContentRouteDeps)
         }>(res)
         const brandId = brandContextOf(res).brandId
         try {
-          const created = await withBrand(deps.pool, brandId, (client) =>
-            createVersion(client, deps, {
+          const created = await withBrand(deps.pool, brandId, async (client) => {
+            // A brief is never edited by an approver (plan, M11): it changes only through "ask for changes".
+            const item = await client.query<{ kind: string }>(
+              'select kind from app.content_item where brand_id = $1 and id = $2',
+              [brandId, params.itemId],
+            )
+            if (item.rows[0]?.kind === 'strategy_brief') {
+              throw new AppError(
+                409,
+                'ask_for_changes_instead',
+                'A brief is changed by asking for changes, not by editing it.',
+              )
+            }
+            return createVersion(client, deps, {
               brandId,
               contentItemId: params.itemId,
               payload: body,
               createdBy: { kind: 'user', userId: principalOf(res).userId },
-            }),
-          )
+            })
+          })
           res.status(201).json(created)
         } catch (error) {
           if (error instanceof PayloadRejected) {

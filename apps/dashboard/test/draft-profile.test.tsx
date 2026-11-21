@@ -18,6 +18,8 @@ const overview = (gaps: { key: string; why: string }[] = []) => ({
   questionnaire: null,
   factsRules: null,
   briefChoices: null,
+  brief: null,
+  gate1: false,
   cost: none,
 })
 const source = (over: Record<string, unknown> = {}) => ({

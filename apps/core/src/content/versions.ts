@@ -26,6 +26,9 @@ export interface NewVersion {
   // The payload as the client or an agent supplies it: the server adds brand_id, content_item_id and schema.
   payload: Record<string, unknown>
   createdBy: Actor
+  // Where the version came from, beyond its creator (a strategist brief's revision). Stored with the version, and
+  // like it never changed.
+  provenance?: Record<string, unknown>
 }
 
 // Moves a version along an allowed transition: the state, its history row and its audit entry in the caller's
@@ -61,8 +64,15 @@ export async function moveState(
     const opened = await openRequest(client, { brandId: row.brand_id, versionId })
     // Spec 10.5: the approvers are told when a version reaches awaiting approval. Only the call that opened the
     // request tells them, so a repeat sends nothing; the notification is in this transaction, like the state.
+    // Who they are depends on the item's kind (a strategy brief is the platform owner's).
     if (opened) {
-      const recipients = await approvalRecipientsOf(client, row.brand_id)
+      const item = await client.query<{ kind: string }>(
+        `select i.kind from app.content_version v
+           join app.content_item i on i.brand_id = v.brand_id and i.id = v.content_item_id
+          where v.brand_id = $1 and v.id = $2`,
+        [row.brand_id, versionId],
+      )
+      const recipients = await approvalRecipientsOf(client, row.brand_id, item.rows[0]?.kind)
       for (const userId of recipients) {
         await enqueueNotification(client, {
           brandId: row.brand_id,
@@ -132,8 +142,8 @@ export async function createVersion(
   const inserted = await client.query<{ id: string }>(
     `insert into app.content_version
        (brand_id, content_item_id, number, payload_canonical, hash, hash_scheme, created_by_kind,
-        created_by_user, created_by_run)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+        created_by_user, created_by_run, provenance)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) returning id`,
     [
       input.brandId,
       input.contentItemId,
@@ -144,6 +154,7 @@ export async function createVersion(
       input.createdBy.kind,
       input.createdBy.userId ?? null,
       input.createdBy.runId ?? null,
+      input.provenance === undefined ? null : JSON.stringify(input.provenance),
     ],
   )
   const versionId = inserted.rows[0]!.id
