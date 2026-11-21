@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import { askSchema } from './agent-question.ts'
-import { DISALLOWED } from './disallowed.ts'
 import {
   CONFIDENCES,
   MAX_FINDINGS,
@@ -9,6 +8,7 @@ import {
   RESEARCH_SOURCE_KINDS,
   WHY_MAX,
 } from './research.ts'
+import { shown } from './visible-text.ts'
 
 // What a question may settle: a profile key, or a strategy input research cannot find (spec 6). Answers on a
 // profile key become profile items when the questionnaire is finished.
@@ -42,20 +42,12 @@ const MAX_OPTIONS = 6
 const QUESTION_MAX = 300
 const OPTION_MAX = 200
 const SUGGESTED_MAX = 500
-// The input's limits (the brief fixes none): an owner's edited profile value is at most 4,000 characters of JSON.
+// The input's limits (the brief fixes none): an owner's edited profile value is at most 4,000 characters.
 const VALUE_MAX = 4000
 const NAME_MAX = 200
 const ADDRESS_MAX = 2000
 const MAX_COMPETITORS = 5
 
-// Text the owner will read: not blank, and without the invisible and control characters the payload refuses.
-const NOT_VISIBLE = 'is blank or contains an invisible or control character'
-const shown = (max: number) =>
-  z
-    .string()
-    .min(1)
-    .max(max)
-    .refine((value) => !DISALLOWED.test(value) && value.trim() !== '', NOT_VISIBLE)
 // The input's text came from the owner, research and the web: it is only bounded here, and reaches the model
 // wrapped as data.
 const given = (max: number) => z.string().min(1).max(max)
@@ -70,14 +62,14 @@ export const questionnaireInputSchema = z.strictObject({
   profile: z
     .array(z.strictObject({ key: profileKey, value: given(VALUE_MAX), status: confidence }))
     .max(PROFILE_KEYS.length),
-  // Profile suggestions the owner has not accepted: undecided, or rejected (ruling R9: a rejected value is never
-  // pre-filled).
+  // Profile suggestions the owner has not accepted: undecided, or rejected (ruling R9: a rejected value is
+  // never pre-filled).
   open: z
     .array(z.strictObject({ key: profileKey, proposed: given(VALUE_MAX), confidence, rejected: z.boolean() }))
     .max(MAX_FINDINGS),
   // The keys the research merge could not settle, with why.
   gaps: z.array(z.strictObject({ key: profileKey, why: given(WHY_MAX) })).max(PROFILE_KEYS.length),
-  // The research sources whose result is not `read`; the questionnaire asks about what they would have covered.
+  // Research sources whose result is not `read`: the questionnaire asks what they would have covered.
   unreadable: z
     .array(z.strictObject({ kind: z.enum(RESEARCH_SOURCE_KINDS), address: given(ADDRESS_MAX).nullable() }))
     .max(MAX_SOURCES),
@@ -148,5 +140,10 @@ export const questionnaireResultSchema = z
         path: ['questions'],
         message: `at least ${MIN_QUESTIONS} questions, or ask the owner`,
       })
+    // The safety rules are made from these answers, so a questionnaire never leaves one out.
+    if (result.ask === null)
+      for (const key of SAFETY_KEYS)
+        if (!result.questions.some((question) => question.key === key))
+          ctx.addIssue({ code: 'custom', path: ['questions'], message: `${key} is always asked` })
   })
 export type QuestionnaireResult = z.infer<typeof questionnaireResultSchema>

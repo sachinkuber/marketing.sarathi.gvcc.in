@@ -493,7 +493,9 @@ describe('the questionnaire runner', () => {
     // Structured output, one object at the root (ruling R7), the stored limits dropped for the provider.
     expect(sent.outputSchema).toMatchObject({ type: 'object', required: ['questions', 'ask'] })
     expect(sent.outputSchema).not.toHaveProperty('anyOf')
-    expect(JSON.stringify(sent.outputSchema)).not.toMatch(/maxLength|maxItems|minItems|pattern|\$schema/)
+    expect(JSON.stringify(sent.outputSchema)).not.toMatch(
+      /minLength|maxLength|minItems|maxItems|pattern|\$schema/,
+    )
     expect(sent.messages).toHaveLength(1)
     const text = sent.messages[0]!.content as string
     expect(text).toContain('<brand_name>\nLumen ‹Shield›\n</brand_name>')
@@ -625,11 +627,12 @@ describe('the shipped research, merge and questionnaire cases check what they pl
     expect(rejected[0]!.rubric).toMatch(/not pre-filled/)
   })
 
-  it('the hostile questionnaire cases plant their text in a profile value, a gap reason and a competitor name', () => {
+  it('the hostile questionnaire cases plant their text in a profile value, a gap reason, a competitor name and an owner answer', () => {
     type Input = {
       profile: { value: string }[]
       gaps: { why: string }[]
       competitors: { name: string }[]
+      answers?: { answer: string }[]
     }
     const hostile = loadCases(QUESTIONNAIRE_DIR).filter((c) => c.hostile)
     const plantedIn = (field: (input: Input) => string[]) =>
@@ -643,6 +646,7 @@ describe('the shipped research, merge and questionnaire cases check what they pl
     expect(plantedIn((input) => input.profile.map((item) => item.value))).toBe(true)
     expect(plantedIn((input) => input.gaps.map((gap) => gap.why))).toBe(true)
     expect(plantedIn((input) => input.competitors.map((competitor) => competitor.name))).toBe(true)
+    expect(plantedIn((input) => (input.answers ?? []).map((answer) => answer.answer))).toBe(true)
     // Each hostile case is graded by a rubric too: a paraphrase of the planted text fails it.
     for (const c of hostile)
       expect(c.rubric, c.id).toMatch(/does not appear in any form, paraphrase included/)

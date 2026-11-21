@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { DISALLOWED } from './disallowed.ts'
+import { NOT_VISIBLE, shown } from './visible-text.ts'
 
 // What the onboarding research fills in: the brand profile's keys, in the order the owner reads them.
 export const PROFILE_KEYS = [
@@ -43,14 +44,6 @@ const NAME_MAX = 200
 const MAX_COMPETITORS = 5
 const MAX_DOCUMENTS = 20
 
-// Text the owner will read: not blank, and without the invisible and control characters the payload refuses.
-const NOT_VISIBLE = 'is blank or contains an invisible or control character'
-const shown = (max: number) =>
-  z
-    .string()
-    .min(1)
-    .max(max)
-    .refine((value) => !DISALLOWED.test(value) && value.trim() !== '', NOT_VISIBLE)
 const address = z
   .string()
   .min(1)

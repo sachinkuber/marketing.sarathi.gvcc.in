@@ -33,8 +33,13 @@ const question = (key: string, over: Record<string, unknown> = {}) => ({
   suggestedAnswer: 'Pune only',
   ...over,
 })
-// One question on each of the first n keys, so no key repeats.
-const questions = (n: number) => QUESTION_KEYS.slice(0, n).map((key) => question(key))
+// The safety keys first (a result that does not ask must hold them), then the rest of the keys in order.
+const ORDER = [
+  ...SAFETY_KEYS,
+  ...QUESTION_KEYS.filter((key) => !(SAFETY_KEYS as readonly string[]).includes(key)),
+]
+// One question on each of the first n keys, so no key repeats; from 4 on, every safety key is there.
+const questions = (n: number) => ORDER.slice(0, n).map((key) => question(key))
 const result = (over: Record<string, unknown> = {}) => ({ questions: questions(10), ask: null, ...over })
 const ask = (over: Record<string, unknown> = {}) => ({
   text: 'What does the business sell, and where?',
@@ -92,14 +97,14 @@ describe('questionnaire schemas', () => {
     expect(ok(questionnaireResultSchema, result({ questions: decided }))).toBe(false)
 
     const unknown = questions(10)
-    unknown[0] = question('favourite_colour')
+    unknown[9] = question('favourite_colour')
     expect(ok(questionnaireResultSchema, result({ questions: unknown }))).toBe(false)
 
     // A second question on a profile key would make the owner answer it twice, and the second answer would
     // replace the first in the profile (ruling R8).
     const repeated = questions(11)
-    repeated[10] = question(repeated[0]!.key)
-    expect(PROFILE_KEYS).toContain(repeated[0]!.key)
+    repeated[10] = question(repeated[4]!.key)
+    expect(PROFILE_KEYS).toContain(repeated[4]!.key)
     expect(ok(questionnaireResultSchema, result({ questions: repeated }))).toBe(false)
     expect(issuesOf(result({ questions: repeated }))).toEqual([
       expect.objectContaining({
@@ -130,8 +135,10 @@ describe('questionnaire schemas', () => {
   })
 
   it('a strategy key may be asked up to three times, a profile key once (ruling R8)', () => {
+    // Ten questions without the key under test, then n questions on it.
+    const base = (key: string) => [...questions(11).filter((q) => q.key !== key)].slice(0, 10)
     const times = (key: string, n: number) => [
-      ...questions(10),
+      ...base(key),
       ...Array.from({ length: n }, () => question(key)),
     ]
     for (const key of STRATEGY_KEYS) {
@@ -145,6 +152,18 @@ describe('questionnaire schemas', () => {
     }
     for (const key of PROFILE_KEYS.slice(10))
       expect(ok(questionnaireResultSchema, result({ questions: times(key, 2) })), key).toBe(false)
+  })
+
+  it('a result that does not ask holds every safety key (they become the safety rules)', () => {
+    for (const key of SAFETY_KEYS) {
+      const without = [...questions(11).filter((q) => q.key !== key)]
+      expect(without).toHaveLength(10)
+      expect(issuesOf(result({ questions: without })), key).toEqual([
+        expect.objectContaining({ path: ['questions'], message: `${key} is always asked` }),
+      ])
+    }
+    // A result that asks holds no questions, so no safety key either.
+    expect(ok(questionnaireResultSchema, { questions: [], ask: ask() })).toBe(true)
   })
 
   it('options are none or two to six, and the texts hold their limits', () => {
@@ -244,6 +263,20 @@ describe('asking instead of guessing (ruling R7)', () => {
     expect(ok(askSchema, ask({ options: ['x'.repeat(201)] }))).toBe(false)
     expect(ok(askSchema, ask({ suggested: 'x'.repeat(500) }))).toBe(true)
     expect(ok(askSchema, ask({ suggested: 'x'.repeat(501) }))).toBe(false)
+  })
+
+  it('with options, the suggestion is one of them or null', () => {
+    expect(
+      ok(askSchema, ask({ options: ['Car coatings', 'Bike coatings'], suggested: 'Car coatings' })),
+    ).toBe(true)
+    expect(ok(askSchema, ask({ options: ['Car coatings', 'Bike coatings'], suggested: null }))).toBe(true)
+    expect(ok(askSchema, ask({ options: [], suggested: 'Car coatings' }))).toBe(true)
+    expect(
+      askSchema.safeParse(ask({ options: ['Car coatings', 'Bike coatings'], suggested: 'Boats' })).error
+        ?.issues,
+    ).toEqual([
+      expect.objectContaining({ path: ['suggested'], message: 'the suggestion is not one of the options' }),
+    ])
   })
 })
 

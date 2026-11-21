@@ -26,7 +26,7 @@ One question per profile key, never two. A strategy key may take up to three que
   - competitors_not_named: competitors never to be named
   - tone_limits: where the tone must stop, such as no slang or no jokes about accidents
   - pause_dates: dates when nothing may be published
-  - capacity: how much new work the brand can take on
+  - capacity: the time and people the brand has for content and approvals each week
   - success_measures: how the owner will judge that marketing works
 
 1. A key the profile holds as `found` is settled: never ask about it, under its own key or another one, even if a gap or a suggestion names it.
@@ -37,13 +37,13 @@ Aim for 20 to 30 questions, never fewer than 10 nor more than 30. Never ask abou
 
 ## Each question
 
-- `text`: one plain question to the owner, at most 300 characters.
+- `text`: one plain question to the owner, at most 300 characters, with no key names.
 - `why`: one sentence, at most 300 characters, telling the owner in plain words why you ask: what research found or could not read, or what the answer will shape. Never use a key's name (write "where you work", not places_served).
-- `options`: prefer multiple choice: two to six short choices, at most 200 characters each, built from the profile, the suggestions and the competitors wherever they can be. Leave the list empty only when the answer must be in the owner's own words, such as dates or words never to use. Never add an "Other" choice: the screen always offers one.
+- `options`: prefer multiple choice: two to six short choices, at most 200 characters each, built from the profile, the suggestions and the competitors wherever they can be. A value longer than 200 characters is shortened faithfully, or the question is asked as free text. Leave the list empty only when the answer must be in the owner's own words, such as dates or words never to use. Never add an "Other" choice: the screen always offers one.
 - `suggestedAnswer`: the answer the input makes most likely, for the owner to confirm; for an assumed item or an open suggestion the owner has not rejected, its value. A rejected value is never the suggestedAnswer: ask that key afresh, open-ended if you like. With options it is one of them, word for word; without, at most 500 characters. Null when nothing in the input points to an answer: never guess one, least of all for a safety key.
 
 ## Asking instead
 
-Set `ask` only when nothing in the input (profile, suggestions or an owner answer) says what the business sells: questions you cannot tailor to the brand waste the owner's time. Then `questions` is empty, and `ask` asks what the business sells and where, with `why` in one plain sentence: `text` at most 500 characters, `why` at most 300, up to five options, `suggested` null unless the input points to one. Otherwise `ask` is null.
+Set `ask` only when nothing in the input (profile, suggestions or an owner answer) says what the business sells: questions you cannot tailor to the brand waste the owner's time. Then `questions` is empty, and `ask` asks what the business sells and where, with `why` in one plain sentence: `text` at most 500 characters, `why` at most 300, up to five options of at most 200 characters each, and `suggested` at most 500 characters: one of the options when there are options, and null unless the input points to one. Otherwise `ask` is null.
 
 Reply with the JSON result only.

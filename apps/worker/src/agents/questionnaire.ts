@@ -9,12 +9,13 @@ export const QUESTIONNAIRE_DIR = fileURLToPath(new URL('../../../../agents/quest
 const section = (title: string, blocks: string[]): string =>
   `${title}\n${blocks.length === 0 ? 'None.' : blocks.join('\n')}`
 
-// The one place the questionnaire request is built: the job handler sends it, and the evaluation sends the same
-// one. No tools, so it keeps structured output. Every profile value, suggestion, gap reason, source address and
-// competitor came from research, the web or the owner, so each is wrapped as data, its key and status as
-// attributes; an open suggestion says whether the owner rejected it (ruling R9). The owner's answers to the job's earlier agent questions follow as owner_answer data: a resumed
-// attempt's request then differs from the one that asked, so its step is sent again instead of replaying the
-// checkpoint that asked (JobContext.answers).
+// The one place the questionnaire request is built: the job handler sends it, and the evaluation sends the
+// same one. No tools, so it keeps structured output. Every profile value, suggestion, gap reason, source
+// address and competitor came from research, the web or the owner, so each is wrapped as data, with its key
+// and status as attributes; an open suggestion also says whether the owner rejected it (ruling R9). The
+// owner's answers to the job's earlier agent questions follow as owner_answer data: a resumed attempt's
+// request then differs from the one that asked, so its step is sent again instead of replaying the checkpoint
+// that asked (JobContext.answers).
 export function buildQuestionnaireRequest(
   agent: LoadedAgent,
   input: QuestionnaireInput,
