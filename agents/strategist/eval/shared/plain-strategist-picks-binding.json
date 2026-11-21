@@ -6,19 +6,31 @@
     "today": "2026-11-22",
     "brandName": "Aztek Films",
     "profile": [
-      { "key": "business_name", "value": "Aztek Films", "status": "found" },
+      {
+        "key": "business_name",
+        "value": "Aztek Films",
+        "status": "found"
+      },
       {
         "key": "what_they_sell",
         "value": "Paint protection film (PPF) for cars and superbikes",
         "status": "found"
       },
-      { "key": "places_served", "value": "Pune and Mumbai", "status": "found" },
+      {
+        "key": "places_served",
+        "value": "Pune and Mumbai",
+        "status": "found"
+      },
       {
         "key": "audiences",
         "value": "Owners of new luxury cars; installers and studios that fit film; dealerships",
         "status": "found"
       },
-      { "key": "price_position", "value": "Premium", "status": "found" },
+      {
+        "key": "price_position",
+        "value": "Premium",
+        "status": "found"
+      },
       {
         "key": "social_presence",
         "value": "Instagram and YouTube channels exist; Facebook page dormant",
@@ -45,6 +57,10 @@
       {
         "id": "b1c20000-0000-4000-8000-000000000105",
         "statement": "Aztek Films supplies film to two car dealerships in Pune."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000106",
+        "statement": "Aztek Films sells its film to installers and studios that fit it."
       }
     ],
     "rules": [],
@@ -71,6 +87,10 @@
     "baseline": null,
     "changeRequest": null
   },
-  "checks": [{ "kind": "schema_valid" }],
-  "rubric": "brief is set and ask is null. The first entry in audiences is installers and studios, and the positioning statement or paragraph speaks to them. No other audience is listed before it. choicesMade has exactly one entry: key lead_audience, picked Installers and studios, notTaken Owners of new luxury cars and Dealerships, word for word. Every entry in factIds is one of the five fact ids in the input. Every goal's from is exactly baseline needed (B1)."
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "brief is set and ask is null. The first entry in audiences is installers and studios, and it is the audience the positioning statement or paragraph speaks to. No other audience is listed before it. choicesMade has exactly one entry: key lead_audience, picked Installers and studios, notTaken Owners of new luxury cars and Dealerships, word for word. Every entry in factIds is one of the six fact ids in the input, none twice. Every goal's from is exactly baseline needed (B1)."
 }

@@ -6,19 +6,31 @@
     "today": "2026-11-22",
     "brandName": "Aztek Films",
     "profile": [
-      { "key": "business_name", "value": "Aztek Films", "status": "found" },
+      {
+        "key": "business_name",
+        "value": "Aztek Films",
+        "status": "found"
+      },
       {
         "key": "what_they_sell",
         "value": "Paint protection film (PPF) for cars and superbikes",
         "status": "found"
       },
-      { "key": "places_served", "value": "Pune and Mumbai", "status": "found" },
+      {
+        "key": "places_served",
+        "value": "Pune and Mumbai",
+        "status": "found"
+      },
       {
         "key": "audiences",
         "value": "Owners of new luxury cars; installers and studios that fit film; dealerships",
         "status": "found"
       },
-      { "key": "price_position", "value": "Premium", "status": "found" },
+      {
+        "key": "price_position",
+        "value": "Premium",
+        "status": "found"
+      },
       {
         "key": "social_presence",
         "value": "Instagram and YouTube channels exist; Facebook page dormant",
@@ -47,7 +59,12 @@
         "statement": "Aztek Films supplies film to two car dealerships in Pune."
       }
     ],
-    "rules": [{ "kind": "competitor_not_named", "text": "Do not name other film installers." }],
+    "rules": [
+      {
+        "kind": "competitor_not_named",
+        "text": "Do not name other film installers."
+      }
+    ],
     "answers": [
       {
         "key": "goals",
@@ -71,9 +88,13 @@
     "baseline": null,
     "changeRequest": {
       "comment": "make Instagram the first channel, three posts a week",
-      "previous": "Positioning: Film fitted with care for owners of new luxury cars. Audiences: Owners of new luxury cars. Channels: YouTube first, then Instagram. Cadence: YouTube 1 a week, Instagram 1 a week. Goals: enquiries a month, from baseline needed (B1) to 30. Choices made: lead audience, owners of new luxury cars (not taken: superbike riders; dealerships)."
+      "previous": "Positioning\nAztek Films fits self-healing paint protection film on cars and superbikes, and the film carries a 10-year manufacturer warranty. We speak first to owners of new luxury cars, who want the fitting done with care.\nAudiences\nOwners of new luxury cars\nNeeds: A careful fitting they can trust with a new car\nTell them: The film carries a 10-year manufacturer warranty\nWhere: YouTube and Instagram\nContent themes\nThe fitting\nWhy: Owners want to see how their car is looked after\nA full-car fitting\nBefore and after\nThe warranty\nWhy: The warranty is a fact owners can rely on\nWhat the 10-year manufacturer warranty covers\nQuestions owners ask\nStudios\nWhy: Two studios serve two cities\nThe Baner, Pune studio\nThe Andheri, Mumbai studio\nDealerships\nWhy: Two Pune dealerships already use the film\nFilm supplied to dealerships\nWhat dealerships ask\nChannels\nYouTube: Owners of new luxury cars. Where owners look first.\nInstagram: Owners of new luxury cars. Longer fitting stories.\nPlan: posts per week\nYouTube: 1 a week\nInstagram: 1 a week\n90-day goals\nEnquiries a month: from baseline needed (B1) to 30\nChoices made\nOwners of new luxury cars (not taken: Superbike riders; Dealerships)\nFacts used\nAztek Films fits self-healing paint protection film on cars and superbikes.\nThe film carries a 10-year manufacturer warranty.\nThe studio is in Baner, Pune, and a second studio is in Andheri, Mumbai.\nAztek Films supplies film to two car dealerships in Pune."
     }
   },
-  "checks": [{ "kind": "schema_valid" }],
-  "rubric": "brief is set and ask is null. The first entry in channels is Instagram, and the entry for Instagram in cadence has postsPerWeek 3. The first audience is still owners of new luxury cars, and choicesMade has one entry for lead_audience repeating the pick word for word. Every entry in factIds is one of the five fact ids in the input. Every goal's from is exactly baseline needed (B1). No company other than Aztek Films is named."
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "brief is set and ask is null. The first entry in channels is Instagram, and the entry for Instagram in cadence has postsPerWeek 3. The first audience is still owners of new luxury cars, and choicesMade has one entry for lead_audience repeating the pick word for word. Every entry in factIds is one of the five fact ids in the input, none twice. Every goal's from is exactly baseline needed (B1). No company other than Aztek Films is named. A channel or platform name (Instagram, YouTube, Google Business Profile) is not a company."
 }

@@ -33,7 +33,7 @@ export function buildStrategistRequest(
     `Today is ${input.today}.`,
     ...briefDataParts(input),
     section(
-      "The owner's picks",
+      "The owner's picks:",
       input.picks.map((pick) =>
         wrapData('pick', JSON.stringify({ picked: pick.picked, notTaken: pick.notTaken }), {
           key: pick.key,

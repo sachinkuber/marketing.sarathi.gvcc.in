@@ -1,7 +1,6 @@
 import { z, type ZodType } from 'zod'
 import {
   briefChoicesInputSchema,
-  strategistInputSchema,
   briefSchema,
   factsRulesInputSchema,
   questionnaireInputSchema,
@@ -9,6 +8,7 @@ import {
   researchGroupInputSchema,
   researchGroupResultSchema,
   researchMergeInputSchema,
+  strategistInputSchema,
   type LoadedAgent,
 } from '@mkt/shared'
 import { buildFactsRulesRequest } from '../agents/facts-rules.ts'

@@ -292,18 +292,41 @@ describe('the strategist handler against its input', () => {
     await expect(strategistHandler(ctx)).rejects.toThrow(/not a valid result/)
   })
 
-  it('sends the picks, the baseline and a change request as data', async () => {
-    const { ctx, requests } = stub(end(strategistOk), {
-      ...strategistInput,
-      baseline: '12 enquiries a month',
-      changeRequest: { comment: 'More Instagram', previous: 'old brief' },
-    })
+  it('sends the picks, the baseline and a change request as data, in order', async () => {
+    const { ctx, requests } = stub(
+      end(strategistOk),
+      {
+        ...strategistInput,
+        baseline: '12 enquiries a month',
+        changeRequest: { comment: 'More Instagram', previous: 'old brief' },
+      },
+      [answered],
+    )
     await strategistHandler(ctx)
     const text = requests[0]!.request.messages[0]!.content as string
     expect(text.startsWith('Write the strategy brief.\n\nToday is 2026-11-22.\n\n')).toBe(true)
-    expect(text).toContain('<baseline>')
-    expect(text).toContain('<change_request>')
-    expect(text).toContain('<previous_brief>')
-    expect(text).toContain('Installers')
+    expect(text).toContain(`<pick key="lead_audience" question="Who first?">`)
+    expect(text).toContain('"picked":"Installers"')
+    expect(text).not.toContain('No baseline figures are given.')
+    const at = [
+      "The owner's picks:",
+      '<pick ',
+      '<baseline>',
+      '<change_request>',
+      '<previous_brief>',
+      '<owner_answer>',
+    ].map((marker) => text.indexOf(marker))
+    expect(at.every((n) => n > 0)).toBe(true)
+    expect(at).toEqual([...at].sort((a, b) => a - b))
+  })
+
+  it('says so when no baseline is given and sends no change request', async () => {
+    const { ctx, requests } = stub(end(strategistOk), strategistInput)
+    await strategistHandler(ctx)
+    const text = requests[0]!.request.messages[0]!.content as string
+    expect(text).toContain('No baseline figures are given.')
+    expect(text).not.toContain('<baseline>')
+    expect(text).not.toContain('<change_request>')
+    expect(text).not.toContain('<previous_brief>')
   })
 })

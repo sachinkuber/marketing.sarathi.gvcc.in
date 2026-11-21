@@ -1,13 +1,13 @@
 import {
   briefChoicesResultSchema,
-  strategistInputSchema,
-  strategyBriefAgainstInput,
-  strategyBriefResultSchema,
   factsRulesAgainstInput,
   factsRulesResultSchema,
   questionnaireResultSchema,
   researchGroupResultSchema,
   researchResultSchema,
+  strategistInputSchema,
+  strategyBriefAgainstInput,
+  strategyBriefResultSchema,
   summaryResultSchema,
 } from '@mkt/shared'
 import { z } from 'zod'
