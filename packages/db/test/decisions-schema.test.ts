@@ -155,6 +155,10 @@ describe('migration 0028: owner statements and question state', () => {
         `insert into app.agent_question (brand_id, run_id, job_id, question, why, suggested) values ($1, $2, $3, 'q', 'w', 's')`,
         [A, runId, jobId],
       )
+      const count = async (t: string) =>
+        (await own.admin.query(`select count(*)::int as n from app.${t}`)).rows[0].n as number
+      const tables = ['question', 'answer', 'agent_question', 'research_source']
+      const before = await Promise.all(tables.map(count))
       await runner({
         databaseUrl: url,
         dir: new URL('../migrations', import.meta.url).pathname,
@@ -165,13 +169,7 @@ describe('migration 0028: owner statements and question state', () => {
         direction: 'down',
         count: 1,
       })
-      const count = async (t: string) =>
-        (await own.admin.query(`select count(*)::int as n from app.${t}`)).rows[0].n as number
-      expect(await count('question')).toBe(1)
-      expect(await count('answer')).toBe(1)
-      expect(await count('agent_question')).toBe(1)
-      // seedBrand adds one source of its own, so two sources remain.
-      expect(await count('research_source')).toBe(2)
+      expect(await Promise.all(tables.map(count))).toEqual(before)
       const cols = await own.admin.query(
         `select column_name from information_schema.columns
           where table_schema = 'app'
@@ -181,6 +179,140 @@ describe('migration 0028: owner statements and question state', () => {
               or (table_name = 'agent_question' and column_name in ('suggested','reminded_at','source_id')))`,
       )
       expect(cols.rows).toEqual([])
+    } finally {
+      await own.drop()
+    }
+  })
+
+  // Takes 0028 off a database with the seeded brand, so the next `migrate` applies it to existing rows.
+  async function at0027(): Promise<{ own: TestDatabase; url: string; uid: string }> {
+    const own = await createTestDatabase()
+    await seedBrand(own, A, 'brand-a')
+    const url = own.urlFor('migration')
+    await runner({
+      databaseUrl: url,
+      dir: new URL('../migrations', import.meta.url).pathname,
+      migrationsTable: 'pgmigrations',
+      migrationsSchema: 'public',
+      createSchema: false,
+      log: () => undefined,
+      direction: 'down',
+      count: 1,
+    })
+    const uid = (await own.admin.query('select id from auth."user" limit 1')).rows[0].id as string
+    return { own, url, uid }
+  }
+
+  const statement = async (own: TestDatabase) =>
+    (
+      await own.admin.query(
+        `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', 'x') returning id`,
+        [A],
+      )
+    ).rows[0].id as string
+
+  // A suggestion decided by `uid` and a fact from it that cites the statement.
+  async function cited(own: TestDatabase, uid: string): Promise<string> {
+    const id = await statement(own)
+    const sug = (
+      await own.admin.query(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, confidence, decision, decided_by, decided_at)
+         values ($1, 'fact', 'k', '"x"'::jsonb, 'w', 'found', 'edited', $2, now()) returning id`,
+        [A, uid],
+      )
+    ).rows[0].id as string
+    await own.admin.query(
+      `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date, from_suggestion)
+       values ($1, 's', 'h', $2::uuid[], $3, current_date + 30, $4)`,
+      [A, [id], uid, sug],
+    )
+    return id
+  }
+
+  const validated = async (own: TestDatabase) =>
+    (
+      await own.admin.query(
+        `select convalidated from pg_constraint where conname = 'research_source_owner_statement_stated_by'`,
+      )
+    ).rows[0].convalidated as boolean
+
+  it('the backfill gives a cited owner statement its deciding user; unmatched rows leave the check not valid', async () => {
+    const { own, url, uid } = await at0027()
+    try {
+      const matched = await cited(own, uid)
+      const unmatched = await statement(own)
+      const { migrate } = await import('../src/migrate.ts')
+      await migrate(url)
+      const rows = await own.admin.query(
+        'select id, stated_by from app.research_source where id = any($1::uuid[])',
+        [[matched, unmatched]],
+      )
+      const by = Object.fromEntries(rows.rows.map((r) => [r.id, r.stated_by]))
+      expect(by[matched]).toBe(uid)
+      expect(by[unmatched]).toBeNull()
+      expect(await validated(own)).toBe(false)
+      expect(
+        await code(() =>
+          own.admin.query(
+            "insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', 'y')",
+            [A],
+          ),
+        ),
+      ).toBe('23514')
+    } finally {
+      await own.drop()
+    }
+  })
+
+  it('with only matched owner statements the check is validated', async () => {
+    const { own, url, uid } = await at0027()
+    try {
+      // The seeded brand's own statement is cited by no suggestion: make it an ordinary source here.
+      await own.admin.query("update app.research_source set kind = 'site' where kind = 'owner_statement'")
+      const matched = await cited(own, uid)
+      const { migrate } = await import('../src/migrate.ts')
+      await migrate(url)
+      expect(
+        (await own.admin.query('select stated_by from app.research_source where id = $1', [matched])).rows[0]
+          .stated_by,
+      ).toBe(uid)
+      expect(await validated(own)).toBe(true)
+    } finally {
+      await own.drop()
+    }
+  })
+
+  it('names the offending rows before its checks run', async () => {
+    const { own, url, uid } = await at0027()
+    try {
+      const { migrate } = await import('../src/migrate.ts')
+      const { runId, jobId } = await seedJob(own, A)
+      for (let i = 0; i < 2; i++)
+        await own.admin.query(
+          `insert into app.agent_question (brand_id, run_id, job_id, question, why) values ($1, $2, $3, 'q', 'w')`,
+          [A, runId, jobId],
+        )
+      await expect(migrate(url)).rejects.toThrow(
+        /0028: app\.agent_question has a job with more than one unanswered question/,
+      )
+      await own.admin.query(
+        'update app.agent_question set answer = $1, answered_by = $2, answered_at = now() where ctid = (select ctid from app.agent_question limit 1)',
+        ['a', uid],
+      )
+      const qn = (
+        await own.admin.query('insert into app.questionnaire (brand_id) values ($1) returning id', [A])
+      ).rows[0].id
+      for (const k of ['a', 'b'])
+        await own.admin.query(
+          `insert into app.question (brand_id, questionnaire_id, key, position, text, why) values ($1, $2, $3, 1, 't', 'w')`,
+          [A, qn, k],
+        )
+      await expect(migrate(url)).rejects.toThrow(/0028: app\.question repeats a position/)
+      await own.admin.query("update app.question set position = 2 where key = 'b'")
+      await own.admin.query(`update app.question set options = '[1]'::jsonb where key = 'b'`)
+      await expect(migrate(url)).rejects.toThrow(
+        /0028: app\.question has options that are not a list of strings/,
+      )
     } finally {
       await own.drop()
     }
