@@ -45,9 +45,12 @@ import type { JobsDeps } from '../../core/src/jobs/service.ts'
 import type { ResultHandlers } from '../../core/src/jobs/results.ts'
 import { addBrand, addUser, enrol, TestClient, totp } from '../../core/test/support.ts'
 import { httpCoreClient } from '../../worker/src/core-client.ts'
+import { FACTS_RULES_DIR } from '../../worker/src/agents/facts-rules.ts'
+import { QUESTIONNAIRE_DIR } from '../../worker/src/agents/questionnaire.ts'
 import { RESEARCH_DIR, RESEARCH_MERGE_DIR } from '../../worker/src/agents/research.ts'
 import { defaultHandlers, startWorker } from '../../worker/src/main.ts'
 import { standInModel } from '../../worker/src/standin.ts'
+import { decisionReplyFor } from './decision-script.ts'
 import { researchReplyFor, withWebTools } from './research-script.ts'
 
 export const PASSWORD = 'correct horse battery'
@@ -191,10 +194,13 @@ export async function startStack(env: Record<string, string | undefined> = proce
      values ('claude-sonnet-5-5', $1::date - 30, 2000000, 10000000, 100000, 2500000, 10000, 'e2e')`,
     [today],
   )
-  // Live releases of both research agents, with the files this worker runs (ruling R9).
+  // Live releases of the research, questionnaire and facts and rules agents, with the files this worker runs
+  // (ruling R9).
   for (const [agent, dir] of [
     ['research', RESEARCH_DIR],
     ['research_merge', RESEARCH_MERGE_DIR],
+    ['questionnaire', QUESTIONNAIRE_DIR],
+    ['facts_rules', FACTS_RULES_DIR],
   ] as const) {
     await db.admin.query(
       `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
@@ -259,7 +265,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
     model: withWebTools(
       standInModel({
         logFile: '/dev/null',
-        replyFor: (step) => researchReplyFor(step) ?? MODEL_REPLY,
+        replyFor: (step) => researchReplyFor(step) ?? decisionReplyFor(step) ?? MODEL_REPLY,
       }),
     ),
     handlers: defaultHandlers(),
