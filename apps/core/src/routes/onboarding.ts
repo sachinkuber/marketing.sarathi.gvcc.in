@@ -5,6 +5,7 @@ import type { RouteTable } from '../access/routes.ts'
 import { principalOf } from '../auth/session.ts'
 import type { AuditSink } from '../ports.ts'
 import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/suggestions.ts'
+import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
 import { inputOf, validate } from '../validate.ts'
 import type { JobsDeps } from '../jobs/service.ts'
 import { intakeSchema, readOverview, saveIntake, startResearch } from '../onboarding/research.ts'
@@ -21,6 +22,16 @@ const brandParams = z.strictObject({ brandId: z.uuid() })
 const suggestionParams = z.strictObject({ brandId: z.uuid(), suggestionId: z.uuid() })
 const listQuery = z.strictObject({ step: z.enum(STEPS).optional() })
 const acceptBody = z.strictObject({ step: z.enum(STEPS) })
+const questionParams = z.strictObject({ brandId: z.uuid(), questionId: z.uuid() })
+// The owner's own words, kept exactly as given once trimmed (an owner statement, D7).
+const answerBody = z.strictObject({
+  answer: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2000)
+    .refine((v) => !v.includes('\u0000'), 'must not contain U+0000'),
+})
 
 const MAX_VALUE = 4000
 const decisionBody = z
@@ -101,6 +112,48 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
           res.json(
             await startResearch(deps.pool, jobs, {
               brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
+  }
+
+  table.add({
+    method: 'get',
+    path: '/brands/:brandId/onboarding/agent-questions',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary:
+      "The questions the brand's agent jobs asked: the open ones first, then the 20 most recently answered",
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json({ questions: await listAgentQuestions(deps.pool, brandContextOf(res).brandId) })
+      },
+    ],
+  })
+
+  if (deps.jobs) {
+    const jobs = deps.jobs
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/agent-questions/:questionId/answer',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary:
+        'Answer an agent question: the answer is kept as an owner statement and the job runs again with it; a question is answered once',
+      handlers: [
+        validate({ params: questionParams, body: answerBody }),
+        async (_req, res) => {
+          const { params, body } = inputOf<{
+            params: z.infer<typeof questionParams>
+            body: z.infer<typeof answerBody>
+          }>(res)
+          res.json(
+            await answerAgentQuestion(jobs, {
+              brandId: brandContextOf(res).brandId,
+              questionId: params.questionId,
+              answer: body.answer,
               actor: { userId: principalOf(res).userId },
             }),
           )

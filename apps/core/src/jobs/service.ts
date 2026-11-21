@@ -137,6 +137,14 @@ export async function createJob(
   return jobId
 }
 
+// The owner's answer to a question an attempt of the job asked (spec 9). Every later attempt is given them all.
+export interface AgentAnswer {
+  question: string
+  why: string
+  options: string[]
+  answer: string
+}
+
 export interface StartedAttempt {
   finished: false
   attemptId: string
@@ -151,6 +159,8 @@ export interface StartedAttempt {
   filesHash: string | null
   // When the attempt token expires (epoch seconds): the worker plans its requests to end before it.
   expiresAt: number
+  // The owner's answers to the questions the job asked, oldest first; empty for a job that never asked.
+  answers: AgentAnswer[]
 }
 export interface FinishedJob {
   finished: true
@@ -158,10 +168,11 @@ export interface FinishedJob {
 }
 // A held job (by its flag or an active kill switch) is not started: no attempt is created, the worker stops.
 // So is a queue copy that is not the job's current one (a release sent the job again under a new queue id):
-// the worker stops and the queue completes that copy, so only the newest copy can run the job.
+// the worker stops and the queue completes that copy, so only the newest copy can run the job. So is a job
+// waiting for the owner's answer to its question (spec 9): the answer sends it again.
 export interface HeldJob {
   finished: false
-  outcome: 'held' | 'superseded'
+  outcome: 'held' | 'superseded' | 'waiting_for_answer'
 }
 
 // The id of the job's current queue row: the job id, unless a kill-switch release sent the job again.
@@ -171,6 +182,25 @@ export async function currentQueueId(client: PoolClient, jobId: string): Promise
     [jobId],
   )
   return rows[0]?.queue_id ?? jobId
+}
+
+// Whether the job has a question the owner has not answered (at most one: index agent_question_one_open).
+export async function hasOpenQuestion(client: PoolClient, brandId: string, jobId: string): Promise<boolean> {
+  const { rowCount } = await client.query(
+    'select 1 from app.agent_question where brand_id = $1 and job_id = $2 and answer is null limit 1',
+    [brandId, jobId],
+  )
+  return (rowCount ?? 0) > 0
+}
+
+async function answersOf(client: PoolClient, brandId: string, jobId: string): Promise<AgentAnswer[]> {
+  const { rows } = await client.query<AgentAnswer>(
+    `select question, why, coalesce(options, '[]'::jsonb) as options, answer from app.agent_question
+      where brand_id = $1 and job_id = $2 and answer is not null
+      order by created_at, id`,
+    [brandId, jobId],
+  )
+  return rows
 }
 
 // `queueId` is the queue row the worker claimed (absent from an older worker: the current row is assumed).
@@ -211,6 +241,12 @@ export async function startAttempt(
     const current = await currentQueueId(client, jobId)
     if (queueId !== undefined && queueId !== current) {
       return { finished: false as const, outcome: 'superseded' as const }
+    }
+
+    // A job waiting for the owner's answer gets no attempt (spec 9): a retried or late copy of the queue row
+    // that asked stops here, and asks nothing again. The answer sends the job again under a new queue id.
+    if (await hasOpenQuestion(client, brandId, jobId)) {
+      return { finished: false as const, outcome: 'waiting_for_answer' as const }
     }
 
     // "Workers check it before every job" (spec 13): a held job gets no attempt.
@@ -254,6 +290,7 @@ export async function startAttempt(
              and not (i.expected_result_type = any($3::text[])))`,
       [row.run_id, jobId, settledTypes(deps)],
     )
+    const answers = await answersOf(client, brandId, jobId)
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)
     const claims: AttemptClaims = {
@@ -277,6 +314,7 @@ export async function startAttempt(
       agent: row.agent,
       filesHash: row.files_hash,
       expiresAt: claims.expiresAt,
+      answers,
     }
   })
 }
@@ -323,44 +361,53 @@ export async function endAttempt(
   claims: AttemptClaims,
   reason: 'held' | 'agent_files_mismatch' = 'held',
 ): Promise<void> {
-  await withBrand(deps.pool, claims.brandId, async (client) => {
-    await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
-    const { rows } = await client.query<{ id: string; state: string }>(
-      `select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1`,
-      [claims.jobId],
-    )
-    const latest = rows[0]
-    if (!latest) throw new AppError(404, 'job_not_found', 'No such job.')
-    if (latest.id !== claims.attemptId) {
-      await deps.audit.record({
-        action: 'worker.attempt_refused',
+  await withBrand(deps.pool, claims.brandId, (client) => endAttemptIn(client, deps, claims, reason))
+}
+
+// endAttempt inside the caller's transaction: a question ends the attempt that asked it in the transaction that
+// stores it ('waiting_for_answer', audited by the caller as the question).
+export async function endAttemptIn(
+  client: PoolClient,
+  deps: JobsDeps,
+  claims: AttemptClaims,
+  reason: 'held' | 'agent_files_mismatch' | 'waiting_for_answer',
+): Promise<void> {
+  await client.query('select 1 from app.job_input where job_id = $1 for update', [claims.jobId])
+  const { rows } = await client.query<{ id: string; state: string }>(
+    `select id, state from app.job_attempt where job_id = $1 order by attempt_number desc limit 1`,
+    [claims.jobId],
+  )
+  const latest = rows[0]
+  if (!latest) throw new AppError(404, 'job_not_found', 'No such job.')
+  if (latest.id !== claims.attemptId) {
+    await deps.audit.record({
+      action: 'worker.attempt_refused',
+      actor: null,
+      brandId: claims.brandId,
+      subject: claims.jobId,
+      outcome: 'failure',
+      detail: { reason: 'attempt_superseded', jobId: claims.jobId, attemptId: claims.attemptId },
+    })
+    throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
+  }
+  await client.query(
+    `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
+    [claims.attemptId],
+  )
+  // A held stop is not an event of the attempt's own. A files mismatch is: the worker refused to run.
+  if (reason === 'agent_files_mismatch') {
+    await deps.audit.record(
+      {
+        action: 'worker.attempt_ended',
         actor: null,
         brandId: claims.brandId,
         subject: claims.jobId,
         outcome: 'failure',
-        detail: { reason: 'attempt_superseded', jobId: claims.jobId, attemptId: claims.attemptId },
-      })
-      throw new AppError(403, 'attempt_refused', 'This attempt may not do that.')
-    }
-    await client.query(
-      `update app.job_attempt set state = 'failed', ended_at = now() where id = $1 and state = 'active'`,
-      [claims.attemptId],
+        detail: { reason, jobId: claims.jobId, attemptId: claims.attemptId },
+      },
+      client,
     )
-    // A held stop is not an event of the attempt's own. A files mismatch is: the worker refused to run.
-    if (reason === 'agent_files_mismatch') {
-      await deps.audit.record(
-        {
-          action: 'worker.attempt_ended',
-          actor: null,
-          brandId: claims.brandId,
-          subject: claims.jobId,
-          outcome: 'failure',
-          detail: { reason, jobId: claims.jobId, attemptId: claims.attemptId },
-        },
-        client,
-      )
-    }
-  })
+  }
 }
 
 // The cancel flag and whether the job is held. Held is the job's own flag OR an active kill switch that covers

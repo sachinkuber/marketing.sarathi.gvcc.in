@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { JobClass } from '@mkt/queue'
-import { CoreError, type CoreClient, type JobDocument } from './core-client.ts'
+import {
+  CoreError,
+  type AgentAnswer,
+  type AgentQuestion,
+  type CoreClient,
+  type JobDocument,
+} from './core-client.ts'
 import {
   isDefiniteRefusal,
   ModelStopped,
@@ -14,6 +20,16 @@ export class JobStopped extends Error {
   constructor(why: 'cancelled' | 'held') {
     super(`job ${why}`)
     this.why = why
+  }
+}
+
+// The job asked the owner a question (spec 9): the core has stored it and ended the attempt, and the job waits for
+// the answer, which starts it again. Like a stop, it ends the job here without a result and without a retry.
+export class JobWaiting extends Error {
+  readonly questionId: string
+  constructor(questionId: string) {
+    super('job waiting for an answer')
+    this.questionId = questionId
   }
 }
 
@@ -116,6 +132,11 @@ export interface JobContext {
   input: unknown
   // When the attempt's token expires: nothing may be started that cannot end before it.
   deadline: Date
+  // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9).
+  answers: AgentAnswer[]
+  // Asks the owner instead of guessing what blocks the job's output: the question is posted, and JobWaiting ends
+  // the job without a result. Its next attempt, started by the answer, finds the answer in `answers`.
+  ask(question: AgentQuestion): Promise<never>
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
   modelStep(step: string, request: ModelRequest): Promise<ModelStepResult>
   // Called between steps: throws JobStopped when the job was cancelled or held.
@@ -182,8 +203,8 @@ export async function runJob(
   const started = await deps.core.startAttempt(job.id, deps.workerId, job.queueId)
   // Finished already (the core accepted the result and the worker died before completing the queue row).
   if (started.finished) return
-  // Held (by a kill switch or a hold), or a queue copy a release has replaced: no attempt was made; stop and
-  // post nothing.
+  // Held (by a kill switch or a hold), a queue copy a release has replaced, or a job waiting for the owner's
+  // answer: no attempt was made; stop and post nothing.
   if ('outcome' in started) return
   const entry = deps.handlers[started.expectedResultType]
   if (!entry) throw new Error(`no handler for ${started.expectedResultType}`)
@@ -208,6 +229,11 @@ export async function runJob(
     jobClass: job.jobClass,
     input: started.input,
     deadline: started.expiresAt === undefined ? new Date(8.64e15) : new Date(started.expiresAt * 1000),
+    answers: started.answers ?? [],
+    async ask(question) {
+      const { questionId } = await deps.core.raiseQuestion(job.id, started.token, question)
+      throw new JobWaiting(questionId)
+    },
     async checkStop(options) {
       const control = await deps.core.control(job.id, started.token)
       if (control.cancelRequested) throw new JobStopped('cancelled')
@@ -324,6 +350,9 @@ export async function runJob(
     await ctx.checkStop({ allowHeld: true })
     await deps.core.postResult(job.id, started.token, outcome)
   } catch (error) {
+    // A job waiting for an answer ends here, posting nothing, and its queue row completes: the core already ended
+    // the attempt, and the answer sends the job again.
+    if (error instanceof JobWaiting) return
     // A cancelled or held job ends here without a retry: the core already knows.
     if (error instanceof JobStopped) {
       // A held job's attempt is ended, so a release starts a fresh attempt instead of finding a live one. A

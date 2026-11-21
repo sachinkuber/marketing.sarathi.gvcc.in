@@ -28,7 +28,7 @@ describe('the replies the worker accepts from the core', () => {
 
   it('accepts both shapes of a start and rejects a malformed one', () => {
     expect(replySchemas.startAttempt.safeParse({ finished: true, outcome: { a: 1 } }).success).toBe(true)
-    for (const outcome of ['held', 'superseded']) {
+    for (const outcome of ['held', 'superseded', 'waiting_for_answer']) {
       expect(replySchemas.startAttempt.safeParse({ finished: false, outcome }).success).toBe(true)
     }
     expect(replySchemas.startAttempt.safeParse({ finished: false, outcome: 'other' }).success).toBe(false)
@@ -51,6 +51,12 @@ describe('the replies the worker accepts from the core', () => {
       true,
     )
     expect(replySchemas.startAttempt.safeParse({ ...started, agent: undefined }).success).toBe(false)
+    // The owner's answers to the job's questions; absent from a core that does not send them.
+    const answers = [{ question: 'Which city?', why: 'Two are named.', options: ['Pune'], answer: 'Pune' }]
+    expect(replySchemas.startAttempt.safeParse({ ...started, answers }).success).toBe(true)
+    expect(replySchemas.startAttempt.safeParse({ ...started, answers: [{ question: 'q' }] }).success).toBe(
+      false,
+    )
   })
 
   it('rejects a checkpoint or result reply that is not understood', () => {

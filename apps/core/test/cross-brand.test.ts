@@ -30,6 +30,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   const suggestions = new Map<string, string>()
   // And a real document in each brand, for the delete route.
   const documents = new Map<string, string>()
+  // And a real agent question in each brand, for the answer route.
+  const questions = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -74,6 +76,21 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         [brand],
       )
       documents.set(brand, document.rows[0].id as string)
+      const job = await stack.db.admin.query(
+        `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type)
+         values (gen_random_uuid(), $1, $2, 'production', '{}', 'test.asks') returning job_id`,
+        [brand, runs.get(brand)],
+      )
+      await stack.db.admin.query('insert into app.job_control (job_id, brand_id) values ($1, $2)', [
+        job.rows[0].job_id,
+        brand,
+      ])
+      const question = await stack.db.admin.query(
+        `insert into app.agent_question (brand_id, run_id, job_id, question, why)
+         values ($1, $2, $3, 'Which city?', 'Two are named.') returning id`,
+        [brand, runs.get(brand), job.rows[0].job_id],
+      )
+      questions.set(brand, question.rows[0].id as string)
     }
   })
   afterAll(async () => stack?.close())
@@ -86,6 +103,7 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       .replace(':runId', runs.get(brand) ?? SOME_USER)
       .replace(':suggestionId', suggestions.get(brand) ?? SOME_USER)
       .replace(':documentId', documents.get(brand) ?? SOME_USER)
+      .replace(':questionId', questions.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
@@ -103,6 +121,8 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       ['get', 'onboarding'],
       ['put', 'onboarding/intake'],
       ['post', 'onboarding/research'],
+      ['get', 'onboarding/agent-questions'],
+      ['post', 'onboarding/agent-questions/:questionId/answer'],
     ] as const) {
       expect(
         scoped.some((r) => r.method === method && r.path === `/brands/:brandId/${path}`),

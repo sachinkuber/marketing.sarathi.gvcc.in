@@ -65,6 +65,9 @@ function fakeCore(
     async approvalsTick() {
       return { reminded: 0, overdue: 0, escalated: 0, failedBrands: 0 }
     },
+    async raiseQuestion() {
+      throw new Error('no question in this test')
+    },
     ...overrides,
   }
   return Object.assign(core, { posted, calls, ended })
@@ -824,6 +827,77 @@ describe('running a job', () => {
     await runOne(core, big, toolsRequest(5), [])
     expect(bodies[0]!.stopped).toBeUndefined()
     expect(typeof bodies[0]!.output).toBe('string')
+  })
+
+  it('ask posts the question and ends the job without a result', async () => {
+    model.sent.length = 0
+    const raised: unknown[] = []
+    const core = fakeCore({
+      async raiseQuestion(jobId, token, body) {
+        raised.push({ jobId, token, body })
+        return { questionId: 'q1' }
+      },
+    })
+    const question = {
+      question: 'Which city is the main shop in?',
+      why: 'The site names two cities.',
+      options: ['Pune', 'Nashik'],
+      suggested: 'Pune',
+    }
+    let guessed = false
+    const asking: JobHandler = async (ctx) => {
+      expect(ctx.answers).toEqual([])
+      await ctx.modelStep('one', { model: 'm', messages: [{ role: 'user', content: 'one' }], maxTokens: 10 })
+      await ctx.ask(question)
+      guessed = true
+      return { type: 'test.echo', result: 'a guess' }
+    }
+    await expect(
+      runJob(
+        { ...deps(core), handlers: { 'test.echo': plain(asking) } },
+        { id: 'jq', jobClass: 'interactive' },
+      ),
+    ).resolves.toBeUndefined()
+    expect(raised).toEqual([{ jobId: 'jq', token: 'tok', body: question }])
+    // Nothing after the question runs: no further model call, no result, and the queue row completes (no throw).
+    expect(guessed).toBe(false)
+    expect(model.sent).toHaveLength(1)
+    expect(core.posted).toEqual([])
+    // The core ended the attempt when it took the question; the worker asks for nothing more.
+    expect(core.ended).toEqual([])
+  })
+
+  it('gives the handler the answers it was sent, and does nothing while the job waits for an answer', async () => {
+    const waiting = fakeCore({
+      async startAttempt() {
+        return { finished: false, outcome: 'waiting_for_answer' }
+      },
+    })
+    await expect(runJob(deps(waiting), { id: 'jw', jobClass: 'interactive' })).resolves.toBeUndefined()
+    expect(waiting.calls).toEqual([])
+    expect(waiting.posted).toEqual([])
+    expect(waiting.ended).toEqual([])
+
+    const answers = [
+      { question: 'Which city?', why: 'Two are named.', options: ['Pune', 'Nashik'], answer: 'Pune' },
+    ]
+    const base = await fakeCore().startAttempt('j', 'w')
+    const answered = fakeCore({
+      async startAttempt() {
+        return { ...(base as Exclude<typeof base, { outcome: unknown }>), answers }
+      },
+    })
+    let seen: unknown = null
+    const reading: JobHandler = async (ctx) => {
+      seen = ctx.answers
+      return { type: 'test.echo', result: 'told' }
+    }
+    await runJob(
+      { ...deps(answered), handlers: { 'test.echo': plain(reading) } },
+      { id: 'ja', jobClass: 'interactive' },
+    )
+    expect(seen).toEqual(answers)
+    expect(answered.posted).toEqual([{ type: 'test.echo', result: 'told' }])
   })
 
   it('replays every saved turn of a tool request after a failed attempt, with no new provider request', async () => {

@@ -10,7 +10,7 @@ import {
   researchMergeHandler,
   ResearchReplyInvalid,
 } from '../src/agents/research.ts'
-import { NO_DOCUMENTS } from './no-documents.ts'
+import { NO_DOCUMENTS, NO_QUESTIONS } from './no-documents.ts'
 
 const DOC = '11111111-1111-4111-8111-111111111111'
 const DOC2 = '22222222-2222-4222-8222-222222222222'
@@ -53,6 +53,7 @@ function stub(input: unknown, script: Script, docs: Partial<JobContext> = {}) {
     },
     async checkStop() {},
     ...NO_DOCUMENTS,
+    ...NO_QUESTIONS,
     ...docs,
   }
   return { ctx, seen }

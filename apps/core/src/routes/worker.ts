@@ -15,6 +15,7 @@ import {
   startAttempt,
   type JobsDeps,
 } from '../jobs/service.ts'
+import { raiseAgentQuestion, remindAgentQuestions } from '../onboarding/agent-questions.ts'
 import { listJobDocuments, readJobDocument, readJobDocumentPart } from '../onboarding/documents.ts'
 import { tick as approvalsTick } from '../approvals/requests.ts'
 import { runNotifyTick } from '../notify/tick.ts'
@@ -78,6 +79,13 @@ const partParams = z.strictObject({
     .transform(Number),
 })
 const callParams = z.strictObject({ jobId: z.uuid(), callId: z.uuid() })
+// Spec 9: what an agent asks when it cannot settle something, with why, and options with a suggestion where it can.
+const questionBody = z.strictObject({
+  question: text(500),
+  why: text(300),
+  options: z.array(text(200)).max(5),
+  suggested: text(500).nullable(),
+})
 
 export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?: NotifyDeps): void {
   table.add({
@@ -285,6 +293,22 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
     ],
   })
 
+  // The attempt ends with the question, and the job waits for the owner's answer (spec 9). 201 with the question id.
+  table.add({
+    method: 'post',
+    path: '/worker/jobs/:jobId/question',
+    access: { kind: 'attempt' },
+    summary:
+      "A worker asks the owner what its job cannot settle; the attempt ends and the job waits for the owner's answer",
+    handlers: [
+      validate({ params: jobParams, body: questionBody }),
+      async (_req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof questionBody> }>(res)
+        res.status(201).json(await raiseAgentQuestion(deps, claimsOf(res), body))
+      },
+    ],
+  })
+
   table.add({
     method: 'post',
     path: '/worker/jobs/:jobId/dead',
@@ -323,7 +347,7 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
       path: '/worker/approvals/tick',
       access: { kind: 'worker' },
       summary:
-        'The worker timer sends due approval reminders and marks and escalates overdue requests, and stamps the worker heartbeat; it never approves or changes a version',
+        'The worker timer sends due approval reminders, marks and escalates overdue requests, reminds unanswered agent questions, and stamps the worker heartbeat; it never approves or changes a version',
       handlers: [
         validate({ body: tickBody }),
         async (_req, res) => {
@@ -335,7 +359,14 @@ export function registerWorkerRoutes(table: RouteTable, deps: JobsDeps, notify?:
           } catch (error) {
             notify.logger?.error({ err: errorName(error) }, 'worker heartbeat not stamped')
           }
-          res.json(await approvalsTick(notify.pool, notify))
+          const approvals = await approvalsTick(notify.pool, notify)
+          // Agent questions unanswered for 72 hours ride the same timer (spec 9).
+          const agentQuestionsReminded = await remindAgentQuestions(
+            notify.pool,
+            notify.clock.now(),
+            notify.logger,
+          )
+          res.json({ ...approvals, agentQuestionsReminded })
         },
       ],
     })

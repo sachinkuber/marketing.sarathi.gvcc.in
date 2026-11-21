@@ -12,3 +12,11 @@ export const NO_DOCUMENTS: Pick<JobContext, 'document' | 'documents' | 'document
     throw new Error('this job lists no documents')
   },
 }
+
+// The question methods of a stub context whose job has asked nothing and must not ask (spec 9).
+export const NO_QUESTIONS: Pick<JobContext, 'answers' | 'ask'> = {
+  answers: [],
+  async ask() {
+    throw new Error('this job may not ask a question')
+  },
+}
