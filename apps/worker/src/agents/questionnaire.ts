@@ -1,8 +1,16 @@
 import { fileURLToPath } from 'node:url'
-import { wrapData, type LoadedAgent, type QuestionnaireInput } from '@mkt/shared'
-import type { ModelRequest } from '../model.ts'
-import type { JobContext } from '../runner.ts'
-import { ownerAnswersSection, section } from './request-parts.ts'
+import {
+  loadAgentDefinition,
+  questionnaireInputSchema,
+  questionnaireResultSchema,
+  wrapData,
+  type LoadedAgent,
+  type QuestionnaireInput,
+} from '@mkt/shared'
+import { attemptTimeoutMs } from '../model-turns.ts'
+import { ModelStopped, type ModelRequest } from '../model.ts'
+import type { JobContext, JobHandler } from '../runner.ts'
+import { DecisionReplyInvalid, ownerAnswersSection, section } from './request-parts.ts'
 import { providerSchema } from './summary.ts'
 
 export const QUESTIONNAIRE_DIR = fileURLToPath(new URL('../../../../agents/questionnaire/', import.meta.url))
@@ -68,4 +76,32 @@ export function buildQuestionnaireRequest(
     outputSchema: providerSchema(agent.outputSchema as Record<string, unknown>),
     messages: [{ role: 'user', content: parts.join('\n\n') }],
   }
+}
+
+const agent = loadAgentDefinition(QUESTIONNAIRE_DIR)
+
+// One structured model call. A reply that asks raises the question and the job waits for the answer; a
+// questionnaire is returned as the result. The request carries the job's answers, so the resumed attempt's step
+// is a new request and is not replayed.
+export const questionnaireHandler: JobHandler = async (ctx) => {
+  const input = questionnaireInputSchema.parse(ctx.input)
+  const request = {
+    ...buildQuestionnaireRequest(agent, input, ctx.answers),
+    timeoutMs: attemptTimeoutMs(ctx),
+  }
+  const reply = await ctx.modelStep('questionnaire', request)
+  if (reply.stopReason !== undefined && reply.stopReason !== 'end_turn')
+    throw new ModelStopped(reply.stopReason)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(reply.text)
+  } catch {
+    throw new DecisionReplyInvalid('questionnaire')
+  }
+  const result = questionnaireResultSchema.safeParse(parsed)
+  if (!result.success) throw new DecisionReplyInvalid('questionnaire')
+  const { ask } = result.data
+  if (ask !== null)
+    return ctx.ask({ question: ask.text, why: ask.why, options: ask.options, suggested: ask.suggested })
+  return { type: 'questionnaire.v1', result: result.data }
 }

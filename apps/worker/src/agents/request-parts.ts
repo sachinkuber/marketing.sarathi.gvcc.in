@@ -18,3 +18,12 @@ export function ownerAnswersSection(answers: JobContext['answers']): string | nu
     ),
   )
 }
+
+// A decision agent's reply that is not a valid result (not JSON, a schema or citation refusal). Not quoted: it is
+// model output over untrusted text. The attempt fails and retries under the Phase 1 rules; no repair request.
+export class DecisionReplyInvalid extends Error {
+  constructor(agent: string) {
+    super(`The ${agent} reply was not a valid result.`)
+    this.name = 'DecisionReplyInvalid'
+  }
+}

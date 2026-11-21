@@ -1,8 +1,17 @@
 import { fileURLToPath } from 'node:url'
-import { wrapData, type FactsRulesInput, type LoadedAgent } from '@mkt/shared'
-import type { ModelRequest } from '../model.ts'
-import type { JobContext } from '../runner.ts'
-import { ownerAnswersSection, section } from './request-parts.ts'
+import {
+  factsRulesAgainstInput,
+  factsRulesInputSchema,
+  factsRulesResultSchema,
+  loadAgentDefinition,
+  wrapData,
+  type FactsRulesInput,
+  type LoadedAgent,
+} from '@mkt/shared'
+import { attemptTimeoutMs } from '../model-turns.ts'
+import { ModelStopped, type ModelRequest } from '../model.ts'
+import type { JobContext, JobHandler } from '../runner.ts'
+import { DecisionReplyInvalid, ownerAnswersSection, section } from './request-parts.ts'
 import { providerSchema } from './summary.ts'
 
 export const FACTS_RULES_DIR = fileURLToPath(new URL('../../../../agents/facts_rules/', import.meta.url))
@@ -71,4 +80,31 @@ export function buildFactsRulesRequest(
     outputSchema: providerSchema(agent.outputSchema as Record<string, unknown>),
     messages: [{ role: 'user', content: parts.join('\n\n') }],
   }
+}
+
+const agent = loadAgentDefinition(FACTS_RULES_DIR)
+
+// One structured model call, as the questionnaire's. The reply is also checked against the input (every cited
+// id is a listed source or an answered question's statement, every review date is after today), so a bad
+// citation fails the attempt here and not only at the core.
+export const factsRulesHandler: JobHandler = async (ctx) => {
+  const input = factsRulesInputSchema.parse(ctx.input)
+  const request = { ...buildFactsRulesRequest(agent, input, ctx.answers), timeoutMs: attemptTimeoutMs(ctx) }
+  const reply = await ctx.modelStep('facts_rules', request)
+  if (reply.stopReason !== undefined && reply.stopReason !== 'end_turn')
+    throw new ModelStopped(reply.stopReason)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(reply.text)
+  } catch {
+    throw new DecisionReplyInvalid('facts and rules')
+  }
+  const result = factsRulesResultSchema.safeParse(parsed)
+  if (!result.success) throw new DecisionReplyInvalid('facts and rules')
+  if (factsRulesAgainstInput(result.data, input, ctx.answers).length > 0)
+    throw new DecisionReplyInvalid('facts and rules')
+  const { ask } = result.data
+  if (ask !== null)
+    return ctx.ask({ question: ask.text, why: ask.why, options: ask.options, suggested: ask.suggested })
+  return { type: 'facts_rules.v1', result: result.data }
 }

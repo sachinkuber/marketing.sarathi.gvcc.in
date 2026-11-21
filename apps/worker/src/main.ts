@@ -13,6 +13,8 @@ import {
   researchGroupHandler,
   researchMergeHandler,
 } from './agents/research.ts'
+import { FACTS_RULES_DIR, factsRulesHandler } from './agents/facts-rules.ts'
+import { QUESTIONNAIRE_DIR, questionnaireHandler } from './agents/questionnaire.ts'
 import { SUMMARY_DIR, summaryHandler } from './agents/summary.ts'
 
 export interface WorkerOptions {
@@ -93,6 +95,16 @@ export function defaultHandlers(): Record<string, HandlerEntry> {
       handler: researchMergeHandler,
       agent: 'research_merge',
       filesHash: agentFilesHash(RESEARCH_MERGE_DIR),
+    },
+    'questionnaire.v1': {
+      handler: questionnaireHandler,
+      agent: 'questionnaire',
+      filesHash: agentFilesHash(QUESTIONNAIRE_DIR),
+    },
+    'facts_rules.v1': {
+      handler: factsRulesHandler,
+      agent: 'facts_rules',
+      filesHash: agentFilesHash(FACTS_RULES_DIR),
     },
     'placeholder_check.v1': { handler: checkHandler, agent: null, filesHash: null },
   }
