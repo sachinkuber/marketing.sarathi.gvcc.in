@@ -282,7 +282,13 @@ export async function decideWithin(
     createdId = await writeRule(client, input, row, chosen)
   }
 
-  const decidedValue = input.decision === 'edited' ? input.value : null
+  // A choice is settled by a pick, never dropped; its decided value is always `{ value }`.
+  const decidedValue =
+    row.step === 'choice'
+      ? choiceValue(row, input.decision, input.value)
+      : input.decision === 'edited'
+        ? input.value
+        : null
   await client.query(
     `update app.suggestion
         set decision = $3, decided_value = $4::jsonb, decided_reason = $5, decided_by = $6, decided_at = now()
@@ -313,6 +319,25 @@ export async function decideWithin(
     client,
   )
   return { createdId }
+}
+
+export const CHOICE_VALUE_MAX = 300
+
+// What the owner settled a choice on: the recommended value when accepted, else one of the options or their own
+// words (1 to 300 characters). Checked before anything is written. A choice writes no fact, rule or profile item.
+function choiceValue(row: SuggestionRow, decision: Decision, value: unknown): { value: string } {
+  if (decision === 'rejected')
+    throw new AppError(400, 'choice_needs_pick', 'Pick one of the options, or write your own.')
+  if (decision === 'accepted') {
+    const recommended = isObject(row.proposed) ? row.proposed.value : undefined
+    if (typeof recommended !== 'string')
+      throw invalid('This choice has no recommended option. Pick an option or write your own.')
+    return { value: recommended }
+  }
+  const picked = isObject(value) && typeof value.value === 'string' ? value.value.trim() : ''
+  if (picked === '' || picked.length > CHOICE_VALUE_MAX)
+    throw invalid(`Give your pick as { "value": text }, from 1 to ${CHOICE_VALUE_MAX} characters.`)
+  return { value: picked }
 }
 
 async function writeFact(

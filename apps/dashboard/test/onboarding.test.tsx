@@ -24,6 +24,7 @@ const overview = (over: Record<string, unknown> = {}) => ({
   openSuggestions: 0,
   questionnaire: null,
   factsRules: null,
+  briefChoices: null,
   cost: { usdMicros: '0', inrMicros: '0' },
   ...over,
 })

@@ -6,6 +6,7 @@ import {
   researchGroupResultHandler,
   researchResultHandler,
 } from '../onboarding/research-results.ts'
+import { BRIEF_CHOICES_RESULT_TYPE, briefChoicesResultHandler } from '../onboarding/brief-choices.ts'
 import { FACTS_RULES_RESULT_TYPE, factsRulesResultHandler } from '../onboarding/facts-rules.ts'
 import { QUESTIONNAIRE_RESULT_TYPE, questionnaireResultHandler } from '../onboarding/questionnaire.ts'
 import { checkResultHandler } from './check-result.ts'
@@ -43,4 +44,9 @@ export function registerQuestionnaireHandlers(results: ResultHandlers): void {
 // The facts and rules agent's result type (spec 7, 8.2): the facts and rules become suggestions for the owner.
 export function registerFactsRulesHandlers(results: ResultHandlers, deps: Pick<JobsDeps, 'audit'>): void {
   results.set(FACTS_RULES_RESULT_TYPE, factsRulesResultHandler(deps))
+}
+
+// The brief choices agent's result type (spec 4, 6): the choices become suggestions for the owner to settle.
+export function registerBriefChoicesHandlers(results: ResultHandlers, deps: Pick<JobsDeps, 'audit'>): void {
+  results.set(BRIEF_CHOICES_RESULT_TYPE, briefChoicesResultHandler(deps))
 }

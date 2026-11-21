@@ -518,6 +518,13 @@ export const onboardingReply = z.strictObject({
       activeRules: z.number().int().nonnegative(),
     })
     .nullable(),
+  briefChoices: z
+    .strictObject({
+      state: agentJobState,
+      total: z.number().int().nonnegative(),
+      decided: z.number().int().nonnegative(),
+    })
+    .nullable(),
   cost: maybeMoney,
 })
 
@@ -631,6 +638,23 @@ export const factsRulesReply = z.strictObject({
     .nullable(),
   facts: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeFact) }),
   rules: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeRule) }),
+})
+
+// --- brief choices (M11, spec 4, 6) ------------------------------------------------------------------------
+export const briefChoicesStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const briefChoice = z.strictObject({
+  id: z.string(),
+  key: z.string(),
+  question: z.string(),
+  why: z.string(),
+  options: z.array(z.strictObject({ value: z.string(), tradeOff: z.string(), recommended: z.boolean() })),
+  decision: z.enum(['accepted', 'edited']).nullable(),
+  // The recommended value, another option or the owner's own words.
+  picked: z.string().nullable(),
+})
+export const briefChoicesReply = z.strictObject({
+  job: z.strictObject({ state: agentJobState, questionId: z.string().optional() }).nullable(),
+  choices: z.array(briefChoice),
 })
 export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId: z.string() })
 export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })

@@ -18,6 +18,8 @@ import {
   factChangedReply,
   factsRulesReply,
   factsRulesStartedReply,
+  briefChoicesReply,
+  briefChoicesStartedReply,
   homeReply,
   intakeSavedReply,
   inviteCreatedReply,
@@ -594,6 +596,66 @@ describe('the dashboard schemas accept the core’s replies', () => {
           rules: { suggestions: [], active: [] },
         }).job?.questionId,
       ).toBe(ruleId)
+    })
+
+    it('brief choices: start, the job, the choices, a pick and the overview block', async () => {
+      // The facts and rules run of the test above ends here, and the brand confirms a fact.
+      await q(`update app.job_input set finished_at = coalesce(finished_at, now()) where brand_id = $1`, [
+        brand,
+      ])
+      await q(`update app.run set state = 'succeeded', finished_at = now() where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('brief_choices', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/brief_choices', import.meta.url)))],
+      )
+      const reviewDate = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10)
+      const fact = await owner.request('POST', `${base()}/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate },
+      })
+      expect(fact.status).toBe(200)
+      const started = await owner.request('POST', `${base()}/brief-choices`, { body: {} })
+      expect(started.status, JSON.stringify(started.json)).toBe(200)
+      briefChoicesStartedReply.parse(started.json)
+      const read = async () => {
+        const reply = await owner.request('GET', `${base()}/brief-choices`)
+        expect(reply.status).toBe(200)
+        return briefChoicesReply.parse(reply.json)
+      }
+      expect(await read()).toEqual({ job: { state: 'waiting' }, choices: [] })
+      expect((await overview()).briefChoices).toEqual({ state: 'waiting', total: 0, decided: 0 })
+      const options = [
+        { value: 'Owners of new cars', tradeOff: 'Reaches many.', recommended: true },
+        { value: 'Fleet managers', tradeOff: 'Fewer, bigger.', recommended: false },
+      ]
+      const made = await q(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, confidence, options)
+         values ($1, 'choice', 'lead_audience', $2::jsonb, 'It decides the brief.', 'assumed', $3::jsonb)
+         returning id`,
+        [
+          brand,
+          JSON.stringify({ question: 'Who do we speak to first?', value: 'Owners of new cars' }),
+          JSON.stringify(options),
+        ],
+      )
+      expect((await read()).choices).toEqual([
+        {
+          id: made.rows[0].id,
+          key: 'lead_audience',
+          question: 'Who do we speak to first?',
+          why: 'It decides the brief.',
+          options,
+          decision: null,
+          picked: null,
+        },
+      ])
+      const picked = await owner.request('POST', `${base()}/suggestions/${made.rows[0].id}/decision`, {
+        body: { decision: 'edited', value: { value: 'Fleet managers' } },
+      })
+      expect(picked.status).toBe(200)
+      expect((await read()).choices[0]).toMatchObject({ decision: 'edited', picked: 'Fleet managers' })
+      expect((await overview()).briefChoices).toEqual({ state: 'waiting', total: 1, decided: 1 })
+      expect(() => briefChoicesReply.parse({ job: null, choices: [{ id: 'x' }] })).toThrow()
     })
   })
 

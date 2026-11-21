@@ -337,7 +337,7 @@ describe('suggest then decide', () => {
   })
 
   it('accept-found accepts found items only', async () => {
-    const step = 'choice' as const
+    const step = 'question' as const
     const [f, a, u] = await add([
       { step, key: 'af-1', confidence: 'found' },
       { step, key: 'af-2', confidence: 'assumed' },
@@ -389,7 +389,7 @@ describe('suggest then decide', () => {
   })
 
   it('a brand admin gets 403; the platform owner gets 200 on the three routes', async () => {
-    const [id] = await add([{ step: 'choice' }])
+    const [id] = await add([{ step: 'question' }])
     const calls: [string, string, unknown][] = [
       ['GET', base(), undefined],
       ['POST', `${base()}/accept-found`, { step: 'profile' }],
@@ -487,7 +487,7 @@ describe('suggest then decide', () => {
   })
 
   it('accept-found skips a row another transaction holds, and does not wait or fail', async () => {
-    const step = 'choice' as const
+    const step = 'question' as const
     const [a, b] = await add([
       { step, key: 'lock-1' },
       { step, key: 'lock-2' },

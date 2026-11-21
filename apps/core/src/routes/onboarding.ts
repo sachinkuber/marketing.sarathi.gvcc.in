@@ -10,6 +10,7 @@ import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/su
 import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
 import { inputOf, validate } from '../validate.ts'
 import type { JobsDeps } from '../jobs/service.ts'
+import { readBriefChoices, startBriefChoices } from '../onboarding/brief-choices.ts'
 import {
   addOwnFact,
   addOwnRule,
@@ -287,7 +288,38 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
         },
       ],
     })
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/brief-choices',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary:
+        'Start the brief choices: one job, from the profile, the facts and rules in force and the questionnaire answers',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startBriefChoices(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
   }
+
+  table.add({
+    method: 'get',
+    path: '/brands/:brandId/onboarding/brief-choices',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'Brief choices: the job state and the current choices with their options and the owner’s pick',
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json(await readBriefChoices(deps.pool, brandContextOf(res).brandId))
+      },
+    ],
+  })
 
   table.add({
     method: 'get',
