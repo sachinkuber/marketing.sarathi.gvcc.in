@@ -47,5 +47,5 @@
     ]
   },
   "checks": [{ "kind": "schema_valid" }],
-  "rubric": "ask is null and there are at least 3 choices. Every choice has two or three options with exactly one recommended: true and the rest false. Each option's trade-off names a cost or a downside as well as a gain, grounded in the input (for example the one-person capacity, the weekend-only catering, the two neighbourhoods). No option calls the food healthy or diet food, and nothing states a fact the input does not state."
+  "rubric": "ask is null and there are at least 3 choices. Every choice has two or three options with exactly one recommended: true and the rest false. Each option's trade-off names a cost or a downside as well as a gain, grounded in the input (for example the one-person capacity, the weekend-only catering, the two neighbourhoods). No option calls the food healthy or diet food. No option or trade-off invents a claim about the brand: a certification, a price, a figure or result, a place, a competitor's name, or a product or service outside the brand's line of business that the input does not name. Paraphrasing what the input names, general reasoning about what an option gains or costs, proposed channels, audiences, rhythms, themes and formats, and general words about the brand's customers are all fine."
 }
