@@ -304,6 +304,47 @@ describe('the questionnaire screen, driven', () => {
     expect(dom.writes().filter((w) => w.url.endsWith('/finish'))).toHaveLength(1)
   })
 
+  it('an answer refused as already given makes the screen read again', async () => {
+    const asked = {
+      id: 'aq1',
+      jobId: 'j1',
+      runId: 'r1',
+      agent: 'questionnaire',
+      question: 'Which year?',
+      why: 'Two years show.',
+      options: [],
+      suggested: null,
+      createdAt: '2026-11-21T08:00:00.000Z',
+      answer: null,
+      answeredAt: null,
+    }
+    dom.replies.push(
+      { status: 200, body: { questionnaire: null, job: { state: 'waiting_for_answer', questionId: 'aq1' } } },
+      { status: 200, body: { questions: [asked] } },
+    )
+    await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
+    dom.type('aq-own-aq1', '2010')
+    // The job has moved on: the re-read shows it running, so the question goes.
+    dom.replies.push(
+      {
+        status: 409,
+        body: {
+          error: {
+            code: 'already_answered',
+            message: 'This question already has an answer. Reload to see it.',
+          },
+        },
+      },
+      { status: 200, body: { questionnaire: null, job: { state: 'running' } } },
+    )
+    const gets = () => dom.calls.filter((c) => c.method === 'GET').length
+    const before = gets()
+    await dom.click('Send answer')
+    expect(gets()).toBe(before + 1)
+    expect(dom.text()).not.toContain('Which year?')
+    expect(dom.text()).toContain('The questionnaire is being written.')
+  })
+
   describe('polling', () => {
     const flush = async () => {
       for (let i = 0; i < 10; i += 1) await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
@@ -342,7 +383,10 @@ describe('the questionnaire screen, driven', () => {
     it('there is no further read after the screen is left', async () => {
       dom.replies.push(running, running)
       await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
-      dom.stop()
+      // Unmount the root and keep the recording stub, so a poll that outlives the screen would be seen.
+      const internals = dom as unknown as { root: { unmount(): void } | null }
+      act(() => internals.root?.unmount())
+      internals.root = null
       await tick(20_000)
       expect(gets()).toBe(1)
     })
