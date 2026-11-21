@@ -3,7 +3,7 @@ import { QUESTION_KEYS, SAFETY_KEYS } from '@mkt/shared'
 import { ModelStopped, type ModelRequest } from '../src/model.ts'
 import { JobWaiting, type JobContext } from '../src/runner.ts'
 import type { AgentQuestion } from '../src/core-client.ts'
-import { questionnaireHandler } from '../src/agents/questionnaire.ts'
+import { questionnaireHandler, withoutLoneOptions } from '../src/agents/questionnaire.ts'
 import { factsRulesHandler } from '../src/agents/facts-rules.ts'
 import { NO_DOCUMENTS } from './no-documents.ts'
 
@@ -169,5 +169,39 @@ describe('the facts and rules handler against its input', () => {
     const cites = { ...factsOk, facts: [{ ...factsOk.facts[0]!, sourceIds: [ANSWER_SRC] }] }
     const { ctx } = stub(end(cites), factsRulesInput, [answered])
     expect((await factsRulesHandler(ctx)).type).toBe('facts_rules.v1')
+  })
+})
+
+describe('a question with one option (seen in the milestone 10 production evaluation)', () => {
+  const lone = (options: string[], suggestedAnswer: string | null) => {
+    const [first, ...rest] = questions()
+    return { questions: [{ ...first!, options, suggestedAnswer }, ...rest], ask: null }
+  }
+
+  it('is stored with no options and that option as its suggestion', async () => {
+    const { ctx } = stub(end(lone(['Baner, Pune'], null)), questionnaireInput)
+    const done = (await questionnaireHandler(ctx)) as { result: typeof questionnaireOk }
+    expect(done.result.questions[0]).toMatchObject({ options: [], suggestedAnswer: 'Baner, Pune' })
+  })
+
+  it('keeps a suggestion it already has', async () => {
+    const { ctx } = stub(end(lone(['Gloss Co; Shine Ltd'], 'Gloss Co; Shine Ltd')), questionnaireInput)
+    const done = (await questionnaireHandler(ctx)) as { result: typeof questionnaireOk }
+    expect(done.result.questions[0]).toMatchObject({ options: [], suggestedAnswer: 'Gloss Co; Shine Ltd' })
+  })
+
+  it('leaves no options, two to six, and anything that is not a questionnaire as they are', () => {
+    const two = lone(['A', 'B'], 'A')
+    expect(withoutLoneOptions(two)).toEqual(two)
+    expect(withoutLoneOptions(questionnaireOk)).toEqual(questionnaireOk)
+    for (const other of ['text', null, 3, { questions: 'x' }, { questions: [null, 'q'] }])
+      expect(withoutLoneOptions(other)).toEqual(other)
+  })
+
+  it('still fails a reply the result check refuses for another reason', async () => {
+    const bad = lone(['A'], null)
+    bad.questions = bad.questions.slice(0, 3)
+    const { ctx } = stub(end(bad), questionnaireInput)
+    await expect(questionnaireHandler(ctx)).rejects.toThrow(/not a valid result/)
   })
 })
