@@ -16,6 +16,11 @@ import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify
 //
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 
+// Step 1, shared: a release (FOR UPDATE) finishes first, and the caller never holds a later lock while waiting for it.
+// Job creation and a result post take the same lock in jobs/service.ts, reading the row's schedule key with it.
+export const shareBrandRow = (client: PoolClient, brandId: string) =>
+  client.query('select 1 from app.brand where id = $1 for share', [brandId])
+
 // A version has at most one request, ever (a full unique on the version), so opening twice changes nothing.
 // Returns whether this call opened it.
 export async function openRequest(
@@ -92,7 +97,7 @@ export async function tick(
       await withBrand(pool, brandId, async (client) => {
         // Lock order, step 1: the brand row, shared like job creation takes it, so a release (FOR UPDATE)
         // finishes first and this brand's tick never holds a later lock while waiting for it.
-        await client.query('select 1 from app.brand where id = $1 for share', [brandId])
+        await shareBrandRow(client, brandId)
         // The item's kind is read with the request (the item and version are not locked: neither changes).
         const open = await client.query<OpenRow>(
           `select r.id, r.content_version_id, r.escalated_to, i.kind,

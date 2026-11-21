@@ -25,17 +25,25 @@ export interface BriefBlock {
   revision: number
   // Closed by a change request at the revision limit: no new version comes until the owner decides.
   needsDecision: boolean
-  // The latest strategist job, so a screen can show that a new version is being written (or waits on a question);
-  // null when none was started.
-  job: { state: AgentJobState; questionId?: string } | null
 }
 
-// The overview's part: the brand's brief item's latest version (null before the first brief), and gate 1, which
-// is passed while that version is approved.
+// The latest strategist job, apart from any version: the first brief is being written before there is one.
+export interface BriefJob {
+  state: AgentJobState
+  questionId?: string
+}
+
+// The overview's part: the brand's brief item's latest version (null before the first brief); the latest strategist
+// job (null before the first start), so a screen can show a brief, first or rewritten, being written or waiting on a
+// question; and gate 1, which is passed while that version is approved.
 export async function readBriefBlock(
   client: PoolClient,
   brandId: string,
-): Promise<{ brief: BriefBlock | null; gate1: boolean }> {
+): Promise<{ brief: BriefBlock | null; briefJob: BriefJob | null; gate1: boolean }> {
+  const job = await latestStrategistJob(client, brandId)
+  const briefJob = job
+    ? { state: job.state, ...(job.questionId ? { questionId: job.questionId } : {}) }
+    : null
   const found = await client.query<{
     item_id: string
     version_id: string
@@ -56,8 +64,7 @@ export async function readBriefBlock(
     [brandId],
   )
   const row = found.rows[0]
-  if (!row) return { brief: null, gate1: false }
-  const job = await latestStrategistJob(client, brandId)
+  if (!row) return { brief: null, briefJob, gate1: false }
   return {
     brief: {
       itemId: row.item_id,
@@ -67,8 +74,8 @@ export async function readBriefBlock(
       revision: row.revision,
       needsDecision:
         row.state === 'rejected' && row.changes_requested && row.revision >= BRIEF_REVISION_LIMIT,
-      job: job ? { state: job.state, ...(job.questionId ? { questionId: job.questionId } : {}) } : null,
     },
+    briefJob,
     gate1: row.state === 'approved',
   }
 }

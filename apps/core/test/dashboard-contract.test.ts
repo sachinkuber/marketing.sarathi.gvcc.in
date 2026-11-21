@@ -674,10 +674,12 @@ describe('the dashboard schemas accept the core’s replies', () => {
          values ('strategist', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
         [agentFilesHash(fileURLToPath(new URL('../../../agents/strategist', import.meta.url)))],
       )
-      expect(await overview()).toMatchObject({ brief: null, gate1: false })
+      expect(await overview()).toMatchObject({ brief: null, briefJob: null, gate1: false })
       const started = await owner.request('POST', `${base()}/brief`, { body: {} })
       expect(started.status, JSON.stringify(started.json)).toBe(200)
       expect(briefStartedReply.parse(started.json).revision).toBe(0)
+      // The first brief is being written: no version yet, the job waiting to be picked up.
+      expect(await overview()).toMatchObject({ brief: null, briefJob: { state: 'waiting' }, gate1: false })
 
       // The brief arrives as the strategist's result makes it: a version waiting for approval.
       const item = await q(
@@ -715,9 +717,9 @@ describe('the dashboard schemas accept the core’s replies', () => {
           state: 'awaiting_approval',
           revision: 0,
           needsDecision: false,
-          // The strategist job started above has not been picked up.
-          job: { state: 'waiting' },
         },
+        // The strategist job started above has not been picked up.
+        briefJob: { state: 'waiting' },
         gate1: false,
       })
       const shown = await owner.request('GET', api(brand, `/content/${briefItem}`))
@@ -734,6 +736,7 @@ describe('the dashboard schemas accept the core’s replies', () => {
       expect(() =>
         onboardingReply.shape.brief.parse({ itemId: 'x', versionId: 'y', number: 0, state: 'approved' }),
       ).toThrow()
+      expect(() => onboardingReply.shape.briefJob.parse({ state: 'writing' })).toThrow()
 
       // Ask for changes on a later version: the version closes; this stack starts no rewrite.
       const later = await withBrand(stack.appPool, brand, async (client) => {

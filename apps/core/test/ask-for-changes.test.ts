@@ -101,12 +101,9 @@ describe('ask for changes', () => {
     ])
     expect(await audits(made.brandId, 'onboarding.brief_revision_not_started')).toEqual([])
     // The overview shows the closed version and the rewrite waiting to run.
-    expect((await w.overview(made.brandId)).brief).toMatchObject({
-      versionId: made.versionId,
-      state: 'rejected',
-      revision: 0,
-      needsDecision: false,
-      job: { state: 'waiting' },
+    expect(await w.overview(made.brandId)).toMatchObject({
+      brief: { versionId: made.versionId, state: 'rejected', revision: 0, needsDecision: false },
+      briefJob: { state: 'waiting' },
     })
 
     // A second ask on the closed version is refused; the comment is not taken twice.
@@ -119,12 +116,9 @@ describe('ask for changes', () => {
     await w.post(jobId, w.result([made.factId], 'Fleets first.'))
     const next = await w.currentBrief(made.brandId)
     expect(next.state).toBe('awaiting_approval')
-    expect((await w.overview(made.brandId)).brief).toMatchObject({
-      versionId: next.versionId,
-      number: 2,
-      revision: 1,
-      needsDecision: false,
-      job: { state: 'done' },
+    expect(await w.overview(made.brandId)).toMatchObject({
+      brief: { versionId: next.versionId, number: 2, revision: 1, needsDecision: false },
+      briefJob: { state: 'done' },
     })
   })
 

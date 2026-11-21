@@ -327,8 +327,17 @@ describe('the strategy brief', () => {
   it('the result becomes a version awaiting approval, with fact_refs and a facts_current check', async () => {
     const { brandId, factId } = await fresh()
     await settle(brandId)
+    expect(await overview(brandId)).toMatchObject({ brief: null, briefJob: null, gate1: false })
     const { runId, jobId } = await started(brandId)
-    await post(jobId, result([factId]))
+    // Before any result there is no version yet, but the overview shows the first brief being written.
+    expect(await overview(brandId)).toMatchObject({
+      brief: null,
+      briefJob: { state: 'waiting' },
+      gate1: false,
+    })
+    const claims = await claim(jobId)
+    expect(await overview(brandId)).toMatchObject({ brief: null, briefJob: { state: 'running' } })
+    await postResult(jobs, claims, { type: TYPE, result: result([factId]) })
 
     const items = await q('select id, kind from app.content_item where brand_id = $1', [brandId])
     expect(items).toEqual([{ id: expect.any(String), kind: 'strategy_brief' }])
@@ -386,8 +395,8 @@ describe('the strategy brief', () => {
       state: 'awaiting_approval',
       revision: 0,
       needsDecision: false,
-      job: { state: 'done' },
     })
+    expect(seen.briefJob).toEqual({ state: 'done' })
     expect(seen.gate1).toBe(false)
 
     // A result that asks is refused and stores nothing.

@@ -19,6 +19,7 @@ const overview = (gaps: { key: string; why: string }[] = []) => ({
   factsRules: null,
   briefChoices: null,
   brief: null,
+  briefJob: null,
   gate1: false,
   cost: none,
 })

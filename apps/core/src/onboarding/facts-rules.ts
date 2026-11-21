@@ -18,6 +18,7 @@ import {
   type FactsRulesInput,
   type SafetyRuleKind,
 } from '@mkt/shared'
+import { shareBrandRow } from '../approvals/requests.ts'
 import { invalidateFactCitations } from '../content/invalidate.ts'
 import { AppError } from '../errors.ts'
 import type { ResultHandler } from '../jobs/results.ts'
@@ -548,12 +549,10 @@ const factNotActive = () =>
     'This fact is no longer in force: it was replaced or retired. Change the fact that is in force instead.',
   )
 
-// A change of a fact can invalidate content citing it, which writes notifications (they reference the brand row). So
-// the brand row is taken first, shared, as approvals/requests.ts orders the locks: a kill-switch release holding it
-// while it applies a held result that wants the onboarding row then finishes first instead of deadlocking.
-const lockBrand = (client: PoolClient, brandId: string) =>
-  client.query('select 1 from app.brand where id = $1 for share', [brandId])
-
+// A change of a fact writes rows that reference the brand row (a new fact, an owner statement, and the notifications
+// of what it invalidates). So the brand row is taken first, shared (shareBrandRow, step 1 of the lock order in
+// approvals/requests.ts): a kill-switch release holding it while it applies a held result that wants the onboarding
+// row then finishes first instead of deadlocking.
 async function lockActiveFact(
   client: PoolClient,
   brandId: string,
@@ -592,7 +591,7 @@ export async function replaceFact(
 ): Promise<{ factId: string }> {
   try {
     return await withBrand(pool, input.brandId, async (client) => {
-      await lockBrand(client, input.brandId)
+      await shareBrandRow(client, input.brandId)
       await lockOnboarding(client, input.brandId)
       const old = await lockActiveFact(client, input.brandId, input.factId)
       await refuseActiveFactTwin(client, input.brandId, input.statement, input.factId)
@@ -650,7 +649,7 @@ export async function retireFact(
   input: { brandId: string; factId: string; actor: { userId: string } },
 ): Promise<{ factId: string }> {
   return withBrand(pool, input.brandId, async (client) => {
-    await lockBrand(client, input.brandId)
+    await shareBrandRow(client, input.brandId)
     await lockOnboarding(client, input.brandId)
     await lockActiveFact(client, input.brandId, input.factId)
     await client.query(`update app.verified_fact set status = 'expired' where brand_id = $1 and id = $2`, [

@@ -6,6 +6,7 @@ import { moveState, type Actor, type VersionDeps } from '../content/versions.ts'
 import type { VersionState } from '../content/states.ts'
 import { AppError } from '../errors.ts'
 import { lockOnboarding } from '../onboarding/suggestions.ts'
+import { shareBrandRow } from './requests.ts'
 
 export interface ApprovalDeps extends VersionDeps {
   // What "ask for changes" starts, by content kind (built at server start). Unset or without the kind: the comment
@@ -65,7 +66,7 @@ export async function lockForDecision(
   client: PoolClient,
   target: DecisionTarget,
 ): Promise<Locked & { kind: string }> {
-  await client.query('select 1 from app.brand where id = $1 for share', [target.brandId])
+  await shareBrandRow(client, target.brandId)
   const found = await client.query<{ kind: string }>(
     `select i.kind from app.content_item i
        join app.content_version v on v.brand_id = i.brand_id and v.content_item_id = i.id

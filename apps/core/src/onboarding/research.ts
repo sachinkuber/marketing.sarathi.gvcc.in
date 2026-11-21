@@ -4,7 +4,7 @@ import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import type { AuditSink } from '../ports.ts'
 import { readBriefChoicesBlock, type BriefChoicesBlock } from './brief-choices-state.ts'
-import { readBriefBlock, type BriefBlock } from './brief-state.ts'
+import { readBriefBlock, type BriefBlock, type BriefJob } from './brief-state.ts'
 import { readFactsRulesBlock, type FactsRulesBlock } from './facts-rules-state.ts'
 import { readQuestionnaireBlock, type QuestionnaireBlock } from './questionnaire-state.ts'
 import { researchRunIsOpen } from './runs.ts'
@@ -205,8 +205,11 @@ export interface Overview {
   factsRules: FactsRulesBlock | null
   // The brief choices: the job state and how many choices the owner has settled; null before the first start.
   briefChoices: BriefChoicesBlock | null
-  // The strategy brief's latest version (null before the first brief), and gate 1: passed while it is approved.
+  // The strategy brief's latest version (null before the first brief), the latest strategist job (null before the
+  // first start; it shows the first brief being written, before any version), and gate 1: passed while the latest
+  // version is approved.
   brief: BriefBlock | null
+  briefJob: BriefJob | null
   gate1: boolean
   cost: Money
 }

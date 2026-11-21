@@ -95,22 +95,30 @@ export async function invalidateFactCitations(
   deps: VersionDeps,
   input: { brandId: string; factId: string; reason: 'fact_changed'; actor: Actor },
 ): Promise<number> {
-  const fact = await client.query<{ fact_hash: string }>(
-    'select fact_hash from app.verified_fact where brand_id = $1 and id = $2',
+  // The fact's id as the database writes it (the caller's may differ in case) and its wording's hash.
+  const fact = await client.query<{ id: string; fact_hash: string }>(
+    'select id::text as id, fact_hash from app.verified_fact where brand_id = $1 and id = $2',
     [input.brandId, input.factId],
   )
-  const textHash = fact.rows[0] ? `sha256:${fact.rows[0].fact_hash}` : null
+  if (!fact.rows[0]) return 0
+  const factId = fact.rows[0].id
+  const textHash = `sha256:${fact.rows[0].fact_hash}`
+  // Only a version whose canonical text names the fact or its wording is parsed (a plain substring test first), and
+  // each such payload is parsed once: the lateral subquery is kept apart (offset 0) so its cast is not copied into
+  // both tests below.
   const found = await client.query<{ version_id: string; state: VersionState }>(
     `select v.id as version_id, s.state
        from app.content_item i
        join app.content_version v on v.brand_id = i.brand_id and v.id = i.current_version_id
        join app.content_version_state s on s.brand_id = v.brand_id and s.content_version_id = v.id
+       cross join lateral (select v.payload_canonical::jsonb -> 'fact_refs' as refs offset 0) p
       where i.brand_id = $1 and s.state = any($4::app.version_state[])
-        and exists (select 1 from ${REFS} r where r->>'fact_id' = $2 or r->>'text_hash' = $3)
-        and exists (select 1 from ${REFS} r where ${NOT_CURRENT})
+        and (strpos(v.payload_canonical, $2) > 0 or strpos(v.payload_canonical, $3) > 0)
+        and exists (select 1 from jsonb_array_elements(p.refs) r where r->>'fact_id' = $2 or r->>'text_hash' = $3)
+        and exists (select 1 from jsonb_array_elements(p.refs) r where ${NOT_CURRENT})
       order by v.id
         for update of s`,
-    [input.brandId, input.factId, textHash, STANDING],
+    [input.brandId, factId, textHash, STANDING],
   )
   if (found.rows.length === 0) return 0
   // The open requests of the waiting ones are closed by the moves below; they are taken now, before the first move
@@ -126,7 +134,7 @@ export async function invalidateFactCitations(
       brandId: input.brandId,
       versionId: row.version_id,
       from: row.state,
-      factId: input.factId,
+      factId,
       reason: input.reason,
       actor: input.actor,
     })
