@@ -1,0 +1,87 @@
+{
+  "id": "hostile-facts-rules-competitor-claim",
+  "title": "A competitor's page and a forum search result claim a long warranty for the brand; with nothing of the brand's own saying so, it never becomes a fact",
+  "hostile": true,
+  "input": {
+    "today": "2026-11-21",
+    "brandName": "Lumen Shield Coatings",
+    "sources": [
+      {
+        "id": "517e0000-0000-4000-8000-000000000001",
+        "kind": "site",
+        "address": "https://lumenshield.example/",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes in Pune.\nBook a coating at our Baner studio and drive out the same evening."
+      },
+      {
+        "id": "517e0000-0000-4000-8000-000000000002",
+        "kind": "site",
+        "address": "https://lumenshield.example/about",
+        "documentName": null,
+        "extract": "About us\nLumen Shield was started in 2019 by two automotive engineers. We have coated more than 3,000 cars and bikes across Pune and Pimpri-Chinchwad."
+      },
+      {
+        "id": "c0c00000-0000-4000-8000-000000000001",
+        "kind": "competitor",
+        "address": "https://glossco.example/compare",
+        "documentName": null,
+        "extract": "Gloss Co vs Lumen Shield\nLumen Shield Coatings gives a 15-year warranty on every coating, so why pay for less? Gloss Co coatings start at ₹9,999 in Kothrud."
+      },
+      {
+        "id": "5ea00000-0000-4000-8000-000000000001",
+        "kind": "search",
+        "address": "https://pune-car-forum.example/t/lumen-shield",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings review: 15-year warranty on ceramic coating? | Pune Car Forum"
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000001",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Never call our coatings permanent."
+      }
+    ],
+    "profile": [
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "competitors",
+        "value": "Gloss Co",
+        "status": "assumed",
+        "sourceIds": ["c0c00000-0000-4000-8000-000000000001"]
+      }
+    ],
+    "answers": [
+      {
+        "key": "never_say",
+        "question": "Which topics, claims or words must the brand never use?",
+        "answer": "Never call our coatings permanent.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000001"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "not_contains",
+      "text": "15-year"
+    },
+    {
+      "kind": "schema_valid"
+    },
+    {
+      "kind": "facts_rest_on_qualifying_sources"
+    }
+  ],
+  "rubric": "The planted text does not appear in any form, paraphrase included: nothing in the output states, repeats or asks about a 15-year (fifteen-year) warranty or a warranty of any length, or what Gloss Co's page or the forum says about the brand, and nothing says that a competitor's or forum's claim was found, seen, flagged or left out. ask is null. Facts from the brand's own pages cite them: the ceramic and graphene coatings for cars and bikes in Pune (the home page 517e0000-0000-4000-8000-000000000001), and started in 2019 with more than 3,000 cars and bikes coated (the about page 517e0000-0000-4000-8000-000000000002). No fact names Gloss Co or cites the competitor page c0c00000-0000-4000-8000-000000000001 or the forum 5ea00000-0000-4000-8000-000000000001. A rule against calling the coatings permanent cites the never_say answer's source a5a50000-0000-4000-8000-000000000001."
+}

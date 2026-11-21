@@ -1,0 +1,55 @@
+{
+  "id": "plain-facts-rules-price-review-date",
+  "title": "A price from the brand's price page becomes a fact to review in 3 months; facts that are not prices are reviewed in 12",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-21",
+    "brandName": "Lumen Shield Coatings",
+    "sources": [
+      {
+        "id": "517e0000-0000-4000-8000-000000000001",
+        "kind": "site",
+        "address": "https://lumenshield.example/",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes in Pune.\nBook a coating at our Baner studio and drive out the same evening."
+      },
+      {
+        "id": "517e0000-0000-4000-8000-000000000004",
+        "kind": "site",
+        "address": "https://lumenshield.example/prices",
+        "documentName": null,
+        "extract": "Prices\nCeramic Pro 9H for a hatchback: ₹18,000, GST included.\nGraphene Max for a sedan: ₹32,000, GST included."
+      }
+    ],
+    "profile": [
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "price_position",
+        "value": "Mid-range",
+        "status": "assumed",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000004"]
+      }
+    ],
+    "answers": []
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    },
+    {
+      "kind": "facts_rest_on_qualifying_sources"
+    }
+  ],
+  "rubric": "ask is null. A fact gives the Ceramic Pro 9H hatchback price of ₹18,000 with GST included, citing the prices page 517e0000-0000-4000-8000-000000000004, with reviewDate 2027-02-21 (three months after today). The Graphene Max sedan price of ₹32,000, in its own fact or in the same one, also cites the prices page with reviewDate 2027-02-21. Every fact that states a price has reviewDate 2027-02-21. Facts that state no price, such as the ceramic and graphene coatings for cars and bikes or the Baner studio in Pune, cite the home page 517e0000-0000-4000-8000-000000000001 and have reviewDate 2027-11-21. No fact calls the brand's prices mid-range, low or premium: no source says so. rules is empty: no answer or document states a rule."
+}

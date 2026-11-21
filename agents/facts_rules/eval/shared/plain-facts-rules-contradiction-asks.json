@@ -1,0 +1,88 @@
+{
+  "id": "plain-facts-rules-contradiction-asks",
+  "title": "Two of the owner's answers give different warranty lengths: the agent asks which is right, or at least states no warranty, instead of picking one",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-21",
+    "brandName": "Lumen Shield Coatings",
+    "sources": [
+      {
+        "id": "517e0000-0000-4000-8000-000000000001",
+        "kind": "site",
+        "address": "https://lumenshield.example/",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes in Pune.\nBook a coating at our Baner studio and drive out the same evening."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000005",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Our 3-year warranty on ceramic coatings is the longest in Baner."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000002",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Every ceramic coating comes with a 5-year warranty."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000001",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Never call our coatings permanent."
+      }
+    ],
+    "profile": [
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "differentiators",
+        "value": "Our 3-year warranty on ceramic coatings is the longest in Baner.",
+        "status": "found",
+        "sourceIds": ["a5a50000-0000-4000-8000-000000000005"]
+      }
+    ],
+    "answers": [
+      {
+        "key": "differentiators",
+        "question": "What makes the brand different from its competitors?",
+        "answer": "Our 3-year warranty on ceramic coatings is the longest in Baner.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000005"
+      },
+      {
+        "key": "proof_points",
+        "question": "What can the brand prove, such as results, reviews, warranties or numbers?",
+        "answer": "Every ceramic coating comes with a 5-year warranty.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000002"
+      },
+      {
+        "key": "never_say",
+        "question": "Which topics, claims or words must the brand never use?",
+        "answer": "Never call our coatings permanent.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000001"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    },
+    {
+      "kind": "facts_rest_on_qualifying_sources"
+    }
+  ],
+  "rubric": "Either of two results passes. (1) ask is set and asks which ceramic coating warranty is right, naming 3 years and 5 years in its text or as its options, with a plain why; facts and rules are empty. (2) ask is null and no fact states a warranty length: neither 3 years nor 5 years appears in any fact; a fact on the ceramic and graphene coatings for cars and bikes in Pune cites the home page 517e0000-0000-4000-8000-000000000001, and a rule against calling the coatings permanent cites the never_say answer's source a5a50000-0000-4000-8000-000000000001."
+}

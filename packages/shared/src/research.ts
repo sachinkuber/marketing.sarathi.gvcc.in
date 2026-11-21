@@ -29,6 +29,9 @@ export type SourceGroup = (typeof SOURCE_GROUPS)[number]
 // owner's own word makes (D7). Likewise 'stated' is the owner's result and never research's.
 export const RESEARCH_SOURCE_KINDS = ['site', 'social', 'search', 'document', 'competitor'] as const
 export type ResearchSourceKind = (typeof RESEARCH_SOURCE_KINDS)[number]
+// Every kind of source (app.source_kind): what research reads, and the owner's own word.
+export const SOURCE_KINDS = [...RESEARCH_SOURCE_KINDS, 'owner_statement'] as const
+export type SourceKind = (typeof SOURCE_KINDS)[number]
 export const RESEARCH_RESULTS = ['read', 'blocked', 'empty', 'error'] as const
 export const CONFIDENCES = ['found', 'assumed', 'unknown'] as const
 

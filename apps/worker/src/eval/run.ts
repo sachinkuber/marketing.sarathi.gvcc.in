@@ -1,6 +1,7 @@
 import { z, type ZodType } from 'zod'
 import {
   briefSchema,
+  factsRulesInputSchema,
   questionnaireInputSchema,
   RESEARCH_SOURCE_KINDS,
   researchGroupInputSchema,
@@ -8,6 +9,7 @@ import {
   researchMergeInputSchema,
   type LoadedAgent,
 } from '@mkt/shared'
+import { buildFactsRulesRequest } from '../agents/facts-rules.ts'
 import { buildQuestionnaireRequest } from '../agents/questionnaire.ts'
 import { buildResearchGroupRequest, buildResearchMergeRequest } from '../agents/research.ts'
 import { buildSummaryRequest } from '../agents/summary.ts'
@@ -77,22 +79,29 @@ const researchCaseSchema = z.strictObject({
     .optional(),
 })
 
-// A questionnaire case may carry the owner's answers to questions the agent asked on an earlier attempt, as the
-// job's attempt does (JobContext.answers), so a case can check what the agent does once it has been answered.
+// A questionnaire or facts and rules case may carry the owner's answers to questions the agent asked on an
+// earlier attempt, as the job's attempt does (JobContext.answers), so a case can check what the agent does once
+// it has been answered.
+const earlierAnswers = z
+  .array(
+    z.strictObject({
+      question: z.string().min(1).max(500),
+      why: z.string().min(1).max(300),
+      options: z.array(z.string().min(1).max(200)).max(5),
+      answer: z.string().min(1).max(2000),
+    }),
+  )
+  .max(10)
 const questionnaireCaseSchema = z.strictObject({
   ...questionnaireInputSchema.shape,
-  answers: z
-    .array(
-      z.strictObject({
-        question: z.string().min(1).max(500),
-        why: z.string().min(1).max(300),
-        options: z.array(z.string().min(1).max(200)).max(5),
-        answer: z.string().min(1).max(2000),
-      }),
-    )
-    .max(10)
-    .optional(),
+  answers: earlierAnswers.optional(),
 })
+// The facts and rules input has its own `answers` (the questionnaire's), so the earlier ones are `agentAnswers`.
+// The rest is the job input, checked whole, its refinement included.
+const factsRulesCaseSchema = z
+  .strictObject({ ...factsRulesInputSchema.shape, agentAnswers: earlierAnswers.optional() })
+  .transform(({ agentAnswers, ...input }) => ({ agentAnswers: agentAnswers ?? [], input }))
+  .pipe(z.strictObject({ agentAnswers: earlierAnswers, input: factsRulesInputSchema }))
 
 // Each runner builds the request its agent's job handler builds (through the same exported function) and
 // sends it straight to the model: no core, no queue, no attempt token. M10 and M11 add their agents here.
@@ -137,6 +146,13 @@ export const EVAL_RUNNERS: Record<string, { inputSchema: ZodType; run: EvalRunne
     run: async (model, def, input) => {
       const { answers, ...questionnaireInput } = questionnaireCaseSchema.parse(input)
       return graded(await model.send(buildQuestionnaireRequest(def, questionnaireInput, answers ?? [])))
+    },
+  },
+  facts_rules: {
+    inputSchema: factsRulesCaseSchema,
+    run: async (model, def, input) => {
+      const { agentAnswers, input: factsRulesInput } = factsRulesCaseSchema.parse(input)
+      return graded(await model.send(buildFactsRulesRequest(def, factsRulesInput, agentAnswers)))
     },
   },
 }

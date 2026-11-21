@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
-import { RESEARCH_SOURCE_KINDS } from '@mkt/shared'
+import { RESEARCH_SOURCE_KINDS, SAFETY_RULE_KINDS } from '@mkt/shared'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { readStoredExtract } from './research-results.ts'
@@ -101,14 +101,7 @@ interface SuggestionRow {
   superseded_by: string | null
 }
 
-const SAFETY_KINDS = [
-  'forbidden_topic',
-  'forbidden_claim',
-  'forbidden_word',
-  'competitor_not_named',
-  'tone_limit',
-  'pause_dates',
-]
+const SAFETY_KINDS: readonly string[] = SAFETY_RULE_KINDS
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)

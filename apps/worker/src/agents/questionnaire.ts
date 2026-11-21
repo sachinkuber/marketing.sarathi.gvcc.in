@@ -2,12 +2,10 @@ import { fileURLToPath } from 'node:url'
 import { wrapData, type LoadedAgent, type QuestionnaireInput } from '@mkt/shared'
 import type { ModelRequest } from '../model.ts'
 import type { JobContext } from '../runner.ts'
+import { ownerAnswersSection, section } from './request-parts.ts'
 import { providerSchema } from './summary.ts'
 
 export const QUESTIONNAIRE_DIR = fileURLToPath(new URL('../../../../agents/questionnaire/', import.meta.url))
-
-const section = (title: string, blocks: string[]): string =>
-  `${title}\n${blocks.length === 0 ? 'None.' : blocks.join('\n')}`
 
 // The one place the questionnaire request is built: the job handler sends it, and the evaluation sends the
 // same one. No tools, so it keeps structured output. Every profile value, suggestion, gap reason, source
@@ -60,15 +58,8 @@ export function buildQuestionnaireRequest(
       ),
     ),
   ]
-  if (answers.length > 0)
-    parts.push(
-      section(
-        "The owner's answers to your earlier questions, oldest first:",
-        answers.map(({ question, why, options, answer }) =>
-          wrapData('owner_answer', JSON.stringify({ question, why, options, answer })),
-        ),
-      ),
-    )
+  const earlier = ownerAnswersSection(answers)
+  if (earlier !== null) parts.push(earlier)
   return {
     model: agent.definition.model,
     system: agent.system,

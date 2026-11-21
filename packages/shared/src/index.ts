@@ -32,6 +32,7 @@ export {
   researchMergeInputSchema,
   researchResultSchema,
   SOURCE_GROUPS,
+  SOURCE_KINDS,
   WHY_MAX,
   type ProfileKey,
   type ResearchGroupInput,
@@ -40,6 +41,7 @@ export {
   type ResearchResult,
   type ResearchSourceKind,
   type SourceGroup,
+  type SourceKind,
 } from './research.ts'
 export { askSchema, type Ask } from './agent-question.ts'
 export {
@@ -53,6 +55,17 @@ export {
   type QuestionnaireInput,
   type QuestionnaireResult,
 } from './questionnaire.ts'
+export {
+  factsRulesAgainstInput,
+  factsRulesInputSchema,
+  factsRulesResultSchema,
+  MAX_FACTS,
+  MAX_RULES,
+  SAFETY_RULE_KINDS,
+  type FactsRulesInput,
+  type FactsRulesResult,
+  type SafetyRuleKind,
+} from './facts-rules.ts'
 export {
   agentDefinitionSchema,
   loadAgentDefinition,

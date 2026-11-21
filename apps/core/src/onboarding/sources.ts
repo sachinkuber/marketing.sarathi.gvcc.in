@@ -1,6 +1,8 @@
-// The kinds of source an agent can read or an owner can give (database enum app.source_kind).
-export const SOURCE_KINDS = ['site', 'social', 'search', 'document', 'competitor', 'owner_statement'] as const
-export type SourceKind = (typeof SOURCE_KINDS)[number]
+import type { SourceKind } from '@mkt/shared'
+
+// The kinds of source an agent can read or an owner can give (database enum app.source_kind), from shared, so
+// the facts and rules agent's input and the core name the same kinds.
+export { SOURCE_KINDS, type SourceKind } from '@mkt/shared'
 
 // What can stand behind a verified fact: the brand's own site, a document the owner uploaded, or the owner's
 // own word. Social posts, search results and competitor pages can suggest a fact but never support one alone.
