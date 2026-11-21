@@ -1,6 +1,7 @@
 import { z, type ZodType } from 'zod'
 import {
   briefChoicesInputSchema,
+  strategistInputSchema,
   briefSchema,
   factsRulesInputSchema,
   questionnaireInputSchema,
@@ -12,6 +13,7 @@ import {
 } from '@mkt/shared'
 import { buildFactsRulesRequest } from '../agents/facts-rules.ts'
 import { buildBriefChoicesRequest } from '../agents/brief-choices.ts'
+import { buildStrategistRequest } from '../agents/strategist.ts'
 import { buildQuestionnaireRequest, withoutLoneOptions } from '../agents/questionnaire.ts'
 import { buildResearchGroupRequest, buildResearchMergeRequest } from '../agents/research.ts'
 import { buildSummaryRequest } from '../agents/summary.ts'
@@ -166,5 +168,10 @@ export const EVAL_RUNNERS: Record<string, { inputSchema: ZodType; run: EvalRunne
     inputSchema: briefChoicesInputSchema,
     run: async (model, def, input) =>
       graded(await model.send(buildBriefChoicesRequest(def, briefChoicesInputSchema.parse(input), []))),
+  },
+  strategist: {
+    inputSchema: strategistInputSchema,
+    run: async (model, def, input) =>
+      graded(await model.send(buildStrategistRequest(def, strategistInputSchema.parse(input), []))),
   },
 }

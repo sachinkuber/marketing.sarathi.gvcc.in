@@ -1,5 +1,8 @@
 import {
   briefChoicesResultSchema,
+  strategistInputSchema,
+  strategyBriefAgainstInput,
+  strategyBriefResultSchema,
   factsRulesAgainstInput,
   factsRulesResultSchema,
   questionnaireResultSchema,
@@ -39,6 +42,12 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown)
   research_merge: (output) => researchResultSchema.safeParse(output).success,
   questionnaire: (output) => questionnaireResultSchema.safeParse(output).success,
   brief_choices: (output) => briefChoicesResultSchema.safeParse(output).success,
+  strategist: (output, input) => {
+    const result = strategyBriefResultSchema.safeParse(output)
+    const given = strategistInputSchema.safeParse(input)
+    if (!result.success || !given.success) return false
+    return strategyBriefAgainstInput(result.data, given.data).length === 0
+  },
   facts_rules: (output, input) => {
     const result = factsRulesResultSchema.safeParse(output)
     const given = factsCaseInput.safeParse(input)

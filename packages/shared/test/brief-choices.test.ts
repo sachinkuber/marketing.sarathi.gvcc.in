@@ -8,6 +8,7 @@ import {
   briefChoicesResultSchema,
   CHOICE_KEYS,
   loadAgentDefinition,
+  strategyBriefResultSchema,
 } from '../src/index.ts'
 
 const BRIEF_CHOICES = fileURLToPath(new URL('../../../agents/brief_choices', import.meta.url))
@@ -134,5 +135,45 @@ describe('the brief_choices agent', () => {
   it('the prompt names every choice key', () => {
     const { system } = loadAgentDefinition(BRIEF_CHOICES)
     for (const key of CHOICE_KEYS) expect(system, key).toContain(key)
+  })
+})
+
+const STRATEGIST = fileURLToPath(new URL('../../../agents/strategist', import.meta.url))
+
+describe('the strategist agent', () => {
+  it('the folder loads with loadAgentDefinition', () => {
+    const loaded = loadAgentDefinition(STRATEGIST)
+    expect(loaded.definition).toEqual({
+      agent: 'strategist',
+      version: 1,
+      model: 'claude-sonnet-5-5',
+      effort: 'medium',
+      maxTokens: 16000,
+      jobClass: 'production',
+      resultType: 'strategy_brief.v1',
+    })
+    expect(loaded.system.length).toBeGreaterThan(0)
+  })
+
+  it('output.schema.json equals the generated JSON schema, with no anyOf at its root', () => {
+    const file = JSON.parse(readFileSync(`${STRATEGIST}/output.schema.json`, 'utf8'))
+    expect(file).toEqual(JSON.parse(JSON.stringify(z.toJSONSchema(strategyBriefResultSchema))))
+    expect(file).not.toHaveProperty('anyOf')
+  })
+
+  it('the prompt names the baseline marker and every brief section', () => {
+    const { system } = loadAgentDefinition(STRATEGIST)
+    expect(system).toContain(BASELINE_NEEDED)
+    for (const section of [
+      'positioning',
+      'audiences',
+      'themes',
+      'channels',
+      'cadence',
+      'goals',
+      'choicesMade',
+      'factIds',
+    ])
+      expect(system, section).toContain(section)
   })
 })

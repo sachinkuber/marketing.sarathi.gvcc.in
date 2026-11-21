@@ -14,19 +14,10 @@ import { DecisionReplyInvalid, ownerAnswersSection, section } from './request-pa
 import { providerSchema } from './summary.ts'
 
 export const BRIEF_CHOICES_DIR = fileURLToPath(new URL('../../../../agents/brief_choices/', import.meta.url))
-
-// The one place the brief_choices request is built: the job handler sends it, and the evaluation sends the same
-// one. The first line is fixed: the e2e stand-in model recognises the agent by it. No tools, so it keeps
-// structured output. Every profile value, fact statement, rule text and questionnaire answer came from research,
-// the web or the owner, so each is wrapped as data (AI-6). The owner's answers to the job's earlier agent
-// questions follow as owner_answer data, so a resumed attempt's step is sent again (JobContext.answers).
-export function buildBriefChoicesRequest(
-  agent: LoadedAgent,
-  input: BriefChoicesInput,
-  answers: JobContext['answers'],
-): ModelRequest {
-  const parts = [
-    'Find the open strategic choices.',
+// The data parts of a brief request, shared by brief_choices and strategist so the brand's profile, facts,
+// rules and answers reach both the same way: every one is wrapped as data (AI-6).
+export function briefDataParts(input: BriefChoicesInput): string[] {
+  return [
     wrapData('brand_name', input.brandName),
     section(
       'The brand profile:',
@@ -49,6 +40,19 @@ export function buildBriefChoicesRequest(
       ),
     ),
   ]
+}
+
+// The one place the brief_choices request is built: the job handler sends it, and the evaluation sends the same
+// one. The first line is fixed: the e2e stand-in model recognises the agent by it. No tools, so it keeps
+// structured output. Every profile value, fact statement, rule text and questionnaire answer came from research,
+// the web or the owner, so each is wrapped as data (AI-6). The owner's answers to the job's earlier agent
+// questions follow as owner_answer data, so a resumed attempt's step is sent again (JobContext.answers).
+export function buildBriefChoicesRequest(
+  agent: LoadedAgent,
+  input: BriefChoicesInput,
+  answers: JobContext['answers'],
+): ModelRequest {
+  const parts = ['Find the open strategic choices.', ...briefDataParts(input)]
   const earlier = ownerAnswersSection(answers)
   if (earlier !== null) parts.push(earlier)
   return {
