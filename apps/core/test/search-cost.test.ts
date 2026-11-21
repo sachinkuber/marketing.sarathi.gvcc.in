@@ -185,3 +185,76 @@ describe('web searches recorded and costed (spec test 50)', () => {
     })
   })
 })
+
+describe('the searches the run has used (M2, per-run cap)', () => {
+  // Three jobs of one run; each is made active in the queue so an attempt can start.
+  async function runOfJobs(n: number): Promise<string[]> {
+    const ids = await withBrand(stack.appPool, brand, async (client) => {
+      const runId = await createRun(client, brand, {
+        agent: 'test-agent',
+        definitionVersionId: definitionId,
+        startedByKind: 'system',
+        startedById: null,
+      })
+      const made: string[] = []
+      for (let i = 0; i < n; i += 1)
+        made.push(
+          await createJob(client, jobs, brand, {
+            runId,
+            jobClass: 'interactive',
+            input: {},
+            expectedResultType: 'test.echo',
+          }),
+        )
+      return made
+    })
+    for (const id of ids)
+      await stack.db.admin.query(`update pgboss.job set state = 'active', started_on = now() where id = $1`, [
+        id,
+      ])
+    return ids
+  }
+
+  it('startAttempt reports the searches recorded by every job of the run, and only that run', async () => {
+    const [a, b, c] = await runOfJobs(3)
+    const [other] = await runOfJobs(1)
+    const begin = async (jobId: string) => {
+      const started = await startAttempt(jobs, jobId, 'w1')
+      if (started.finished || 'outcome' in started) throw new Error('unexpected')
+      const check = verifyAttemptToken(
+        jobs.attemptTokenSecret,
+        started.token,
+        Math.floor(jobs.now().getTime() / 1000),
+      )
+      if (!check.ok) throw new Error('token')
+      return { started, claims: check.claims }
+    }
+    const spend = async (claims: AttemptClaims, searches: number) => {
+      const reg = await registerModelCall(jobs, claims, {
+        step: 's',
+        requestHash: 'h',
+        model: 'search-model',
+      })
+      if (reg.outcome !== 'send') throw new Error('unexpected')
+      await saveCheckpoint(jobs, claims, {
+        callId: reg.callId,
+        step: 's',
+        output: { text: 'x' },
+        model: 'search-model',
+        providerMessageId: 'msg',
+        providerRequestId: null,
+        usage: { ...USAGE, serverToolSearches: searches },
+      })
+    }
+    const first = await begin(a!)
+    expect(first.started.runSearches).toBe(0)
+    await spend(first.claims, 7)
+    const second = await begin(b!)
+    expect(second.started.runSearches).toBe(7)
+    await spend(second.claims, 5)
+    const third = await begin(c!)
+    expect(third.started.runSearches).toBe(12)
+    // Another run's searches are not counted.
+    expect((await begin(other!)).started.runSearches).toBe(0)
+  })
+})

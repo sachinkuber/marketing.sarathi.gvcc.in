@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   agentsReply,
   alertsReply,
+  answerSavedReply,
   approvalSettingsReply,
   auditReply,
   auditVerifyReply,
@@ -13,6 +14,10 @@ import {
   deletedReply,
   documentSummary,
   documentsReply,
+  factAddedReply,
+  factChangedReply,
+  factsRulesReply,
+  factsRulesStartedReply,
   homeReply,
   intakeSavedReply,
   inviteCreatedReply,
@@ -24,8 +29,14 @@ import {
   suggestionsReply,
   overdueAllReply,
   overdueReply,
+  agentQuestionsReply,
+  questionnaireFinishedReply,
+  questionnaireReply,
+  questionnaireStartedReply,
   researchStartedReply,
   roleChangedReply,
+  ruleAddedReply,
+  ruleChangedReply,
   runDetailReply,
   runStartedReply,
   runsReply,
@@ -433,6 +444,156 @@ describe('the dashboard schemas accept the core’s replies', () => {
       const gone = await owner.request('DELETE', `${base()}/documents/${summary.id}`)
       expect(gone.status).toBe(204)
       expect(deletedReply.parse(gone.text === '' ? null : JSON.parse(gone.text))).toBeNull()
+    })
+    it('questionnaire: start, the job waiting, the questions with answers, a save and the finish', async () => {
+      // The brand's research ended in the documents test above.
+      await q(`update app.onboarding set step = 'profile' where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('questionnaire', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/questionnaire', import.meta.url)))],
+      )
+      const started = await owner.request('POST', `${base()}/questionnaire`, { body: {} })
+      expect(started.status).toBe(200)
+      const { runId: qRun } = questionnaireStartedReply.parse(started.json)
+      const waiting = questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json)
+      expect(waiting).toEqual({ questionnaire: null, job: { state: 'waiting' } })
+      expect((await overview()).questionnaire).toEqual({
+        state: 'waiting',
+        total: 0,
+        answered: 0,
+        finished: false,
+      })
+
+      const made = await q(`insert into app.questionnaire (brand_id, run_id) values ($1, $2) returning id`, [
+        brand,
+        qRun,
+      ])
+      const asked = await q(
+        `insert into app.question (brand_id, questionnaire_id, key, position, text, why, suggested_answer, options)
+         values ($1, $2, 'business_name', 1, 'What is the name?', 'The brief names it.', 'Aztek', '["Aztek","Aztek Labs"]'::jsonb)
+         returning id`,
+        [brand, made.rows[0].id],
+      )
+      const saved = await owner.request('PUT', `${base()}/questionnaire/answers/${asked.rows[0].id}`, {
+        body: { value: 'Aztek' },
+      })
+      expect(saved.status).toBe(200)
+      expect(answerSavedReply.parse(saved.json)).toEqual({ answered: true })
+      const read = questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json)
+      expect(read.questionnaire?.questions).toEqual([
+        {
+          id: asked.rows[0].id,
+          key: 'business_name',
+          position: 1,
+          text: 'What is the name?',
+          why: 'The brief names it.',
+          options: ['Aztek', 'Aztek Labs'],
+          suggestedAnswer: 'Aztek',
+          answer: 'Aztek',
+        },
+      ])
+      // A job waiting on a question carries its id.
+      expect(
+        questionnaireReply.parse({
+          questionnaire: null,
+          job: { state: 'waiting_for_answer', questionId: asked.rows[0].id },
+        }).job?.questionId,
+      ).toBe(asked.rows[0].id)
+      expect((await overview()).questionnaire).toMatchObject({ total: 1, answered: 1, finished: false })
+      const finished = await owner.request('POST', `${base()}/questionnaire/finish`, { body: {} })
+      expect(finished.status).toBe(200)
+      expect(questionnaireFinishedReply.parse(finished.json)).toEqual({ answered: 1, blank: 0 })
+      expect(await overview()).toMatchObject({ step: 'facts_rules', questionnaire: { finished: true } })
+      expect(
+        agentQuestionsReply.parse((await owner.request('GET', `${base()}/agent-questions`)).json),
+      ).toEqual({
+        questions: [],
+      })
+      expect(
+        questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json).questionnaire
+          ?.finishedAt,
+      ).toEqual(expect.any(String))
+    })
+
+    it('facts and rules: start, the job, the lists, add your own, replace, retire and turn off', async () => {
+      // The brand's questionnaire was finished in the test above.
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('facts_rules', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/facts_rules', import.meta.url)))],
+      )
+      const started = await owner.request('POST', `${base()}/facts-rules`, { body: {} })
+      expect(started.status).toBe(200)
+      factsRulesStartedReply.parse(started.json)
+      const read = async () => {
+        const reply = await owner.request('GET', `${base()}/facts-rules`)
+        expect(reply.status).toBe(200)
+        return factsRulesReply.parse(reply.json)
+      }
+      expect(await read()).toEqual({
+        job: { state: 'waiting' },
+        facts: { suggestions: [], active: [] },
+        rules: { suggestions: [], active: [] },
+      })
+      expect((await overview()).factsRules).toEqual({
+        state: 'waiting',
+        openFacts: 0,
+        openRules: 0,
+        activeFacts: 0,
+        activeRules: 0,
+      })
+      const reviewDate = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10)
+      const fact = await owner.request('POST', `${base()}/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate },
+      })
+      expect(fact.status).toBe(200)
+      const { factId } = factAddedReply.parse(fact.json)
+      const rule = await owner.request('POST', `${base()}/rules`, {
+        body: { kind: 'forbidden_word', text: 'cheap', why: 'We are not the cheapest.' },
+      })
+      expect(rule.status).toBe(200)
+      const { ruleId } = ruleAddedReply.parse(rule.json)
+      const listed = await read()
+      expect(listed.facts.active).toEqual([
+        {
+          id: factId,
+          statement: 'Open since 2019.',
+          reviewDate,
+          sources: [
+            expect.objectContaining({
+              kind: 'owner_statement',
+              documentName: null,
+              extract: 'Open since 2019.',
+              flagged: null,
+            }),
+          ],
+        },
+      ])
+      expect(listed.facts.suggestions[0]?.decision).toBe('accepted')
+      expect(listed.rules.active).toEqual([
+        { id: ruleId, kind: 'forbidden_word', text: 'cheap', why: 'We are not the cheapest.' },
+      ])
+      expect((await overview()).factsRules).toMatchObject({ activeFacts: 1, activeRules: 1 })
+      const replaced = await owner.request('POST', `${base()}/facts/${factId}/replace`, {
+        body: { statement: 'Open since 2018.', reviewDate },
+      })
+      expect(replaced.status).toBe(200)
+      const { factId: newId } = factChangedReply.parse(replaced.json)
+      const retired = await owner.request('POST', `${base()}/facts/${newId}/retire`, { body: {} })
+      expect(retired.status).toBe(200)
+      expect(factChangedReply.parse(retired.json)).toEqual({ factId: newId })
+      const off = await owner.request('POST', `${base()}/rules/${ruleId}/turn-off`, { body: {} })
+      expect(off.status).toBe(200)
+      expect(ruleChangedReply.parse(off.json)).toEqual({ ruleId })
+      // A job waiting on a question carries its id.
+      expect(
+        factsRulesReply.parse({
+          job: { state: 'waiting_for_answer', questionId: ruleId },
+          facts: { suggestions: [], active: [] },
+          rules: { suggestions: [], active: [] },
+        }).job?.questionId,
+      ).toBe(ruleId)
     })
   })
 

@@ -1,7 +1,7 @@
 import { withBrand } from '@mkt/db'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { acceptFound, addSuggestions, decideSuggestion } from '../src/onboarding/suggestions.ts'
-import { qualifiesAsFactSource } from '../src/onboarding/sources.ts'
+import { qualifiesAsFactSource, type SourceKind } from '../src/onboarding/sources.ts'
 import { storedExtract } from '../src/onboarding/research-results.ts'
 import { addBrand, addUser, createStack, enrolledClient, type Stack, type TestClient } from './support.ts'
 
@@ -18,10 +18,10 @@ const deps = () => ({ audit: stack.audit })
 const actor = () => ({ userId: ownerId })
 const base = () => `/api/v1/brands/${brandId}/onboarding/suggestions`
 
-async function source(kind: string, extract = 'text'): Promise<string> {
+async function source(kind: string, extract = 'text', address: string | null = null): Promise<string> {
   const made = await stack.db.admin.query(
-    `insert into app.research_source (brand_id, kind, result, extract) values ($1, $2, 'read', $3) returning id`,
-    [brandId, kind, extract],
+    `insert into app.research_source (brand_id, kind, address, result, extract) values ($1, $2, $3, 'read', $4) returning id`,
+    [brandId, kind, address, extract],
   )
   return made.rows[0].id as string
 }
@@ -52,6 +52,11 @@ const rows = async (sql: string, params: unknown[] = []) =>
 beforeAll(async () => {
   stack = await createStack()
   brandId = await addBrand(stack, 'onboarding-a')
+  // The brand's own site is aztek.example (ruling R41: a site source counts for a fact only there).
+  await stack.db.admin.query(`insert into app.onboarding (brand_id, intake) values ($1, $2::jsonb)`, [
+    brandId,
+    JSON.stringify({ website: 'https://www.aztek.example/', socials: {}, competitors: [] }),
+  ])
   ownerId = await addUser(stack, { email: 'owner@example.test', password: PASSWORD, platformOwner: true })
   await addUser(stack, { email: 'admin@example.test', password: PASSWORD, role: 'brand_admin', brandId })
   owner = (await enrolledClient(stack, 'owner@example.test', PASSWORD)).client
@@ -60,12 +65,44 @@ beforeAll(async () => {
 afterAll(async () => stack?.close())
 
 describe('qualifiesAsFactSource', () => {
-  it('is true only when a site, document or owner statement is among the sources', () => {
-    expect(qualifiesAsFactSource(['social', 'search', 'competitor'])).toBe(false)
-    expect(qualifiesAsFactSource([])).toBe(false)
-    expect(qualifiesAsFactSource(['search', 'site'])).toBe(true)
-    expect(qualifiesAsFactSource(['document'])).toBe(true)
-    expect(qualifiesAsFactSource(['owner_statement'])).toBe(true)
+  const web = 'https://aztek.example/'
+  const at = (kind: SourceKind, address: string | null = null) => ({ kind, address })
+  it('is true only when the brand site, a document or an owner statement is among the sources', () => {
+    expect(
+      qualifiesAsFactSource(
+        [at('social', web), at('search', web), at('competitor', 'https://rival.example/')],
+        web,
+      ),
+    ).toBe(false)
+    expect(qualifiesAsFactSource([], web)).toBe(false)
+    expect(
+      qualifiesAsFactSource([at('search', 'https://news.example/'), at('site', `${web}about`)], web),
+    ).toBe(true)
+    expect(qualifiesAsFactSource([at('document', 'brochure.pdf, pages 1-4')], web)).toBe(true)
+    expect(qualifiesAsFactSource([at('owner_statement')], web)).toBe(true)
+    expect(qualifiesAsFactSource([at('document')], null)).toBe(true)
+    expect(qualifiesAsFactSource([at('owner_statement')], null)).toBe(true)
+  })
+
+  it('counts a page labelled site only on the brand own registrable domain (ruling R41)', () => {
+    // The brand's pages, with or without www, and its subdomains.
+    for (const address of [
+      'https://aztek.example/x',
+      'https://www.aztek.example/',
+      'https://shop.aztek.example/a',
+    ])
+      expect(qualifiesAsFactSource([at('site', address)], web), address).toBe(true)
+    // A third party's page, whatever the model labelled it, and a lookalike.
+    for (const address of [
+      'https://rival.example/',
+      'https://aztek.example.evil.test/',
+      'https://notaztek.example/',
+      null,
+    ])
+      expect(qualifiesAsFactSource([at('site', address)], web), String(address)).toBe(false)
+    // With no intake website, no page labelled site can stand behind a fact.
+    expect(qualifiesAsFactSource([at('site', 'https://aztek.example/x')], null)).toBe(false)
+    expect(qualifiesAsFactSource([at('site', 'https://aztek.example/x')], 'not a web address')).toBe(false)
   })
 })
 
@@ -96,7 +133,7 @@ describe('suggest then decide', () => {
       {
         step: 'fact',
         key: 'founded',
-        proposed: { statement: 'Founded in 1999', reviewDate: '2027-06-01' },
+        proposed: { statement: 'Founded in 1999', reviewDate: '2099-06-01' },
         sourceIds: [weak],
       },
     ])
@@ -114,7 +151,7 @@ describe('suggest then decide', () => {
     )[0]
     expect(fact.statement).toBe(wording)
     expect(fact.confirmed_by).toBe(ownerId)
-    expect(fact.review_date.toISOString().slice(0, 10)).toBe('2027-06-01')
+    expect(fact.review_date.toISOString().slice(0, 10)).toBe('2099-06-01')
     expect(fact.source_ids).toHaveLength(2)
     const added = await rows(
       `select kind, extract from app.research_source where brand_id = $1 and id = any($2::uuid[]) and kind = 'owner_statement'`,
@@ -131,7 +168,7 @@ describe('suggest then decide', () => {
       {
         step: 'fact',
         key: 'weak',
-        proposed: { statement: 'X', reviewDate: '2027-01-01' },
+        proposed: { statement: 'X', reviewDate: '2099-01-01' },
         sourceIds: sources,
       },
     ])
@@ -178,13 +215,13 @@ describe('suggest then decide', () => {
     expect(reply.json.error.code).toBe('review_date_needed')
   })
 
-  it('accepts a fact that has a site source', async () => {
-    const s = await source('site')
+  it('accepts a fact that has a source on the brand site', async () => {
+    const s = await source('site', 'text', 'https://aztek.example/hours')
     const [id] = await add([
       {
         step: 'fact',
         key: 'ok',
-        proposed: { statement: 'Open daily', reviewDate: '2027-01-01' },
+        proposed: { statement: 'Open daily', reviewDate: '2099-01-01' },
         sourceIds: [s],
       },
     ])
@@ -316,9 +353,22 @@ describe('suggest then decide', () => {
     expect(by[f!]).toBe('accepted')
     expect(by[a!]).toBeNull()
     expect(by[u!]).toBeNull()
-    const reply = await owner.request('POST', `${base()}/accept-found`, { body: { step } })
+    // Over HTTP only the draft profile has a bulk accept (M6); every other step is decided one at a time.
+    for (const other of ['choice', 'question', 'fact', 'rule']) {
+      const refused = await owner.request('POST', `${base()}/accept-found`, { body: { step: other } })
+      expect(refused.status, other).toBe(400)
+      expect(refused.json.error).toMatchObject({
+        code: 'one_at_a_time',
+        message: expect.stringContaining('Facts and rules are confirmed one at a time'),
+      })
+    }
+    const [p] = await add([{ key: 'af-profile', confidence: 'found' }])
+    const reply = await owner.request('POST', `${base()}/accept-found`, { body: { step: 'profile' } })
     expect(reply.status).toBe(200)
-    expect(reply.json).toEqual({ accepted: 0 })
+    expect(reply.json.accepted).toBeGreaterThanOrEqual(1)
+    expect(
+      (await rows('select decision from app.suggestion where brand_id = $1 and id = $2', [p]))[0].decision,
+    ).toBe('accepted')
   })
 
   it('an empty or 4001-character edited value is refused naming value', async () => {
@@ -339,10 +389,10 @@ describe('suggest then decide', () => {
   })
 
   it('a brand admin gets 403; the platform owner gets 200 on the three routes', async () => {
-    const [id] = await add([{}])
+    const [id] = await add([{ step: 'choice' }])
     const calls: [string, string, unknown][] = [
       ['GET', base(), undefined],
-      ['POST', `${base()}/accept-found`, { step: 'rule' }],
+      ['POST', `${base()}/accept-found`, { step: 'profile' }],
       ['POST', `${base()}/${id}/decision`, { decision: 'rejected' }],
     ]
     for (const [method, path, body] of calls) {
@@ -400,8 +450,8 @@ describe('suggest then decide', () => {
     const wording = `[flagged: not a flag] ${'w'.repeat(2000 - 22)}`
     expect(wording).toHaveLength(2000)
     const made = await stack.db.admin.query(
-      `insert into app.research_source (brand_id, kind, result, extract) values ($1, 'owner_statement', 'stated', $2) returning id`,
-      [brandId, wording],
+      `insert into app.research_source (brand_id, kind, result, extract, stated_by) values ($1, 'owner_statement', 'stated', $2, $3) returning id`,
+      [brandId, wording, ownerId],
     )
     const statement = made.rows[0].id as string
     const [id] = await add([{ step: 'rule', key: 'owner-words', sourceIds: [statement] }])

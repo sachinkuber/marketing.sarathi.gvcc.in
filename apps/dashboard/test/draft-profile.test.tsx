@@ -15,12 +15,15 @@ const overview = (gaps: { key: string; why: string }[] = []) => ({
   documents: 0,
   research: { runId: 'r1', state: 'succeeded', groups: [], merge: 'done', gaps },
   openSuggestions: 3,
+  questionnaire: null,
+  factsRules: null,
   cost: none,
 })
 const source = (over: Record<string, unknown> = {}) => ({
   id: 's1',
   kind: 'site',
   address: 'https://aztek.example/about',
+  documentName: null,
   readAt: '2026-11-20T08:30:00.000Z',
   extract: 'Aztek makes water pumps in Pune.',
   flagged: null,
@@ -229,5 +232,78 @@ describe('the draft profile, driven', () => {
     dom.replies.push({ status: 403, body: { error: { code: 'forbidden', message: 'x' } } })
     await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
     expect(dom.text()).toContain('Only the platform owner')
+  })
+})
+
+describe('the draft profile links on to the questionnaire', () => {
+  const dom = new Dom()
+  beforeEach(() => dom.start())
+  afterEach(() => dom.stop())
+  const link = () =>
+    dom.host.querySelector(`a[href="/b/${brandId}/onboarding/questionnaire"]`)?.textContent ?? null
+
+  it('shows Next: the questionnaire once nothing is open, and not before', async () => {
+    dom.replies.push(
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [item('business_name')] } },
+    )
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+    expect(link()).toBeNull()
+    dom.stop()
+    dom.start()
+    dom.replies.push(
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [item('business_name', { decision: 'accepted' })] } },
+    )
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+    expect(link()).toBe('Next: the questionnaire')
+  })
+})
+
+describe('the draft profile edit box and failed reloads', () => {
+  const dom = new Dom()
+  beforeEach(() => dom.start())
+  afterEach(() => dom.stop())
+  const open = async (suggestions: unknown[]) => {
+    dom.replies.push({ status: 200, body: overview() }, { status: 200, body: { suggestions } })
+    await dom.mount(<DraftProfileScreen brandId={brandId} />, sessionAs('owner'))
+  }
+
+  it('the edit box holds at most 4000 characters and sends the text trimmed', async () => {
+    await open([item('business_name')])
+    await dom.click('Edit')
+    expect(dom.field('edit-business_name')!.getAttribute('maxlength')).toBe('4000')
+    dom.type('edit-business_name', '  Aztek Pumps  ')
+    dom.replies.push(
+      { status: 200, body: { createdId: 'p1' } },
+      { status: 200, body: overview() },
+      { status: 200, body: { suggestions: [] } },
+    )
+    await dom.click('Save edit')
+    expect(dom.writes()).toEqual([
+      {
+        url: decisionUrl('business_name'),
+        method: 'POST',
+        body: { decision: 'edited', value: 'Aztek Pumps' },
+      },
+    ])
+  })
+
+  it('whitespace only is refused on the screen and never sent', async () => {
+    await open([item('business_name')])
+    await dom.click('Edit')
+    dom.type('edit-business_name', '   \n  ')
+    await dom.click('Save edit')
+    expect(dom.writes()).toEqual([])
+    expect(dom.text()).toContain('Write the value, or reject the suggestion.')
+  })
+
+  it('a reload that fails after a decision keeps the items and shows the error beside them', async () => {
+    await open([item('business_name')])
+    const fail = { status: 500, body: { error: { code: 'internal_error', message: 'x' } } }
+    dom.replies.push({ status: 200, body: { createdId: 'p1' } }, fail, fail)
+    await dom.click('Accept')
+    expect(dom.text()).toContain('The business_name')
+    expect(dom.host.querySelector('[role="alert"]')).not.toBeNull()
   })
 })

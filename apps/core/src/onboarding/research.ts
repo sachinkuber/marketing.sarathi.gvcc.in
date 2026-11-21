@@ -1,8 +1,11 @@
-import { withBrand, type Pool, type PoolClient } from '@mkt/db'
+import { withBrand, type Pool } from '@mkt/db'
 import { z } from 'zod'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import type { AuditSink } from '../ports.ts'
+import { readFactsRulesBlock, type FactsRulesBlock } from './facts-rules-state.ts'
+import { readQuestionnaireBlock, type QuestionnaireBlock } from './questionnaire-state.ts'
+import { researchRunIsOpen } from './runs.ts'
 
 // Owner intake (spec 4) and starting research (spec 8.1).
 const httpsUrl = z
@@ -73,21 +76,6 @@ export async function saveIntake(
       client,
     )
   })
-}
-
-// Whether a research run is still going: its state says so, or any of its jobs is still alive (not finished,
-// cancelled or dead). A dead job can fail its run while its siblings keep going, so the state alone is not
-// enough. Starting research and deleting a document both refuse while this is true.
-export async function researchRunIsOpen(client: PoolClient, runId: string): Promise<boolean> {
-  const run = await client.query<{ state: string }>('select state from app.run where id = $1', [runId])
-  if (run.rows[0]?.state === 'running' || run.rows[0]?.state === 'created') return true
-  const alive = await client.query(
-    `select 1 from app.job_input i join app.job_control c on c.job_id = i.job_id
-      where i.run_id = $1 and i.finished_at is null and not c.cancel_requested and c.dead_at is null
-      limit 1`,
-    [runId],
-  )
-  return alive.rows.length > 0
 }
 
 export async function startResearch(
@@ -209,6 +197,10 @@ export interface Overview {
     gaps: { key: string; why: string }[]
   }
   openSuggestions: number
+  // The questionnaire's state and progress; null before the first start.
+  questionnaire: QuestionnaireBlock | null
+  // Facts and rules: the job state, the suggestions waiting and what is in force; null before the first start.
+  factsRules: FactsRulesBlock | null
   cost: Money
 }
 
@@ -241,6 +233,8 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       documents: counts.rows[0]!.documents,
       research: null,
       openSuggestions: counts.rows[0]!.open,
+      questionnaire: await readQuestionnaireBlock(client, brandId),
+      factsRules: await readFactsRulesBlock(client, brandId),
       cost: money(t.usd, t.inr, t.uncosted > 0),
     }
     const runId = ob.rows[0]?.research_run_id

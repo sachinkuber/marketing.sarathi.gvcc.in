@@ -454,6 +454,8 @@ export const overdueAllReply = z.strictObject({
 // it past 300 characters.
 
 const maybeMoney = z.strictObject({ usdMicros: micros.nullable(), inrMicros: micros.nullable() })
+// The state of a job as the onboarding screens show it (spec 9): a job with an open question waits for the owner.
+const agentJobState = z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed'])
 const groupState = z.enum(['waiting', 'running', 'done', 'failed'])
 
 export const intakeShape = z.strictObject({
@@ -499,11 +501,60 @@ export const onboardingReply = z.strictObject({
     })
     .nullable(),
   openSuggestions: z.number().int().nonnegative(),
+  questionnaire: z
+    .strictObject({
+      state: agentJobState,
+      total: z.number().int().nonnegative(),
+      answered: z.number().int().nonnegative(),
+      finished: z.boolean(),
+    })
+    .nullable(),
+  factsRules: z
+    .strictObject({
+      state: agentJobState,
+      openFacts: z.number().int().nonnegative(),
+      openRules: z.number().int().nonnegative(),
+      activeFacts: z.number().int().nonnegative(),
+      activeRules: z.number().int().nonnegative(),
+    })
+    .nullable(),
   cost: maybeMoney,
 })
 
 export const intakeSavedReply = z.strictObject({ intake: intakeShape })
 export const researchStartedReply = z.strictObject({ runId: z.string(), jobIds: z.array(z.string()) })
+
+export const questionnaireStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const questionnaireQuestion = z.strictObject({
+  id: z.string(),
+  key: z.string(),
+  position: z.number().int().positive(),
+  text: z.string(),
+  why: z.string(),
+  options: z.array(z.string()),
+  suggestedAnswer: z.string().nullable(),
+  answer: z.string().nullable(),
+})
+export const questionnaireReply = z.strictObject({
+  questionnaire: z
+    .strictObject({
+      id: z.string(),
+      finishedAt: z.string().nullable(),
+      questions: z.array(questionnaireQuestion),
+    })
+    .nullable(),
+  job: z
+    .strictObject({
+      state: agentJobState,
+      questionId: z.string().optional(),
+    })
+    .nullable(),
+})
+export const answerSavedReply = z.strictObject({ answered: z.boolean() })
+export const questionnaireFinishedReply = z.strictObject({
+  answered: z.number().int().nonnegative(),
+  blank: z.number().int().nonnegative(),
+})
 
 export const documentSummary = z.strictObject({
   id: z.string(),
@@ -523,6 +574,8 @@ export const suggestionSource = z.strictObject({
   id: z.string(),
   kind: z.string(),
   address: z.string().nullable(),
+  // The uploaded file's name, for a document source.
+  documentName: z.string().nullable(),
   readAt: z.string(),
   extract: z.string(),
   flagged: z.strictObject({ reason: z.string() }).nullable(),
@@ -545,3 +598,62 @@ export const suggestionItem = z.strictObject({
 })
 export const suggestionsReply = z.strictObject({ suggestions: z.array(suggestionItem) })
 export const suggestionDecisionReply = z.strictObject({ createdId: z.string().nullable() })
+
+// --- facts and rules (M10) ----------------------------------------------------------------------------------
+// The suggestions are the shared shape above; a fact in force carries its sources, a rule its kind and why.
+
+export const factsRulesStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const activeFact = z.strictObject({
+  id: z.string(),
+  statement: z.string(),
+  reviewDate: z.string(),
+  sources: z.array(suggestionSource),
+})
+export const activeRule = z.strictObject({
+  id: z.string(),
+  kind: z.enum([
+    'forbidden_topic',
+    'forbidden_claim',
+    'forbidden_word',
+    'competitor_not_named',
+    'tone_limit',
+    'pause_dates',
+  ]),
+  text: z.string(),
+  why: z.string(),
+})
+export const factsRulesReply = z.strictObject({
+  job: z
+    .strictObject({
+      state: agentJobState,
+      questionId: z.string().optional(),
+    })
+    .nullable(),
+  facts: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeFact) }),
+  rules: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeRule) }),
+})
+export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId: z.string() })
+export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })
+export const factChangedReply = z.strictObject({ factId: z.string() })
+export const ruleChangedReply = z.strictObject({ ruleId: z.string() })
+
+// --- agent questions (M10, spec 9) -------------------------------------------------------------------------
+// A question an agent job asked the owner: open while `answer` is null.
+export const agentQuestion = z.strictObject({
+  id: z.string(),
+  jobId: z.string(),
+  runId: z.string(),
+  agent: z.string(),
+  question: z.string(),
+  why: z.string(),
+  options: z.array(z.string()),
+  suggested: z.string().nullable(),
+  createdAt: z.string(),
+  answer: z.string().nullable(),
+  answeredAt: z.string().nullable(),
+})
+export const agentQuestionsReply = z.strictObject({ questions: z.array(agentQuestion) })
+export const agentQuestionAnsweredReply = z.strictObject({
+  questionId: z.string(),
+  requeued: z.literal(true),
+})

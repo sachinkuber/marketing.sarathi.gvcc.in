@@ -1,5 +1,6 @@
 import express, { type RequestHandler } from 'express'
 import type { Pool } from '@mkt/db'
+import type { Logger } from 'pino'
 import { z } from 'zod'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
@@ -21,6 +22,7 @@ import { inputOf, validate } from '../validate.ts'
 export interface DocumentRouteDeps {
   pool: Pool
   audit: AuditSink
+  logger?: Logger
 }
 
 const brandParams = z.strictObject({ brandId: z.uuid() })

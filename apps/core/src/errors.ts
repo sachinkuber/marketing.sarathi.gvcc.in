@@ -1,20 +1,9 @@
 import type { ErrorRequestHandler, RequestHandler, Response } from 'express'
 import type { Logger } from 'pino'
 import { captureError } from '@mkt/shared'
+import { AppError } from './app-error.ts'
 
-export class AppError extends Error {
-  readonly status: number
-  readonly code: string
-  readonly details: unknown
-
-  constructor(status: number, code: string, message: string, details?: unknown) {
-    super(message)
-    this.name = 'AppError'
-    this.status = status
-    this.code = code
-    this.details = details
-  }
-}
+export { AppError }
 
 function send(res: Response, status: number, code: string, message: string, details?: unknown): void {
   res.status(status).json({ error: { code, message, ...(details === undefined ? {} : { details }) } })

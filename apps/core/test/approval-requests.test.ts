@@ -476,7 +476,15 @@ describe('worker route', () => {
       body: JSON.stringify({ workerId: 'test-worker' }),
     })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ failedBrands: 0, reminded: 1, overdue: 0, escalated: 0 })
+    // The same timer reminds unanswered agent questions (spec 9); none is due here.
+    expect(await res.json()).toEqual({
+      failedBrands: 0,
+      reminded: 1,
+      overdue: 0,
+      escalated: 0,
+      agentQuestionsReminded: 0,
+      agentQuestionsFailedBrands: 0,
+    })
     expect(await notified(w.versionId, 'approval_reminder')).toHaveLength(2)
     const anonymous = await fetch(`${stack.server.url}/api/v1/worker/approvals/tick`, { method: 'POST' })
     expect(anonymous.status).toBeGreaterThanOrEqual(401)

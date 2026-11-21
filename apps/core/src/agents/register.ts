@@ -6,6 +6,8 @@ import {
   researchGroupResultHandler,
   researchResultHandler,
 } from '../onboarding/research-results.ts'
+import { FACTS_RULES_RESULT_TYPE, factsRulesResultHandler } from '../onboarding/facts-rules.ts'
+import { QUESTIONNAIRE_RESULT_TYPE, questionnaireResultHandler } from '../onboarding/questionnaire.ts'
 import { checkResultHandler } from './check-result.ts'
 import { CHECK_RESULT_TYPE, summaryResultHandler } from './summary-result.ts'
 import { SUMMARY_RESULT_TYPE } from './start.ts'
@@ -31,4 +33,14 @@ export function registerResearchHandlers(
   settled.set(GROUP_RESULT_TYPE, async (client, context) => {
     await maybeStartMerge(client, deps, context)
   })
+}
+
+// The questionnaire agent's result type (spec 4, 12): the questions are stored in order for the owner to answer.
+export function registerQuestionnaireHandlers(results: ResultHandlers): void {
+  results.set(QUESTIONNAIRE_RESULT_TYPE, questionnaireResultHandler())
+}
+
+// The facts and rules agent's result type (spec 7, 8.2): the facts and rules become suggestions for the owner.
+export function registerFactsRulesHandlers(results: ResultHandlers, deps: Pick<JobsDeps, 'audit'>): void {
+  results.set(FACTS_RULES_RESULT_TYPE, factsRulesResultHandler(deps))
 }

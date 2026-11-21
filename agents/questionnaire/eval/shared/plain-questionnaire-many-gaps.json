@@ -1,0 +1,93 @@
+{
+  "id": "plain-questionnaire-many-gaps",
+  "title": "A profile with many gaps: every open profile key is asked once, before the strategy keys; nothing found is asked again",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Lumen Shield Coatings",
+        "status": "found"
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found"
+      }
+    ],
+    "open": [
+      {
+        "key": "places_served",
+        "proposed": "Pune",
+        "confidence": "assumed",
+        "rejected": false
+      },
+      {
+        "key": "audiences",
+        "proposed": "Car and bike owners in Pune who want long-lasting paint protection",
+        "confidence": "assumed",
+        "rejected": false
+      }
+    ],
+    "gaps": [
+      {
+        "key": "main_products",
+        "why": "The products page could not be read."
+      },
+      {
+        "key": "price_position",
+        "why": "No prices are shown on the site."
+      },
+      {
+        "key": "tone_of_voice",
+        "why": "Too little text on the site to judge the tone."
+      },
+      {
+        "key": "differentiators",
+        "why": "Nothing on the site says what sets the brand apart."
+      },
+      {
+        "key": "certifications",
+        "why": "No certification is named anywhere."
+      },
+      {
+        "key": "contact_points",
+        "why": "The contact page could not be read."
+      },
+      {
+        "key": "social_presence",
+        "why": "No social profile was found in search."
+      },
+      {
+        "key": "search_visibility",
+        "why": "The visibility searches could not be run."
+      },
+      {
+        "key": "ai_answer_visibility",
+        "why": "The visibility searches could not be run."
+      },
+      {
+        "key": "competitors",
+        "why": "No competitors were named or found."
+      }
+    ],
+    "unreadable": [
+      {
+        "kind": "site",
+        "address": "https://lumenshield.example/products"
+      },
+      {
+        "kind": "site",
+        "address": "https://lumenshield.example/contact"
+      }
+    ],
+    "competitors": []
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "ask is null. No question's key is business_name or what_they_sell, and no question asks the owner to state or confirm the business name or what the business sells under another key. There are at least 20 questions. Each of these 12 profile keys has exactly one question: places_served, audiences, main_products, price_position, tone_of_voice, differentiators, certifications, contact_points, social_presence, search_visibility, ai_answer_visibility, competitors. Each of the nine strategy keys (goals, priority_audiences, proof_points, never_say, competitors_not_named, tone_limits, pause_dates, capacity, success_measures) has one to three questions, and two questions on the same key ask genuinely different things, not the same thing in other words. Every question on one of the first twelve (profile) keys comes before every question on the last nine (strategy) keys. places_served's suggestedAnswer is Pune, or the option that says Pune; audiences' suggestedAnswer is the proposed audience or the option that carries it. A question that asks the owner to confirm an assumed item is fine. At least half of the questions have options. Options such as Not sure or None yet are fine (for certifications, None yet is a real answer); a bare catch-all Other is not. No text or why contains a field name with an underscore, such as places_served."
+}

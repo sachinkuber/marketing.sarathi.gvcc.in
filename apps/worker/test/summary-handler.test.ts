@@ -6,7 +6,7 @@ import { ModelStopped, type ModelClient, type ModelRequest } from '../src/model.
 import { runJob, type JobContext } from '../src/runner.ts'
 import { checkHandler } from '../src/agents/check.ts'
 import { providerSchema, summaryHandler } from '../src/agents/summary.ts'
-import { NO_DOCUMENTS } from './no-documents.ts'
+import { NO_DOCUMENTS, NO_QUESTIONS } from './no-documents.ts'
 
 const good = { summary: 'One. Two.', keywords: ['a', 'b', 'c'] }
 const agentFile = (name: string) =>
@@ -28,6 +28,7 @@ function stubContext(
     },
     async checkStop() {},
     ...NO_DOCUMENTS,
+    ...NO_QUESTIONS,
   }
   return { ctx, requests }
 }

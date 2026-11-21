@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto'
 import type { JobClass } from '@mkt/queue'
-import { CoreError, type CoreClient, type JobDocument } from './core-client.ts'
+import {
+  CoreError,
+  type AgentAnswer,
+  type AgentQuestion,
+  type CoreClient,
+  type JobDocument,
+} from './core-client.ts'
 import {
   isDefiniteRefusal,
   ModelStopped,
@@ -17,6 +23,16 @@ export class JobStopped extends Error {
   }
 }
 
+// The job asked the owner a question (spec 9): the core has stored it and ended the attempt, and the job waits for
+// the answer, which starts it again. Like a stop, it ends the job here without a result and without a retry.
+export class JobWaiting extends Error {
+  readonly questionId: string
+  constructor(questionId: string) {
+    super('job waiting for an answer')
+    this.questionId = questionId
+  }
+}
+
 // What a model step gives back. A step replayed from a checkpoint carries zero token usage (it was not paid
 // for again); `content` is [] for a step saved before content was kept. The runner always
 // sets both; they are optional so a test double of a step need not.
@@ -26,6 +42,8 @@ export interface ModelStepResult {
   stopReason?: string | null
   content?: unknown[]
   usage?: Required<ModelUsage>
+  // True for a step replayed from its checkpoint: its searches were made (and recorded) by an earlier attempt.
+  replayed?: true
 }
 
 // Request timeout by job class: a request must end before the queue expires the job. Production jobs run
@@ -95,6 +113,7 @@ function replayed(output: unknown): ModelStepResult {
   const counted = toolCounts(content)
   return {
     text: saved.text,
+    replayed: true,
     ...(saved.stopReason === undefined ? {} : { stopReason: saved.stopReason }),
     content,
     usage: {
@@ -116,6 +135,18 @@ export interface JobContext {
   input: unknown
   // When the attempt's token expires: nothing may be started that cannot end before it.
   deadline: Date
+  // The web searches the job's run had recorded when this attempt started (all its jobs, earlier attempts
+  // included). Absent: none known. modelTurns holds each request to the run's search cap less this.
+  runSearches?: number
+  // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9). The step that
+  // decides whether to ask must carry them in its request (in its messages, say): a step whose request is unchanged
+  // replays its checkpoint on the next attempt, decides the same way again, and asks again after every answer.
+  // Each answer carries `sourceId`, the owner statement that records it, so an agent may cite it (ruling R11).
+  answers: AgentAnswer[]
+  // Asks the owner instead of guessing what blocks the job's output: the question is posted, and JobWaiting ends
+  // the job without a result. Its next attempt, started by the answer, finds the answer in `answers`; the step that
+  // led to the question must then see it in its request (above), or it replays and asks again.
+  ask(question: AgentQuestion): Promise<never>
   // One model call as a step: checkpointed, never sent again once saved, stopped by cancel or hold.
   modelStep(step: string, request: ModelRequest): Promise<ModelStepResult>
   // Called between steps: throws JobStopped when the job was cancelled or held.
@@ -182,8 +213,8 @@ export async function runJob(
   const started = await deps.core.startAttempt(job.id, deps.workerId, job.queueId)
   // Finished already (the core accepted the result and the worker died before completing the queue row).
   if (started.finished) return
-  // Held (by a kill switch or a hold), or a queue copy a release has replaced: no attempt was made; stop and
-  // post nothing.
+  // Held (by a kill switch or a hold), a queue copy a release has replaced, or a job waiting for the owner's
+  // answer: no attempt was made; stop and post nothing.
   if ('outcome' in started) return
   const entry = deps.handlers[started.expectedResultType]
   if (!entry) throw new Error(`no handler for ${started.expectedResultType}`)
@@ -208,6 +239,12 @@ export async function runJob(
     jobClass: job.jobClass,
     input: started.input,
     deadline: started.expiresAt === undefined ? new Date(8.64e15) : new Date(started.expiresAt * 1000),
+    runSearches: started.runSearches ?? 0,
+    answers: started.answers ?? [],
+    async ask(question) {
+      const { questionId } = await deps.core.raiseQuestion(job.id, started.token, question)
+      throw new JobWaiting(questionId)
+    },
     async checkStop(options) {
       const control = await deps.core.control(job.id, started.token)
       if (control.cancelRequested) throw new JobStopped('cancelled')
@@ -324,6 +361,9 @@ export async function runJob(
     await ctx.checkStop({ allowHeld: true })
     await deps.core.postResult(job.id, started.token, outcome)
   } catch (error) {
+    // A job waiting for an answer ends here, posting nothing, and its queue row completes: the core already ended
+    // the attempt, and the answer sends the job again.
+    if (error instanceof JobWaiting) return
     // A cancelled or held job ends here without a retry: the core already knows.
     if (error instanceof JobStopped) {
       // A held job's attempt is ended, so a release starts a fresh attempt instead of finding a live one. A

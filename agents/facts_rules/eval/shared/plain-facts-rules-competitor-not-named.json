@@ -1,0 +1,75 @@
+{
+  "id": "plain-facts-rules-competitor-not-named",
+  "title": "The owner names two competitors never to name: one competitor_not_named rule each, citing the answer, and no fact about either",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-21",
+    "brandName": "Lumen Shield Coatings",
+    "sources": [
+      {
+        "id": "517e0000-0000-4000-8000-000000000001",
+        "kind": "site",
+        "address": "https://lumenshield.example/",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes in Pune.\nBook a coating at our Baner studio and drive out the same evening."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000006",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Gloss Co in Kothrud and Shine Ltd in Hadapsar."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000007",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Never name Gloss Co or Shine Ltd in anything we publish."
+      }
+    ],
+    "profile": [
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "competitors",
+        "value": "Gloss Co in Kothrud and Shine Ltd in Hadapsar.",
+        "status": "found",
+        "sourceIds": ["a5a50000-0000-4000-8000-000000000006"]
+      }
+    ],
+    "answers": [
+      {
+        "key": "competitors",
+        "question": "Who are your main competitors?",
+        "answer": "Gloss Co in Kothrud and Shine Ltd in Hadapsar.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000006"
+      },
+      {
+        "key": "competitors_not_named",
+        "question": "Which competitors must never be named in what the brand publishes?",
+        "answer": "Never name Gloss Co or Shine Ltd in anything we publish.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000007"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    },
+    {
+      "kind": "facts_rest_on_qualifying_sources"
+    }
+  ],
+  "rubric": "ask is null. rules hold exactly two competitor_not_named rules, one never to name Gloss Co and one never to name Shine Ltd, each citing the competitors-not-named answer's source a5a50000-0000-4000-8000-000000000007 (citing the competitors answer a5a50000-0000-4000-8000-000000000006 beside it is fine). There is no rule of another kind: no other answer or document states one. No fact names or describes Gloss Co or Shine Ltd, or says the brand has competitors. A fact on the ceramic and graphene coatings for cars and bikes in Pune cites the home page 517e0000-0000-4000-8000-000000000001 and has reviewDate 2027-11-21."
+}

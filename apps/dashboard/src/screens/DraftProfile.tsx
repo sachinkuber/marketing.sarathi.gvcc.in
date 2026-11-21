@@ -1,14 +1,15 @@
 'use client'
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import { suggestionDecisionReply, onboardingReply, suggestionItem, suggestionsReply } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
+import { SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import { KEY_LABEL, TOPICS, failureWords, isForbidden } from './onboarding-words'
 
 type Item = z.infer<typeof suggestionItem>
-type Source = Item['sources'][number]
 type Gap = { key: string; why: string }
 
 const label = (key: string) => KEY_LABEL[key] ?? key
@@ -17,29 +18,8 @@ const label = (key: string) => KEY_LABEL[key] ?? key
 const textOf = (value: unknown): string =>
   typeof value === 'string' ? value : value === null || value === undefined ? '' : JSON.stringify(value)
 
-const readOn = (iso: string) =>
-  new Date(iso).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  })
-
 const sourceCount = (n: number) => (n === 0 ? 'no sources' : `${n} ${n === 1 ? 'source' : 'sources'}`)
 const confidenceTag = (c: Item['confidence']) => (c === 'found' ? 'ok' : c === 'assumed' ? 'warn' : 'plain')
-
-function SourceRow({ source }: { source: Source }) {
-  return (
-    <li className="onb-group">
-      <div className="wrap-row">
-        <div className="grow onb-wrap">{source.address ?? 'No address'}</div>
-        {source.flagged ? <span className="tag warn">{`Flagged: ${source.flagged.reason}`}</span> : null}
-      </div>
-      <div className="muted small">{`Read ${readOn(source.readAt)}`}</div>
-      <p className="dp-extract small">{source.extract}</p>
-    </li>
-  )
-}
 
 function ItemCard(props: {
   item: Item
@@ -81,6 +61,7 @@ function ItemCard(props: {
             id={`edit-${item.key}`}
             className={`input dp-edit${empty ? ' err' : ''}`}
             value={draft}
+            maxLength={4000}
             aria-invalid={empty ? true : undefined}
             onChange={(event) => {
               setDraft(event.target.value)
@@ -95,7 +76,7 @@ function ItemCard(props: {
               disabled={props.busy}
               onClick={() => {
                 if (draft.trim() === '') return setEmpty(true)
-                props.onDecide(item, { decision: 'edited', value: draft })
+                props.onDecide(item, { decision: 'edited', value: draft.trim() })
               }}
             >
               Save edit
@@ -285,12 +266,17 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
           <p>What the research found about this brand. Accept it, put it in your own words, or reject it.</p>
         </div>
       </div>
-      {loadError ? (
-        <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
-      ) : items === null ? (
-        <p className="muted">Loading…</p>
+      {items === null ? (
+        loadError ? (
+          <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
+        ) : (
+          <p className="muted">Loading…</p>
+        )
       ) : (
         <div className="stack">
+          {loadError ? (
+            <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
+          ) : null}
           {notice ? (
             <p className="callout ok" role="status">
               {notice}
@@ -314,6 +300,13 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
             </div>
           ) : null}
           {topics.length === 0 ? <p className="sub">Nothing is waiting for your decision.</p> : null}
+          {ordered.every((i) => i.decision !== null) ? (
+            <div>
+              <Link className="btn primary onb-touch" href={`/b/${brandId}/onboarding/questionnaire`}>
+                Next: the questionnaire
+              </Link>
+            </div>
+          ) : null}
           {topics.map((topic) => (
             <section key={topic.heading} className="panel" aria-label={topic.heading}>
               <h2 className="pad onb-h">{topic.heading}</h2>

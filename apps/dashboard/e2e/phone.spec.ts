@@ -11,6 +11,7 @@ import {
   tinyPdf,
   unique,
 } from './control.ts'
+import { ASK_TEXT, FACT_CONFIRMED, FACT_EDITED } from './decision-script.ts'
 
 // Runs first: the other phone check moves the clock a hundred hours on, and the platform owner would then see
 // its overdue pop-up over these screens.
@@ -74,6 +75,50 @@ test('the intake, research progress and draft profile work on a phone', async ({
   await expect(
     page.locator('li[data-key="search_visibility"]').getByText('Rejected', { exact: true }),
   ).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  // The questionnaire, the agent's question and the facts and rules screen, by touch (test 53).
+  await page.goto(`/b/${brandId}/onboarding/questionnaire`)
+  await expect(page.getByRole('heading', { name: 'Questionnaire', level: 1 })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Prepare the questionnaire' }).tap()
+  const goals = page.getByRole('listitem').filter({ hasText: 'What should the next three months bring?' })
+  await expect(goals).toBeVisible({ timeout: 120_000 })
+  await expectNoHorizontalScroll(page)
+  await goals.getByText('More walk-ins', { exact: true }).tap()
+  await expect(goals.getByRole('radio', { name: 'More walk-ins' })).toBeChecked()
+  await expect(goals.getByText('Saved', { exact: true })).toBeVisible()
+  const audience = page.getByRole('listitem').filter({ hasText: 'Who matters most to you?' })
+  await audience.getByLabel('Your answer').fill('Bike owners in Pune')
+  await expect(audience.getByText('Saved', { exact: true })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Finish questionnaire' }).tap()
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Yes, finish' }).tap()
+  await expect(page).toHaveURL(new RegExp(`/b/${brandId}/onboarding/facts-rules$`))
+  await expect(page.getByRole('heading', { name: 'Facts and rules', level: 1 })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  await page.getByRole('button', { name: 'Find facts and rules' }).tap()
+  const question = page.getByRole('region', { name: 'A question from the agent' })
+  await expect(question.getByText(ASK_TEXT)).toBeVisible({ timeout: 120_000 })
+  await expectNoHorizontalScroll(page)
+  await question.getByText('Premium', { exact: true }).tap()
+  await question.getByRole('button', { name: 'Send answer' }).tap()
+  await expect(question.getByText('Sent. The job starts again with your answer.')).toBeVisible()
+  const card = (text: string) =>
+    page.locator('li.dp-item').filter({ has: page.locator('p.dp-value', { hasText: text }) })
+  const fact = card(FACT_CONFIRMED)
+  await expect(fact).toBeVisible({ timeout: 120_000 })
+  await expectNoHorizontalScroll(page)
+  await fact.getByRole('button', { name: 'Confirm' }).tap()
+  await expect(
+    page.getByRole('region', { name: 'Confirmed facts' }).locator('p.dp-value', { hasText: FACT_CONFIRMED }),
+  ).toBeVisible()
+  await card(FACT_EDITED).getByRole('button', { name: 'Edit' }).tap()
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Add your own rule' }).tap()
+  await page.getByLabel('The rule, in your words').fill('Never compare prices with a named rival.')
   await expectNoHorizontalScroll(page)
 })
 

@@ -7,7 +7,12 @@ import { createS3Client, S3ExportStore } from './audit/s3-store.ts'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
-import { registerResearchHandlers, registerSummaryHandlers } from './agents/register.ts'
+import {
+  registerFactsRulesHandlers,
+  registerQuestionnaireHandlers,
+  registerResearchHandlers,
+  registerSummaryHandlers,
+} from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
 import type { SettledHooks } from './jobs/service.ts'
 import { ecbFxSource } from './triggers/fx.ts'
@@ -15,6 +20,15 @@ import { ecbFxSource } from './triggers/fx.ts'
 export interface RunningServer {
   url: string
   stop(): Promise<void>
+}
+
+// Ruling R42: the proxy in front (Caddy) keeps an idle connection to the core for up to 2 minutes, but Node closes
+// one after 5 s by default, so a request sent on a connection the core is closing fails with a 502. The core keeps
+// idle connections for 125 s, longer than the proxy, with the header limit just above that. Both stay under Node's
+// 300 s request timeout.
+export function keepIdleConnections(server: Server): void {
+  server.keepAliveTimeout = 125_000
+  server.headersTimeout = 126_000
 }
 
 export async function startServer(
@@ -50,6 +64,8 @@ export async function startServer(
     queue,
     backlogLimit: config.queueBacklogLimit,
   })
+  registerQuestionnaireHandlers(results)
+  registerFactsRulesHandlers(results, { audit: deps.audit })
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,
@@ -102,6 +118,7 @@ export async function startServer(
     ])
     throw error
   }
+  keepIdleConnections(server)
   const { port } = server.address() as AddressInfo
   // A second signal, or a second caller, waits for the same stop instead of closing twice.
   let stopping: Promise<void> | undefined

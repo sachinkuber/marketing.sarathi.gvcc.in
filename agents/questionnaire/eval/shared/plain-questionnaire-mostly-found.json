@@ -1,0 +1,99 @@
+{
+  "id": "plain-questionnaire-mostly-found",
+  "title": "A mostly found profile is not padded: only the two open profile keys and the nine strategy inputs are asked",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Lumen Shield Coatings",
+        "status": "found"
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found"
+      },
+      {
+        "key": "main_products",
+        "value": "Ceramic Pro 9H (5-year); Graphene Max (7-year); paint protection film",
+        "status": "found"
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found"
+      },
+      {
+        "key": "audiences",
+        "value": "Owners of new cars; superbike riders; detailing studios that resell coatings",
+        "status": "found"
+      },
+      {
+        "key": "price_position",
+        "value": "Premium: from ₹18,000 for a car",
+        "status": "found"
+      },
+      {
+        "key": "tone_of_voice",
+        "value": "Friendly and direct, with emoji",
+        "status": "found"
+      },
+      {
+        "key": "differentiators",
+        "value": "7-year graphene warranty; paint correction done in-house",
+        "status": "found"
+      },
+      {
+        "key": "certifications",
+        "value": "Authorised Ceramic Pro installer (Ceramic Pro, 2024)",
+        "status": "found"
+      },
+      {
+        "key": "contact_points",
+        "value": "Phone and WhatsApp +91 98765 43210; hello@lumenshield.example",
+        "status": "found"
+      },
+      {
+        "key": "social_presence",
+        "value": "Instagram @lumenshieldcoatings, about 2,100 followers",
+        "status": "found"
+      },
+      {
+        "key": "search_visibility",
+        "value": "First result for the brand's name; not on the first page for 'ceramic coating Pune'",
+        "status": "found"
+      },
+      {
+        "key": "competitors",
+        "value": "Gloss Co; Shine Ltd",
+        "status": "assumed"
+      }
+    ],
+    "open": [],
+    "gaps": [
+      {
+        "key": "ai_answer_visibility",
+        "why": "The visibility searches did not cover AI answers."
+      }
+    ],
+    "unreadable": [],
+    "competitors": [
+      {
+        "name": "Gloss Co",
+        "website": "https://gloss.example/"
+      },
+      {
+        "name": "Shine Ltd",
+        "website": null
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "ask is null. Exactly these 11 keys are asked and no other: competitors and ai_answer_visibility, one question each, and the nine strategy keys goals, priority_audiences, proof_points, never_say, competitors_not_named, tone_limits, pause_dates, capacity and success_measures, one to three questions each. Two questions on the same strategy key ask genuinely different things, not the same thing in other words. No question's key is one of the twelve found keys, and no question asks the owner to confirm or restate a found value under another key. Offering found values as options for a strategy question (for example the found audiences as options for priority_audiences, or the warranty under proof_points) is fine. The competitors question names Gloss Co and Shine Ltd for the owner to confirm or correct; a question that asks the owner to confirm an assumed item is fine. The competitors and ai_answer_visibility questions come before the strategy questions."
+}

@@ -1,7 +1,7 @@
 import { withBrand, type PoolClient } from '@mkt/db'
 import { CLASS_SETTINGS, JOB_CLASSES, type JobClass } from '@mkt/queue'
 import { AppError } from '../errors.ts'
-import { currentQueueId, finaliseRun, settledTypes, type JobsDeps } from './service.ts'
+import { currentQueueId, finaliseRun, hasOpenQuestion, settledTypes, type JobsDeps } from './service.ts'
 
 export interface DeadJob {
   jobId: string
@@ -70,6 +70,11 @@ export async function markDead(deps: JobsDeps, jobId: string): Promise<void> {
     const job = await lockJob(client, jobId)
     // A job whose result was already applied is not dead, whatever a late copy says.
     if (job.finishedAt) return
+    // Nor is a job waiting for the owner's answer (spec 9: not failed, not dead, its run still running). Its
+    // question is stored and its attempt has ended, so a failed copy of the row that asked (the raise's reply
+    // lost, or the worker gone before the row completed, on the last retry) leaves nothing to give up on: the
+    // answer sends the job again under a new queue id.
+    if (await hasOpenQuestion(client, brandId, jobId)) return
     // Already marked (dead_at set, so the run failed, or its hook ran, in that same transaction): a repeated
     // report changes nothing and costs no queue call.
     if (job.deadAt && (settle || job.runState === 'failed')) return

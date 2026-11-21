@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { DISALLOWED } from './disallowed.ts'
+import { NOT_VISIBLE, shown } from './visible-text.ts'
 
 // What the onboarding research fills in: the brand profile's keys, in the order the owner reads them.
 export const PROFILE_KEYS = [
@@ -28,6 +29,9 @@ export type SourceGroup = (typeof SOURCE_GROUPS)[number]
 // owner's own word makes (D7). Likewise 'stated' is the owner's result and never research's.
 export const RESEARCH_SOURCE_KINDS = ['site', 'social', 'search', 'document', 'competitor'] as const
 export type ResearchSourceKind = (typeof RESEARCH_SOURCE_KINDS)[number]
+// Every kind of source (app.source_kind): what research reads, and the owner's own word.
+export const SOURCE_KINDS = [...RESEARCH_SOURCE_KINDS, 'owner_statement'] as const
+export type SourceKind = (typeof SOURCE_KINDS)[number]
 export const RESEARCH_RESULTS = ['read', 'blocked', 'empty', 'error'] as const
 export const CONFIDENCES = ['found', 'assumed', 'unknown'] as const
 
@@ -43,14 +47,6 @@ const NAME_MAX = 200
 const MAX_COMPETITORS = 5
 const MAX_DOCUMENTS = 20
 
-// Text the owner will read: not blank, and without the invisible and control characters the payload refuses.
-const NOT_VISIBLE = 'is blank or contains an invisible or control character'
-const shown = (max: number) =>
-  z
-    .string()
-    .min(1)
-    .max(max)
-    .refine((value) => !DISALLOWED.test(value) && value.trim() !== '', NOT_VISIBLE)
 const address = z
   .string()
   .min(1)

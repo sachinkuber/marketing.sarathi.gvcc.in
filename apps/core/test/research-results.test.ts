@@ -1055,3 +1055,34 @@ describe('deciding research suggestions', () => {
     })
   })
 })
+
+describe('the merge job under a full backlog', () => {
+  const withFullBacklog = async (body: () => Promise<void>) => {
+    const was = jobs.backlogLimit
+    jobs.backlogLimit = 0
+    try {
+      await body()
+    } finally {
+      jobs.backlogLimit = was
+    }
+  }
+
+  it('a merge job is created even when the backlog is full', async () => {
+    const brandId = await newBrand()
+    const run = await begin(brandId)
+    await withFullBacklog(async () => {
+      for (const name of ['site', 'social', 'visibility', 'competitors']) {
+        await postGroup(run.group[name]!, GROUP_RESULTS[name]!)
+      }
+    })
+    expect(await mergeJobs(run.runId)).toHaveLength(1)
+    expect(await runState(run.runId)).toBe('running')
+  })
+
+  it('an ordinary production job is still refused at the same backlog', async () => {
+    const brandId = await newBrand()
+    await withFullBacklog(async () => {
+      await expect(begin(brandId)).rejects.toMatchObject({ status: 503, code: 'queue_busy' })
+    })
+  })
+})

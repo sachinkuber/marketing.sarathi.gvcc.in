@@ -123,12 +123,12 @@ describe('the auth schema', () => {
     }
   })
 
-  it('references auth.user from the fourteen columns the schema document names, and enforces it', async () => {
+  it('references auth.user from the sixteen columns the schema document names, and enforces it', async () => {
     const result = await db.admin.query(
       `select count(*)::int as n from pg_constraint
         where contype = 'f' and confrelid = 'auth."user"'::regclass and conrelid::regclass::text like 'app.%'`,
     )
-    expect(result.rows[0].n).toBe(14)
+    expect(result.rows[0].n).toBe(16)
     await expect(
       db.admin.query(
         "insert into app.membership (brand_id, user_id, role) values ($1, gen_random_uuid(), 'viewer')",

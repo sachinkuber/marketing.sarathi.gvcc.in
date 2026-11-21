@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { DISALLOWED } from './disallowed.ts'
+import { shown } from './visible-text.ts'
 
 export const BRIEF_MAX = 2000
 const SUMMARY_MAX = 600
@@ -8,18 +8,13 @@ const KEYWORD_MAX = 60
 const CHECK_SUMMARY_MAX = 400
 const CHECK_KEYWORD_MAX = 40
 
-// Non-empty text without the invisible and control characters the payload refuses.
-const text = z.string().min(1)
-const visible = (value: string) => !DISALLOWED.test(value) && value.trim() !== ''
-const NOT_VISIBLE = 'is blank or contains an invisible or control character'
-
 export const briefSchema = z.strictObject({
-  brief: text.max(BRIEF_MAX).refine(visible, NOT_VISIBLE),
+  brief: shown(BRIEF_MAX),
 })
 
 export const summaryResultSchema = z.strictObject({
-  summary: text.max(SUMMARY_MAX).refine(visible, NOT_VISIBLE),
-  keywords: z.array(text.max(KEYWORD_MAX).refine(visible, NOT_VISIBLE)).length(3),
+  summary: shown(SUMMARY_MAX),
+  keywords: z.array(shown(KEYWORD_MAX)).length(3),
 })
 export type SummaryResult = z.infer<typeof summaryResultSchema>
 

@@ -15,6 +15,7 @@ const checkSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('not_contains'), text: z.string().min(1) }),
   z.strictObject({ kind: z.literal('flags_source'), sourceId: z.string().min(1) }),
   z.strictObject({ kind: z.literal('no_third_party_fact') }),
+  z.strictObject({ kind: z.literal('facts_rest_on_qualifying_sources') }),
 ])
 export type Check = z.infer<typeof checkSchema>
 

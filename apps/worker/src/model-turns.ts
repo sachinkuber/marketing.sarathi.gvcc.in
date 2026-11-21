@@ -21,6 +21,10 @@ export interface TurnCaps {
   searches: number
   fetches: number
   maxContinuations?: number
+  // The searches the whole run may use (the definition's searchesPerBrandStep). With it, a request's searches are
+  // also limited to what the run has left: the cap less the searches recorded before this attempt
+  // (ctx.runSearches) and the ones made so far in this attempt. Absent: no run limit.
+  runSearchCap?: number
 }
 
 export interface TurnsResult {
@@ -49,6 +53,7 @@ export async function modelTurns(
   const messages = [...request.messages]
   const content: unknown[] = []
   let searches = 0
+  let freshSearches = 0
   let fetches = 0
 
   for (let turn = 0; ; turn += 1) {
@@ -56,12 +61,28 @@ export async function modelTurns(
     const timeoutMs = attemptTimeoutMs(ctx, request.timeoutMs)
 
     const used = (tool: ModelTool): number => (tool.type === 'web_search_20260209' ? searches : fetches)
+    // The turn's cap, and for web_search also what the run has left (M2): the run cap less the searches
+    // recorded before this attempt and the ones made so far in it. Both are for "uses still allowed".
     const cap = (tool: ModelTool): number =>
       tool.type === 'web_search_20260209' ? caps.searches : caps.fetches
-    // A tool whose budget is spent is left out. Exception: a continuation whose history holds that tool's
-    // blocks keeps it with max_uses 1, because it is not known whether the API accepts such a history with
-    // the tool omitted or with max_uses 0 (see the live probe in anthropic-live.test.ts). The cost is that a
-    // spent tool may be used once more per continuation.
+    const runLeft = (tool: ModelTool): number =>
+      tool.type === 'web_search_20260209' && caps.runSearchCap !== undefined
+        ? caps.runSearchCap - (ctx.runSearches ?? 0) - freshSearches
+        : Number.POSITIVE_INFINITY
+    // A tool whose budget is spent (its turn cap or the run's) is left out. Exception (R29): a continuation
+    // whose history holds that tool's blocks keeps it with max_uses 1, because it is not known whether the API
+    // accepts such a history with the tool omitted. max_uses 0 is refused (R13 probe, 2026-11-21), and
+    // omitting the tool could not be tested without a real pause_turn continuation.
+    //
+    // What this bounds. On a first attempt nothing can pass the run cap: 4 web groups x (20 + 6 R29 extras) = 104,
+    // under 150. On a retry the run's recorded searches (ctx.runSearches) are counted, with two known gaps:
+    // attempts that start together read the same stale count, so the run can pass 150 by up to the others'
+    // allowances (about 60) plus R29 extras; and a call whose reply was lost records 0 searches, so its retry
+    // spends that turn again. The old worst case of about 312 is reduced only for recorded calls.
+    //
+    // The run term counts only searches made fresh in this attempt (`freshSearches`): a replayed step's searches
+    // are already in ctx.runSearches. The job's own cap still counts all of them. Near the cap a changed maxUses
+    // changes the request's hash, so a replay misses its checkpoint and the turn is sent again (accepted).
     const inHistory = (tool: ModelTool): boolean =>
       content.some((b) => {
         const block = b as { type?: unknown; name?: unknown }
@@ -69,7 +90,7 @@ export async function modelTurns(
       })
     const tools: ModelTool[] = []
     for (const tool of request.tools ?? []) {
-      const left = Math.min(tool.maxUses, cap(tool) - used(tool))
+      const left = Math.min(tool.maxUses, cap(tool) - used(tool), runLeft(tool))
       if (left > 0) tools.push({ ...tool, maxUses: left })
       else if (inHistory(tool)) tools.push({ ...tool, maxUses: 1 })
     }
@@ -78,6 +99,7 @@ export async function modelTurns(
     if (tools.length > 0) next.tools = tools
     const reply = await ctx.modelStep(`${step}#${turn}`, next)
     searches += reply.usage?.serverToolSearches ?? 0
+    if (!reply.replayed) freshSearches += reply.usage?.serverToolSearches ?? 0
     fetches += reply.usage?.serverToolFetches ?? 0
     const blocks = reply.content
     if (reply.stopReason === 'end_turn') {

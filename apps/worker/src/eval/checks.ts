@@ -1,13 +1,52 @@
-import { researchGroupResultSchema, researchResultSchema, summaryResultSchema } from '@mkt/shared'
+import {
+  factsRulesAgainstInput,
+  factsRulesResultSchema,
+  questionnaireResultSchema,
+  researchGroupResultSchema,
+  researchResultSchema,
+  summaryResultSchema,
+} from '@mkt/shared'
 import { z } from 'zod'
 import type { ModelClient, ModelUsage } from '../model.ts'
 import type { EvalCase } from './cases.ts'
 
-// Each agent's own result check, used by schema_valid. M10 and M11 add their agents here.
-export const RESULT_VALIDATORS: Record<string, (output: unknown) => boolean> = {
+// What a facts and rules result is checked against: the case input's date, the ids of its sources and the owner
+// statements of its earlier answers (ruling R11). The case input was checked whole before the run
+// (EVAL_RUNNERS.facts_rules.inputSchema).
+const factsCaseInput = z.object({
+  today: z.iso.date(),
+  sources: z.array(z.object({ id: z.string() })),
+  agentAnswers: z.array(z.object({ sourceId: z.string() })).optional(),
+})
+
+// The latest review date the prompt allows: 12 months after today, on the same day of the month, or on that
+// month's last day when the day does not exist (from 29 February, 28 February).
+function yearAfter(today: string): string {
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number]
+  const lastDay = new Date(Date.UTC(year + 1, month, 0)).getUTCDate()
+  const two = (n: number) => String(n).padStart(2, '0')
+  return `${year + 1}-${two(month)}-${two(Math.min(day, lastDay))}`
+}
+
+// Each agent's own result check, used by schema_valid, given the case's input. M10 and M11 add their agents
+// here. A facts and rules result is also checked against its input as the core checks it (every cited id is a
+// listed source or an earlier answer's statement, every review date after today), and, in evaluation only, no
+// review date is more than 12 months after today (ruling R13).
+export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown) => boolean> = {
   summary: (output) => summaryResultSchema.safeParse(output).success,
   research: (output) => researchGroupResultSchema.safeParse(output).success,
   research_merge: (output) => researchResultSchema.safeParse(output).success,
+  questionnaire: (output) => questionnaireResultSchema.safeParse(output).success,
+  facts_rules: (output, input) => {
+    const result = factsRulesResultSchema.safeParse(output)
+    const given = factsCaseInput.safeParse(input)
+    if (!result.success || !given.success) return false
+    const latest = yearAfter(given.data.today)
+    return (
+      factsRulesAgainstInput(result.data, given.data, given.data.agentAnswers ?? []).length === 0 &&
+      result.data.facts.every((fact) => fact.reviewDate <= latest)
+    )
+  },
 }
 
 export interface CheckResult {
@@ -49,27 +88,65 @@ function flagsSource(output: unknown, sourceId: string): boolean {
   return false
 }
 
+// The kind of every source the given values list, by ref (a group result) and by id; a later value's kind wins.
+function sourceKinds(...values: unknown[]): Map<string, unknown> {
+  const kinds = new Map<string, unknown>()
+  for (const source of values.flatMap((value) => [...sourceEntries(value)])) {
+    if (typeof source['ref'] === 'string') kinds.set(source['ref'], source['kind'])
+    if (typeof source['id'] === 'string') kinds.set(source['id'], source['kind'])
+  }
+  return kinds
+}
+
+// True when the cited refs or ids name no known source other than social, search or competitor ones (AI-11):
+// citing nothing, or only sources the case does not list, rests on no known source.
+const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
+function restsOnThirdParty(field: unknown, kinds: Map<string, unknown>): boolean {
+  const cited: unknown[] = Array.isArray(field) ? field : []
+  const known = cited
+    .filter((ref): ref is string => typeof ref === 'string' && kinds.has(ref))
+    .map((ref) => kinds.get(ref))
+  return known.every((kind) => typeof kind === 'string' && THIRD_PARTY.has(kind))
+}
+
 // Fails when a `found` finding or suggestion rests only on social, search or competitor sources (AI-11). A
 // group result names its sources by ref in its own `sources`; a merge result names them by id, and those are
 // in the case's input. A `found` item that cites nothing, or only sources that are in neither, rests on no
 // known source and fails too: otherwise "mark everything found" without copying the ids would pass.
-const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
 function hasThirdPartyFact(output: unknown, input: unknown): boolean {
-  const kinds = new Map<string, unknown>()
-  for (const source of [...sourceEntries(input), ...sourceEntries(output)]) {
-    if (typeof source['ref'] === 'string') kinds.set(source['ref'], source['kind'])
-    if (typeof source['id'] === 'string') kinds.set(source['id'], source['kind'])
-  }
+  const kinds = sourceKinds(input, output)
   for (const obj of objects(output)) {
     if (obj['confidence'] !== 'found') continue
-    const field = Array.isArray(obj['sourceRefs']) ? obj['sourceRefs'] : obj['sourceIds']
-    const cited: unknown[] = Array.isArray(field) ? field : []
-    const known = cited
-      .filter((ref): ref is string => typeof ref === 'string' && kinds.has(ref))
-      .map((ref) => kinds.get(ref))
-    if (known.every((kind) => typeof kind === 'string' && THIRD_PARTY.has(kind))) return true
+    if (restsOnThirdParty(Array.isArray(obj['sourceRefs']) ? obj['sourceRefs'] : obj['sourceIds'], kinds))
+      return true
   }
   return false
+}
+
+// Fails when a candidate fact of a facts and rules result cites no listed site, document or owner statement:
+// a fact never rests only on social, search or competitor sources (spec 8.2), and one citing nothing known
+// rests on nothing. A fact carries no confidence, so no_third_party_fact cannot see it. Rules are not checked
+// here: a rule may cite a competitor page it names. An earlier answer to the agent's question is an owner
+// statement (ruling R11). The kinds come from the case input only: a facts result lists no sources, and one that
+// did could otherwise call a competitor page a site (ruling R13).
+function hasUnsupportedFact(output: unknown, input: unknown): boolean {
+  if (output === null || typeof output !== 'object' || Array.isArray(output)) return false
+  const facts = (output as Record<string, unknown>)['facts']
+  if (!Array.isArray(facts)) return false
+  const kinds = sourceKinds(input)
+  const answered = factsCaseInput.shape.agentAnswers.safeParse(
+    input !== null && typeof input === 'object'
+      ? (input as Record<string, unknown>)['agentAnswers']
+      : undefined,
+  )
+  for (const answer of answered.success ? (answered.data ?? []) : [])
+    kinds.set(answer.sourceId, 'owner_statement')
+  return facts.some(
+    (fact) =>
+      fact === null ||
+      typeof fact !== 'object' ||
+      restsOnThirdParty((fact as Record<string, unknown>)['sourceIds'], kinds),
+  )
 }
 
 export function runChecks(
@@ -82,7 +159,7 @@ export function runChecks(
       case 'schema_valid': {
         const validate = RESULT_VALIDATORS[agent]
         if (!validate) return { kind: check.kind, passed: false, detail: `no result validator for ${agent}` }
-        return validate(output)
+        return validate(output, c.input)
           ? { kind: check.kind, passed: true }
           : { kind: check.kind, passed: false, detail: 'the output is not a valid result' }
       }
@@ -103,6 +180,14 @@ export function runChecks(
               kind: check.kind,
               passed: false,
               detail: 'a found item rests only on social, search or competitor sources',
+            }
+          : { kind: check.kind, passed: true }
+      case 'facts_rest_on_qualifying_sources':
+        return hasUnsupportedFact(output, c.input)
+          ? {
+              kind: check.kind,
+              passed: false,
+              detail: 'a fact cites no listed site, document or owner statement',
             }
           : { kind: check.kind, passed: true }
     }

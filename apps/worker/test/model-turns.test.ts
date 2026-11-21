@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ModelStopped, type ModelRequest } from '../src/model.ts'
 import { modelTurns } from '../src/model-turns.ts'
 import type { JobContext, ModelStepResult } from '../src/runner.ts'
-import { NO_DOCUMENTS } from './no-documents.ts'
+import { NO_DOCUMENTS, NO_QUESTIONS } from './no-documents.ts'
 
 const usage = (searches: number, fetches = 0) => ({
   inputTokens: 1,
@@ -13,13 +13,14 @@ const usage = (searches: number, fetches = 0) => ({
   serverToolFetches: fetches,
 })
 
-function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_600_000)) {
+function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_600_000), runSearches = 0) {
   const seen: { step: string; request: ModelRequest }[] = []
   const ctx: JobContext = {
     jobId: 'j',
     jobClass: 'production',
     input: null,
     deadline,
+    runSearches,
     async modelStep(step, request) {
       seen.push({ step, request })
       const next = replies[seen.length - 1]
@@ -28,6 +29,7 @@ function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_6
     },
     async checkStop() {},
     ...NO_DOCUMENTS,
+    ...NO_QUESTIONS,
   }
   return { ctx, seen }
 }
@@ -86,6 +88,86 @@ describe('modelTurns', () => {
       { type: 'web_search_20260209', maxUses: 1 },
       { type: 'web_fetch_20260209', maxUses: 10 },
     ])
+  })
+
+  it('the run cap removes web_search once the run has used its searches', async () => {
+    const { ctx, seen } = script(
+      [{ text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) }],
+      undefined,
+      150,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // No web_search tool at all; fetch stays.
+    expect(seen[0]!.request.tools).toEqual([{ type: 'web_fetch_20260209', maxUses: 10 }])
+  })
+
+  it('the run cap limits a request to what the run has left', async () => {
+    const { ctx, seen } = script(
+      [{ text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) }],
+      undefined,
+      141,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    expect(seen[0]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 9 })
+  })
+
+  it('the run cap shares the remainder across turns', async () => {
+    const { ctx, seen } = script(
+      [
+        {
+          text: '',
+          stopReason: 'pause_turn',
+          content: [{ type: 'text', text: 'a' }],
+          usage: usage(6),
+        },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // 10 left for the run: the first request may use 10; after 6 are made, the second may use 4.
+    expect(seen[0]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 10 })
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 4 })
+  })
+
+  // R29: the exception to "no web_search once the run cap is spent" is a continuation whose history already
+  // holds web_search blocks: it keeps the tool with max_uses 1 (the API may refuse that history without it).
+  it('a spent run cap still keeps web_search at max_uses 1 in a continuation whose history holds its blocks', async () => {
+    const blocks = [{ type: 'server_tool_use', name: 'web_search' }]
+    const { ctx, seen } = script(
+      [
+        { text: '', stopReason: 'pause_turn', content: blocks, usage: usage(10) },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 1 })
+  })
+
+  // I4: ctx.runSearches already holds the searches an earlier attempt made and recorded, so a replayed step's
+  // searches are not taken off the run's remainder a second time. The job's own cap still counts them.
+  it('a replayed turn with saved searches is not charged to the run twice', async () => {
+    const { ctx, seen } = script(
+      [
+        {
+          text: '',
+          stopReason: 'pause_turn',
+          content: [{ type: 'text', text: 'a' }],
+          usage: usage(10),
+          replayed: true,
+        },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // The run had 10 left at the start; the replayed 10 are in the 140 already, so 10 are still left. The job's
+    // own cap (20) does count them: 10 left there too.
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 10 })
   })
 
   it('gives each request its own copy of the messages', async () => {

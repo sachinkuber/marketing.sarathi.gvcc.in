@@ -22,6 +22,8 @@ const overview = (over: Record<string, unknown> = {}) => ({
   documents: 0,
   research: null,
   openSuggestions: 0,
+  questionnaire: null,
+  factsRules: null,
   cost: { usdMicros: '0', inrMicros: '0' },
   ...over,
 })
@@ -402,6 +404,31 @@ describe('onboarding screens, driven', () => {
     )
   })
 
+  it('Continue leads to facts and rules from that step on', async () => {
+    dom.replies.push({ status: 200, body: overview({ step: 'facts_rules' }) })
+    await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/facts-rules"]`)?.textContent).toBe(
+      'Continue',
+    )
+  })
+
+  it('Continue leads to the draft profile while suggestions are open, then to the questionnaire', async () => {
+    const cases: [string, number, string][] = [
+      ['profile', 3, 'profile'],
+      ['profile', 0, 'questionnaire'],
+      ['questionnaire', 0, 'questionnaire'],
+    ]
+    for (const [step, openSuggestions, where] of cases) {
+      dom.replies.push({ status: 200, body: overview({ step, openSuggestions }) })
+      await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/${where}"]`)?.textContent).toBe(
+        'Continue',
+      )
+      dom.stop()
+      dom.start()
+    }
+  })
+
   const loadIntake = async (intakeBody: unknown = null) => {
     dom.replies.push(
       { status: 200, body: overview({ intake: intakeBody }) },
@@ -565,6 +592,35 @@ describe('onboarding screens, driven', () => {
         await tick(20_000)
         expect(gets()).toBe(before)
       }
+    })
+
+    it('says "Cost so far" while the run goes and "Cost" once it has ended', async () => {
+      dom.replies.push(reply('running', 'waiting'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain('Cost so far:')
+      dom.stop()
+      dom.start()
+      dom.replies.push(reply('done', 'done'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain('Cost:')
+      expect(dom.text()).not.toContain('Cost so far')
+    })
+
+    it('stops on a 401 and sends the owner to sign in', async () => {
+      const assign = vi.fn()
+      Object.defineProperty(window.location, 'assign', { value: assign, configurable: true })
+      dom.replies.push(reply('running', 'waiting'), {
+        status: 401,
+        body: { error: { code: 'not_signed_in', message: 'Sign in' } },
+      })
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      await tick(5000)
+      expect(assign).toHaveBeenCalledTimes(1)
+      expect(assign.mock.calls[0]![0]).toMatch(/^\/sign-in/)
+      expect(dom.text()).toContain('You are signed out.')
+      const before = gets()
+      await tick(20_000)
+      expect(gets()).toBe(before)
     })
   })
 

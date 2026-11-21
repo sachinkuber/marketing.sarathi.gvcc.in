@@ -1,7 +1,6 @@
 import type { PoolClient } from '@mkt/db'
 import type { JobClass } from '@mkt/queue'
-import { randomUUID } from 'node:crypto'
-import { applyResult, type HeldResult, type JobsDeps } from '../jobs/service.ts'
+import { applyResult, resendJob, type HeldResult, type JobsDeps } from '../jobs/service.ts'
 
 interface Freed {
   job_id: string
@@ -86,12 +85,7 @@ export function releaseHeldJobs(
       // Known limitation: release during an in-flight call can cost one duplicate model call; the proper fix is
       // the worker ending its attempt when it stops on held. (An attempt still running when its job is freed
       // here is superseded by the new copy's attempt, whose model call is flagged possible_duplicate.)
-      const queueId = randomUUID()
-      await client.query('update app.job_control set queue_id = $2, updated_at = now() where job_id = $1', [
-        job.job_id,
-        queueId,
-      ])
-      await deps.queue.send(client, { jobId: job.job_id, jobClass: job.class, scheduleKey, queueId })
+      await resendJob(client, deps, { jobId: job.job_id, jobClass: job.class, scheduleKey })
     }
   }
 }

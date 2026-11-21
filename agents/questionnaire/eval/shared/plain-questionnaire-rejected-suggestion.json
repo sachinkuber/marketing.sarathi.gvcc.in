@@ -1,0 +1,88 @@
+{
+  "id": "plain-questionnaire-rejected-suggestion",
+  "title": "A price position the owner rejected is asked afresh and never pre-filled; an undecided suggestion still is",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Lumen Shield Coatings",
+        "status": "found"
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found"
+      },
+      {
+        "key": "main_products",
+        "value": "Ceramic Pro 9H (5-year); Graphene Max (7-year); paint protection film",
+        "status": "found"
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found"
+      },
+      {
+        "key": "contact_points",
+        "value": "Phone and WhatsApp +91 98765 43210; hello@lumenshield.example",
+        "status": "found"
+      },
+      {
+        "key": "tone_of_voice",
+        "value": "Friendly and direct, with emoji",
+        "status": "found"
+      }
+    ],
+    "open": [
+      {
+        "key": "price_position",
+        "proposed": "Premium: from ₹18,000 for a car",
+        "confidence": "assumed",
+        "rejected": true
+      },
+      {
+        "key": "audiences",
+        "proposed": "Car and bike owners in Pune",
+        "confidence": "assumed",
+        "rejected": false
+      }
+    ],
+    "gaps": [
+      {
+        "key": "differentiators",
+        "why": "Nothing on the site says what sets the brand apart."
+      },
+      {
+        "key": "certifications",
+        "why": "No certification is named anywhere."
+      },
+      {
+        "key": "social_presence",
+        "why": "No social profile was found in search."
+      },
+      {
+        "key": "search_visibility",
+        "why": "Nothing found."
+      },
+      {
+        "key": "ai_answer_visibility",
+        "why": "Nothing found."
+      },
+      {
+        "key": "competitors",
+        "why": "No competitors were named or found."
+      }
+    ],
+    "unreadable": [],
+    "competitors": []
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "ask is null. price_position is asked exactly once, and the rejected value is not pre-filled: the price_position question's suggestedAnswer is null, or a value the input supports; never Premium (from ₹18,000 for a car), in any wording. An open-ended price_position question is fine, and so is offering Premium as one option among others that is not the suggestedAnswer. audiences, which the owner has not rejected, is pre-filled: its suggestedAnswer is the proposed audience (car and bike owners in Pune) or the option that carries it. No question's key is one of the six found keys. never_say, competitors_not_named, tone_limits and pause_dates are each asked, and no profile key has two questions."
+}

@@ -170,6 +170,9 @@ test('the worker is not on app', () => {
     if (name !== 'worker') assert.ok(!Object.keys(service.networks ?? {}).includes('worker_egress'), name)
   }
   assert.deepEqual(Object.keys(services.core.networks).sort(), ['app', 'data', 'worker'])
+  // The core writes no core dumps (a split child can hold a whole PDF in memory).
+  // (the JSON model prints a zero limit as an empty object; the YAML model shows soft and hard 0)
+  assert.ok('core' in services.core.ulimits)
   assert.deepEqual(Object.keys(services.dashboard.networks), ['app'])
   assert.deepEqual(Object.keys(services.ops.networks), ['data'])
 })

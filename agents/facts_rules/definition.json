@@ -1,0 +1,9 @@
+{
+  "agent": "facts_rules",
+  "version": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "maxTokens": 16000,
+  "jobClass": "production",
+  "resultType": "facts_rules.v1"
+}

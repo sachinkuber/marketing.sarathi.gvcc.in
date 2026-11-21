@@ -28,7 +28,7 @@ describe('the replies the worker accepts from the core', () => {
 
   it('accepts both shapes of a start and rejects a malformed one', () => {
     expect(replySchemas.startAttempt.safeParse({ finished: true, outcome: { a: 1 } }).success).toBe(true)
-    for (const outcome of ['held', 'superseded']) {
+    for (const outcome of ['held', 'superseded', 'waiting_for_answer']) {
       expect(replySchemas.startAttempt.safeParse({ finished: false, outcome }).success).toBe(true)
     }
     expect(replySchemas.startAttempt.safeParse({ finished: false, outcome: 'other' }).success).toBe(false)
@@ -51,6 +51,19 @@ describe('the replies the worker accepts from the core', () => {
       true,
     )
     expect(replySchemas.startAttempt.safeParse({ ...started, agent: undefined }).success).toBe(false)
+    // The owner's answers to the job's questions; absent from a core that does not send them. Each carries the
+    // owner statement that records it, so an agent can cite the answer (ruling R11).
+    const answer = { question: 'Which city?', why: 'Two are named.', options: ['Pune'], answer: 'Pune' }
+    const answers = [{ ...answer, sourceId: 'a5a50000-0000-4000-8000-000000000008' }]
+    expect(replySchemas.startAttempt.safeParse({ ...started, answers }).success).toBe(true)
+    expect(replySchemas.startAttempt.parse({ ...started, answers })).toMatchObject({ answers })
+    expect(replySchemas.startAttempt.safeParse({ ...started, answers: [answer] }).success).toBe(false)
+    expect(
+      replySchemas.startAttempt.safeParse({ ...started, answers: [{ ...answer, sourceId: '' }] }).success,
+    ).toBe(false)
+    expect(replySchemas.startAttempt.safeParse({ ...started, answers: [{ question: 'q' }] }).success).toBe(
+      false,
+    )
   })
 
   it('rejects a checkpoint or result reply that is not understood', () => {

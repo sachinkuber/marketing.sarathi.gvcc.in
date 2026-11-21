@@ -1,0 +1,128 @@
+{
+  "id": "plain-facts-rules-site-and-brochure",
+  "title": "The brand's site, its brochure and the owner's answers give facts that each cite a source stating them, and rules from the answers on what never to say, tone and pause dates",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-21",
+    "brandName": "Lumen Shield Coatings",
+    "sources": [
+      {
+        "id": "517e0000-0000-4000-8000-000000000001",
+        "kind": "site",
+        "address": "https://lumenshield.example/",
+        "documentName": null,
+        "extract": "Lumen Shield Coatings\nCeramic and graphene coatings for cars and bikes in Pune.\nBook a coating at our Baner studio and drive out the same evening."
+      },
+      {
+        "id": "517e0000-0000-4000-8000-000000000002",
+        "kind": "site",
+        "address": "https://lumenshield.example/about",
+        "documentName": null,
+        "extract": "About us\nLumen Shield was started in 2019 by two automotive engineers. We have coated more than 3,000 cars and bikes across Pune and Pimpri-Chinchwad."
+      },
+      {
+        "id": "517e0000-0000-4000-8000-000000000003",
+        "kind": "site",
+        "address": "https://lumenshield.example/services",
+        "documentName": null,
+        "extract": "Services\nCeramic Pro 9H - 3-year and 5-year packages\nGraphene Max - 7-year package\nPaint protection film (PPF) - bonnet, bumpers or full body"
+      },
+      {
+        "id": "d0c00000-0000-4000-8000-000000000001",
+        "kind": "document",
+        "address": null,
+        "documentName": "Lumen Shield brochure 2026.pdf",
+        "extract": "Lumen Shield Coatings, brochure 2026\nStudio: Shop 4, Baner Road, Pune 411045\nOur three installers hold the Detailing Guild of India Level 2 coating certificate.\nEvery coating is applied indoors, in a dust-free bay."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000002",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "More than 3,000 cars and bikes coated since 2019."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000001",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Never call our coatings permanent or scratch-proof. Never talk about accident repairs or insurance claims."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000003",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "No slang, and no jokes about crashes."
+      },
+      {
+        "id": "a5a50000-0000-4000-8000-000000000004",
+        "kind": "owner_statement",
+        "address": null,
+        "documentName": null,
+        "extract": "Nothing from 29 October to 4 November 2027: the studio is closed for Diwali."
+      }
+    ],
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Lumen Shield Coatings",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings and paint protection film for cars and bikes",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001", "517e0000-0000-4000-8000-000000000003"]
+      },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found",
+        "sourceIds": ["517e0000-0000-4000-8000-000000000001", "d0c00000-0000-4000-8000-000000000001"]
+      },
+      {
+        "key": "certifications",
+        "value": "Installers hold the Detailing Guild of India Level 2 coating certificate",
+        "status": "found",
+        "sourceIds": ["d0c00000-0000-4000-8000-000000000001"]
+      }
+    ],
+    "answers": [
+      {
+        "key": "proof_points",
+        "question": "What can the brand prove, such as results, reviews, warranties or numbers?",
+        "answer": "More than 3,000 cars and bikes coated since 2019.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000002"
+      },
+      {
+        "key": "never_say",
+        "question": "Which topics, claims or words must the brand never use?",
+        "answer": "Never call our coatings permanent or scratch-proof. Never talk about accident repairs or insurance claims.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000001"
+      },
+      {
+        "key": "tone_limits",
+        "question": "Where must the tone stop?",
+        "answer": "No slang, and no jokes about crashes.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000003"
+      },
+      {
+        "key": "pause_dates",
+        "question": "Are there dates when nothing may be published?",
+        "answer": "Nothing from 29 October to 4 November 2027: the studio is closed for Diwali.",
+        "sourceId": "a5a50000-0000-4000-8000-000000000004"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    },
+    {
+      "kind": "facts_rest_on_qualifying_sources"
+    }
+  ],
+  "rubric": "ask is null. facts include each of these, citing a source that states it: the ceramic and graphene coatings for cars and bikes (the home page 517e0000-0000-4000-8000-000000000001 or the services page 517e0000-0000-4000-8000-000000000003); the Baner studio in Pune (the home page or the brochure d0c00000-0000-4000-8000-000000000001); started in 2019 (the about page 517e0000-0000-4000-8000-000000000002 or the proof-points answer a5a50000-0000-4000-8000-000000000002); more than 3,000 cars and bikes coated (the about page or the proof-points answer); the installers' Level 2 coating certificate, naming the Detailing Guild of India as its issuer (the brochure). Every reviewDate is 2027-11-21, since none of these is a price or an offer. rules include: a rule or rules against calling the coatings permanent or scratch-proof (kind forbidden_claim or forbidden_word) and a forbidden_topic rule or rules on accident repairs and insurance claims, each citing the never_say answer's source a5a50000-0000-4000-8000-000000000001; a tone_limit rule or rules against slang and jokes about crashes, citing a5a50000-0000-4000-8000-000000000003; a pause_dates rule for 29 October to 4 November 2027, citing a5a50000-0000-4000-8000-000000000004. No fact or rule states something no source says. Further facts a source states, such as the Ceramic Pro 9H and Graphene Max packages, the paint protection film, the dust-free bay or the studio's address, are fine, and so is the brand's name in a statement."
+}

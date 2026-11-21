@@ -30,6 +30,11 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
   const suggestions = new Map<string, string>()
   // And a real document in each brand, for the delete route.
   const documents = new Map<string, string>()
+  // And a real agent question in each brand, for the answer route.
+  const questions = new Map<string, string>()
+  // And a real verified fact and safety rule in each brand, for the replace, retire and turn-off routes.
+  const facts = new Map<string, string>()
+  const rules = new Map<string, string>()
 
   beforeAll(async () => {
     // With the queue, so the job routes (declared only when the work engine is) are walked too.
@@ -74,6 +79,34 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
         [brand],
       )
       documents.set(brand, document.rows[0].id as string)
+      const job = await stack.db.admin.query(
+        `insert into app.job_input (job_id, brand_id, run_id, class, input, expected_result_type)
+         values (gen_random_uuid(), $1, $2, 'production', '{}', 'test.asks') returning job_id`,
+        [brand, runs.get(brand)],
+      )
+      await stack.db.admin.query('insert into app.job_control (job_id, brand_id) values ($1, $2)', [
+        job.rows[0].job_id,
+        brand,
+      ])
+      const question = await stack.db.admin.query(
+        `insert into app.agent_question (brand_id, run_id, job_id, question, why)
+         values ($1, $2, $3, 'Which city?', 'Two are named.') returning id`,
+        [brand, runs.get(brand), job.rows[0].job_id],
+      )
+      questions.set(brand, question.rows[0].id as string)
+      const fact = await stack.db.admin.query(
+        `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
+         values ($1, 'Open since 2019.', 'h', '{}', (select id from auth."user" limit 1), current_date + 30)
+         returning id`,
+        [brand],
+      )
+      facts.set(brand, fact.rows[0].id as string)
+      const rule = await stack.db.admin.query(
+        `insert into app.safety_rule (brand_id, kind, text, why, confirmed_by)
+         values ($1, 'forbidden_word', 'cheap', 'Not us.', (select id from auth."user" limit 1)) returning id`,
+        [brand],
+      )
+      rules.set(brand, rule.rows[0].id as string)
     }
   })
   afterAll(async () => stack?.close())
@@ -86,6 +119,9 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       .replace(':runId', runs.get(brand) ?? SOME_USER)
       .replace(':suggestionId', suggestions.get(brand) ?? SOME_USER)
       .replace(':documentId', documents.get(brand) ?? SOME_USER)
+      .replace(':questionId', questions.get(brand) ?? SOME_USER)
+      .replace(':factId', facts.get(brand) ?? SOME_USER)
+      .replace(':ruleId', rules.get(brand) ?? SOME_USER)
       .replace(/:[a-zA-Z]+/g, SOME_USER)
 
   it('finds the brand-scoped routes, so the checks below cannot pass on an empty list', () => {
@@ -103,6 +139,19 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       ['get', 'onboarding'],
       ['put', 'onboarding/intake'],
       ['post', 'onboarding/research'],
+      ['post', 'onboarding/questionnaire'],
+      ['get', 'onboarding/questionnaire'],
+      ['put', 'onboarding/questionnaire/answers/:questionId'],
+      ['post', 'onboarding/questionnaire/finish'],
+      ['get', 'onboarding/agent-questions'],
+      ['post', 'onboarding/agent-questions/:questionId/answer'],
+      ['post', 'onboarding/facts-rules'],
+      ['get', 'onboarding/facts-rules'],
+      ['post', 'onboarding/facts'],
+      ['post', 'onboarding/rules'],
+      ['post', 'onboarding/facts/:factId/replace'],
+      ['post', 'onboarding/facts/:factId/retire'],
+      ['post', 'onboarding/rules/:ruleId/turn-off'],
     ] as const) {
       expect(
         scoped.some((r) => r.method === method && r.path === `/brands/:brandId/${path}`),

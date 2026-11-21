@@ -1,0 +1,9 @@
+{
+  "agent": "questionnaire",
+  "version": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "maxTokens": 16000,
+  "jobClass": "production",
+  "resultType": "questionnaire.v1"
+}

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
+import type { Logger } from 'pino'
 import { withBrand, type Pool, type PoolClient } from '@mkt/db'
 import { AppError } from '../errors.ts'
 import type { AuditSink } from '../ports.ts'
 import { splitPdfOneAtATime, type PdfPart } from './pdf-parts.ts'
-import { researchRunIsOpen } from './research.ts'
+import { researchRunIsOpen } from './runs.ts'
 
 // Brand documents (spec 13, test 51). The size limits are the owner's decision (a PDF up to 100 MB, which
 // supersedes the spec's 10 MB) and match migration 0026's check.
@@ -58,6 +59,7 @@ export function matchesMagic(type: DocumentType, bytes: Buffer): boolean {
 
 interface Deps {
   audit: AuditSink
+  logger?: Pick<Logger, 'warn'>
 }
 
 export interface DocumentSummary {
@@ -89,7 +91,10 @@ export async function uploadDocument(
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   // Every PDF is opened here, so an unreadable one is refused whatever its size. This runs before the transaction:
   // the brand's onboarding row is not held while a large PDF is split, and a refused split has stored nothing.
-  const parts = mediaType === 'application/pdf' ? await splitPdfOneAtATime(bytes, PART_LIMITS) : []
+  const parts =
+    mediaType === 'application/pdf'
+      ? await splitPdfOneAtATime(bytes, PART_LIMITS, deps.logger ? { logger: deps.logger } : {})
+      : []
 
   return withBrand(pool, input.brandId, async (client) => {
     // Two uploads at once must not pass the limits together: the brand's onboarding row is locked while the
