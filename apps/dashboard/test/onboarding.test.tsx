@@ -593,6 +593,35 @@ describe('onboarding screens, driven', () => {
         expect(gets()).toBe(before)
       }
     })
+
+    it('says "Cost so far" while the run goes and "Cost" once it has ended', async () => {
+      dom.replies.push(reply('running', 'waiting'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain('Cost so far:')
+      dom.stop()
+      dom.start()
+      dom.replies.push(reply('done', 'done'))
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain('Cost:')
+      expect(dom.text()).not.toContain('Cost so far')
+    })
+
+    it('stops on a 401 and sends the owner to sign in', async () => {
+      const assign = vi.fn()
+      Object.defineProperty(window.location, 'assign', { value: assign, configurable: true })
+      dom.replies.push(reply('running', 'waiting'), {
+        status: 401,
+        body: { error: { code: 'not_signed_in', message: 'Sign in' } },
+      })
+      await dom.mount(<ResearchProgressScreen brandId={brandId} />, sessionAs('owner'))
+      await tick(5000)
+      expect(assign).toHaveBeenCalledTimes(1)
+      expect(assign.mock.calls[0]![0]).toMatch(/^\/sign-in/)
+      expect(dom.text()).toContain('You are signed out.')
+      const before = gets()
+      await tick(20_000)
+      expect(gets()).toBe(before)
+    })
   })
 
   it('the menu shows Onboarding to the platform owner only', () => {

@@ -189,7 +189,7 @@ export function ResearchProgressScreen({ brandId }: { brandId: string }) {
               </li>
             </ul>
           </div>
-          <p className="sub mt-4">{`Cost so far: ${costWords(data.cost)}`}</p>
+          <p className="sub mt-4">{`${isOpen(research) ? 'Cost so far' : 'Cost'}: ${costWords(data.cost)}`}</p>
           {couldNotFinish ? (
             <div className="callout warn mt-4 stack" role="alert">
               <p>Research could not finish. Check the agents’ releases, then start research again.</p>

@@ -72,8 +72,14 @@ export async function createJob(
   deps: Pick<JobsDeps, 'queue' | 'backlogLimit'>,
   brandId: string,
   job: NewJob,
+  // A step that finishes work already admitted (the research merge) is not refused for a backlog.
+  options: { backpressure?: boolean } = {},
 ): Promise<string> {
-  if (BACKPRESSURE.has(job.jobClass) && (await deps.queue.depth(job.jobClass)) >= deps.backlogLimit) {
+  if (
+    options.backpressure !== false &&
+    BACKPRESSURE.has(job.jobClass) &&
+    (await deps.queue.depth(job.jobClass)) >= deps.backlogLimit
+  ) {
     throw new AppError(503, 'queue_busy', 'Too much work is waiting. Try again shortly.')
   }
   // Kill switch ordering (spec 13). The brand row is taken FOR SHARE here, and set/release take it FOR UPDATE

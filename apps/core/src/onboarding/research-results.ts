@@ -173,13 +173,20 @@ export async function maybeStartMerge(
       .map((r) => r.group)
       .sort((a, b) => order(a) - order(b)),
   })
-  return createJob(client, deps, input.brandId, {
-    runId: input.runId,
-    jobClass: 'production',
-    input: mergeInput,
-    expectedResultType: MERGE_RESULT_TYPE,
-    agent: 'research_merge',
-  })
+  return createJob(
+    client,
+    deps,
+    input.brandId,
+    {
+      runId: input.runId,
+      jobClass: 'production',
+      input: mergeInput,
+      expectedResultType: MERGE_RESULT_TYPE,
+      agent: 'research_merge',
+    },
+    // The last step of a run whose groups already passed the check: refusing it would strand the run.
+    { backpressure: false },
+  )
 }
 
 // ---- research.v1 ----

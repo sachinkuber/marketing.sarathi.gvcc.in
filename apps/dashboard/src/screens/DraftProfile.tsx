@@ -61,6 +61,7 @@ function ItemCard(props: {
             id={`edit-${item.key}`}
             className={`input dp-edit${empty ? ' err' : ''}`}
             value={draft}
+            maxLength={4000}
             aria-invalid={empty ? true : undefined}
             onChange={(event) => {
               setDraft(event.target.value)
@@ -75,7 +76,7 @@ function ItemCard(props: {
               disabled={props.busy}
               onClick={() => {
                 if (draft.trim() === '') return setEmpty(true)
-                props.onDecide(item, { decision: 'edited', value: draft })
+                props.onDecide(item, { decision: 'edited', value: draft.trim() })
               }}
             >
               Save edit
@@ -265,12 +266,17 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
           <p>What the research found about this brand. Accept it, put it in your own words, or reject it.</p>
         </div>
       </div>
-      {loadError ? (
-        <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
-      ) : items === null ? (
-        <p className="muted">Loading…</p>
+      {items === null ? (
+        loadError ? (
+          <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
+        ) : (
+          <p className="muted">Loading…</p>
+        )
       ) : (
         <div className="stack">
+          {loadError ? (
+            <LoadError what="the draft profile" error={loadError as ApiError} onRetry={() => void load()} />
+          ) : null}
           {notice ? (
             <p className="callout ok" role="status">
               {notice}
