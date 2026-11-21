@@ -623,6 +623,8 @@ export const suggestionItem = z.strictObject({
   sources: z.array(suggestionSource),
 })
 export const suggestionsReply = z.strictObject({ suggestions: z.array(suggestionItem) })
+// Add as a case (a correction or an example): the id of the candidate case it made.
+export const caseAddedReply = z.strictObject({ caseId: z.string() })
 export const suggestionDecisionReply = z.strictObject({ createdId: z.string().nullable() })
 
 // --- facts and rules (M10) ----------------------------------------------------------------------------------

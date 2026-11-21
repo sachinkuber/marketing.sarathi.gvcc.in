@@ -22,6 +22,7 @@ import {
   briefChoicesStartedReply,
   briefStartedReply,
   changesRequestedReply,
+  caseAddedReply,
   decisionReply,
   homeReply,
   intakeSavedReply,
@@ -425,6 +426,17 @@ describe('the dashboard schemas accept the core’s replies', () => {
       })
       expect(decided.status).toBe(200)
       expect(suggestionDecisionReply.parse(decided.json).createdId).toEqual(expect.any(String))
+      // The edited suggestion becomes a candidate case, and an example is stored too (C8).
+      const asCase = await owner.request('POST', `${base()}/suggestions/${mine.id}/case`, {
+        body: { note: 'wrong name' },
+      })
+      expect(asCase.status).toBe(200)
+      caseAddedReply.parse(asCase.json)
+      const example = await owner.request('POST', `${base()}/examples`, {
+        body: { example: 'bad', text: 'Buy now, cheap!' },
+      })
+      expect(example.status).toBe(200)
+      caseAddedReply.parse(example.json)
     })
 
     it('documents: a split PDF in the upload reply and the list, then a delete', async () => {
