@@ -28,6 +28,14 @@ const CONFLICTS: Record<string, string> = {
 export const BRIEF_KIND = 'strategy_brief'
 export const BRIEF_OWNER_ONLY = 'Only the platform owner decides on the strategy brief.'
 
+// What the screen says after an ask for changes succeeded.
+export function changesNotice(kind: string, runId: string | null): string {
+  if (kind !== BRIEF_KIND) return 'Comment saved.'
+  return runId
+    ? 'Your comment was sent. A new version will come back to your inbox.'
+    : 'Comment saved. The brief was revised three times; approve it, reject it, or write it again from onboarding.'
+}
+
 // Who may decide on an item: the owner, brand admins and approvers; on the strategy brief, the platform owner alone.
 export function canDecideOn(kind: string, role: string | null | undefined): boolean {
   if (kind === BRIEF_KIND) return role === 'owner'

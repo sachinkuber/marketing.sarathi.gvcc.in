@@ -8,8 +8,8 @@ import { useShell } from '../frame/shell-context'
 import {
   approveShown,
   askForChanges,
-  BRIEF_KIND,
   canDecideOn,
+  changesNotice,
   commentOn,
   loadItem,
   rejectShown,
@@ -123,12 +123,7 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
           onAskChanges={(shown, text) =>
             void finish(
               () => askForChanges(brandId, itemId, shown, text),
-              (runId) =>
-                item.kind !== BRIEF_KIND
-                  ? 'Comment saved.'
-                  : runId
-                    ? 'Your comment was sent. A new version will come back to your inbox.'
-                    : 'Comment saved. The brief was revised three times; approve it, reject it, or write it again from onboarding.',
+              (runId) => changesNotice(item.kind, runId),
             )
           }
           onEdit={(shown, values) => {

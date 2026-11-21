@@ -123,7 +123,13 @@ function BriefBody({ body }: { body: NonNullable<Version['payload']['body']> }) 
       {body.map((block, i) => {
         const text = typeof block['text'] === 'string' ? block['text'] : ''
         if (block.type === 'heading')
-          return block['level'] === 1 ? <h3 key={i}>{text}</h3> : <h4 key={i}>{text}</h4>
+          // The brief's sections are level 2 and its audience and theme names level 3; the page's own
+          // headings take h1 and h2, so 1 and 2 are h3 and 3 (or an unknown level) is h4.
+          return block['level'] === 1 || block['level'] === 2 ? (
+            <h3 key={i}>{text}</h3>
+          ) : (
+            <h4 key={i}>{text}</h4>
+          )
         if (block.type === 'paragraph') return <p key={i}>{text}</p>
         if (block.type === 'quote') return <blockquote key={i}>{text}</blockquote>
         if (block.type === 'list') {

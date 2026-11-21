@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { setCsrfToken } from '../src/api/client'
 import { ItemReview, hashPrefix, shownVersion } from '../src/screens/ItemReview'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ACTIONS } from '../src/screens/audit-words'
 import {
   approveShown,
   askForChanges,
   canDecideOn,
+  changesNotice,
   editValues,
   editedPayload,
   rejectShown,
@@ -87,7 +91,25 @@ const review = (state: State, extra: Partial<Parameters<typeof ItemReview>[0]> =
 
 const approveButton = (html: string) => html.match(/<button[^>]*>Approve<\/button>/)?.[0] ?? ''
 
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return sourceFiles(path)
+    return /\.tsx?$/.test(entry.name) ? [path] : []
+  })
+}
+
 describe('audit words', () => {
+  it('every action the core can record has a label', () => {
+    const core = join(dirname(fileURLToPath(import.meta.url)), '../../core/src')
+    const found = new Set<string>()
+    for (const file of sourceFiles(core)) {
+      for (const m of readFileSync(file, 'utf8').matchAll(/action: '([a-z_]+\.[a-z_]+)'/g)) found.add(m[1]!)
+    }
+    expect(found.size).toBeGreaterThan(40)
+    expect([...found].filter((action) => !ACTIONS[action])).toEqual([])
+  })
+
   it('every new audit action has a label', () => {
     for (const action of [
       'onboarding.brief_choices_started',
@@ -239,9 +261,11 @@ const briefItem = (): ContentItem => {
           kind: 'strategy_brief',
           title: 'Strategy brief',
           body: [
-            { type: 'heading', level: 1, text: 'Positioning' },
+            // The levels strategyBriefPayload (packages/shared) writes: 2 for sections, 3 for audience
+            // and theme names.
+            { type: 'heading', level: 2, text: 'Positioning' },
             { type: 'paragraph', text: 'We sell coatings to schools.' },
-            { type: 'heading', level: 2, text: 'Priorities' },
+            { type: 'heading', level: 3, text: 'Priorities' },
             { type: 'list', ordered: true, items: ['Win the district', 'Keep the care plan'] },
             { type: 'list', ordered: false, items: ['Films', 'Coatings'] },
           ],
@@ -297,6 +321,26 @@ describe('a strategy brief', () => {
 })
 
 describe('asking for changes', () => {
+  it('says the right thing after an ask succeeded', () => {
+    expect(changesNotice('strategy_brief', 'r1')).toBe(
+      'Your comment was sent. A new version will come back to your inbox.',
+    )
+    expect(changesNotice('strategy_brief', null)).toBe(
+      'Comment saved. The brief was revised three times; approve it, reject it, or write it again from onboarding.',
+    )
+    expect(changesNotice('summary', null)).toBe('Comment saved.')
+    expect(changesNotice('summary', 'r1')).toBe('Comment saved.')
+  })
+
+  it('the Ask for changes button is disabled unless the version awaits approval', () => {
+    const button = (html: string) => html.match(/<button[^>]*>Ask for changes<\/button>/)?.[0] ?? ''
+    expect(button(review('awaiting_approval'))).not.toMatch(/disabled/)
+    expect(button(review('rejected'))).toMatch(/disabled/)
+    expect(button(review('check_failed'))).toMatch(/disabled/)
+    expect(button(review('awaiting_approval', { canDecide: false }))).toBe('')
+    expect(button(review('awaiting_approval', { busy: true }))).toMatch(/disabled/)
+  })
+
   it('ask for changes needs a comment and posts it', async () => {
     const shown = shownVersion(item('awaiting_approval'))!
     expect(await askForChanges(brandId, itemId, shown, '   ')).toEqual({
