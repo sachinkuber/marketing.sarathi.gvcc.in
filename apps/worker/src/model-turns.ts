@@ -21,6 +21,10 @@ export interface TurnCaps {
   searches: number
   fetches: number
   maxContinuations?: number
+  // The searches the whole run may use (the definition's searchesPerBrandStep). With it, a request's searches are
+  // also limited to what the run has left: the cap less the searches recorded before this attempt
+  // (ctx.runSearches) and the ones made so far in this attempt. Absent: no run limit.
+  runSearchCap?: number
 }
 
 export interface TurnsResult {
@@ -56,12 +60,19 @@ export async function modelTurns(
     const timeoutMs = attemptTimeoutMs(ctx, request.timeoutMs)
 
     const used = (tool: ModelTool): number => (tool.type === 'web_search_20260209' ? searches : fetches)
+    // The turn's cap, and for web_search also what the run has left (M2): the run cap less the searches
+    // recorded before this attempt and the ones made so far in it. Both are for "uses still allowed".
     const cap = (tool: ModelTool): number =>
       tool.type === 'web_search_20260209' ? caps.searches : caps.fetches
-    // A tool whose budget is spent is left out. Exception: a continuation whose history holds that tool's
-    // blocks keeps it with max_uses 1, because it is not known whether the API accepts such a history with
-    // the tool omitted or with max_uses 0 (see the live probe in anthropic-live.test.ts). The cost is that a
-    // spent tool may be used once more per continuation.
+    const runLeft = (tool: ModelTool): number =>
+      tool.type === 'web_search_20260209' && caps.runSearchCap !== undefined
+        ? caps.runSearchCap - (ctx.runSearches ?? 0) - searches
+        : Number.POSITIVE_INFINITY
+    // A tool whose budget is spent (its turn cap or the run's) is left out. Exception (R29): a continuation
+    // whose history holds that tool's blocks keeps it with max_uses 1, because it is not known whether the API
+    // accepts such a history with the tool omitted or with max_uses 0 (see the R13 probe in
+    // anthropic-live.test.ts, not yet run). So the run cap is enforced at run time, with at most one search over
+    // it per continuation until that probe is run.
     const inHistory = (tool: ModelTool): boolean =>
       content.some((b) => {
         const block = b as { type?: unknown; name?: unknown }
@@ -69,7 +80,7 @@ export async function modelTurns(
       })
     const tools: ModelTool[] = []
     for (const tool of request.tools ?? []) {
-      const left = Math.min(tool.maxUses, cap(tool) - used(tool))
+      const left = Math.min(tool.maxUses, cap(tool) - used(tool), runLeft(tool))
       if (left > 0) tools.push({ ...tool, maxUses: left })
       else if (inHistory(tool)) tools.push({ ...tool, maxUses: 1 })
     }

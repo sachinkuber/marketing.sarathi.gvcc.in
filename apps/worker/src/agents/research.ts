@@ -148,6 +148,15 @@ const agents = {
 }
 // Checked when the module loads, so a definition without its caps stops the worker starting.
 const CAPS = requireCaps(agents.research.definition)
+// The searches one research run may use in all (the definition's searchesPerBrandStep), enforced at run time.
+const RUN_SEARCH_CAP = requireRunSearchCap(agents.research.definition)
+
+export function requireRunSearchCap(definition: { caps?: { searchesPerBrandStep?: number } }): number {
+  const cap = definition.caps?.searchesPerBrandStep
+  if (cap === undefined)
+    throw new Error('agents/research/definition.json: caps.searchesPerBrandStep is required')
+  return cap
+}
 
 // A reply that is not a valid result (no JSON, a schema refusal, another group's result). Not quoted: it is
 // model output over untrusted pages and documents.
@@ -209,6 +218,71 @@ function readGroupReply(text: string, group: SourceGroup): ResearchGroupResult {
   if (!result.success) throw new ResearchReplyInvalid(issues(result.error))
   if (result.data.group !== group) throw new ResearchReplyInvalid(`group: must be "${group}".`)
   return result.data
+}
+
+// An address as compared for I6: lower-case scheme and host, a leading `www.` dropped, no fragment and no
+// trailing slash. Text that is not an address is compared as its trimmed self.
+export function normaliseAddress(address: string): string {
+  const text = address.trim()
+  let url: URL
+  try {
+    url = new URL(text)
+  } catch {
+    return text
+  }
+  const host = url.host.replace(/^www\./, '')
+  return `${url.protocol}//${host}${url.pathname.replace(/\/+$/, '')}${url.search}`
+}
+
+// The addresses the provider returned in a job: the pages given in the message (`given`), the URL of each
+// `web_fetch_tool_result` and the URL of each result in a `web_search_tool_result`, in every content block of
+// every turn (paused turns included), normalised.
+export function returnedAddresses(content: unknown[], given: string[] = []): Set<string> {
+  const found = new Set<string>(given.map(normaliseAddress))
+  const add = (url: unknown): void => {
+    if (typeof url === 'string' && url !== '') found.add(normaliseAddress(url))
+  }
+  for (const entry of content) {
+    if (entry === null || typeof entry !== 'object') continue
+    const block = entry as { type?: unknown; content?: unknown }
+    if (block.type === 'web_fetch_tool_result') {
+      const result = block.content as { url?: unknown } | null | undefined
+      if (result !== null && typeof result === 'object') add(result.url)
+    } else if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+      for (const item of block.content as unknown[])
+        if (item !== null && typeof item === 'object') add((item as { url?: unknown }).url)
+    }
+  }
+  return found
+}
+
+const NOT_READ = 'Not read in this run.'
+const WEB_KINDS = new Set(['site', 'social', 'search', 'competitor'])
+
+// I6: a web source recorded as read must be an address the provider returned in this job. One that is not (the
+// model wrote it from memory or made it up) becomes an error source, the refs to it are dropped, and a finding
+// left with none moves to unsettled, as R30 does for a document.
+export function checkReadAddresses(result: ResearchGroupResult, returned: Set<string>): ResearchGroupResult {
+  const dropped = new Set<string>()
+  const sources = result.sources.map((source) => {
+    if (!WEB_KINDS.has(source.kind) || source.result !== 'read' || source.address === null) return source
+    if (returned.has(normaliseAddress(source.address))) return source
+    dropped.add(source.ref)
+    return { ...source, result: 'error' as const, extract: NOT_READ }
+  })
+  if (dropped.size === 0) return result
+  const kept: ResearchGroupResult['findings'] = []
+  const unsettled = [...result.unsettled]
+  const lost: ResearchGroupResult['findings'][number]['key'][] = []
+  for (const found of result.findings) {
+    const refs = found.sourceRefs.filter((ref) => !dropped.has(ref))
+    if (refs.length > 0) kept.push({ ...found, sourceRefs: refs })
+    else lost.push(found.key)
+  }
+  for (const key of lost)
+    if (!kept.some((f) => f.key === key) && !unsettled.some((entry) => entry.key === key))
+      unsettled.push({ key, why: 'The source was not read in this run; ask the owner.' })
+  return { ...result, sources, findings: kept, unsettled }
 }
 
 function readMergeReply(text: string): ResearchResult {
@@ -288,14 +362,9 @@ interface Item {
 
 const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3)
 
-// The provider's per-image limit (5 MB) may be measured on the base64 text, about 3.75 MiB of image (R41). An
-// image over it is not sent: one refused image would fail the whole documents group. It is recorded as an error
-// source instead, so the owner sees what to do, and the rest of the documents are read. The owner's upload limit
-// (5 MB of image) is unchanged.
-export const IMAGE_MAX_BASE64 = 5_242_880
-export const IMAGE_TOO_LARGE = 'Too large for the AI to read. Save it under 3.7 MB and upload it again.'
-const tooLargeImage = (item: Item): boolean =>
-  item.mediaType.startsWith('image/') && item.base64Length > IMAGE_MAX_BASE64
+// Images are not size-checked here (R41, relaxed): the 2026-11-21 probe showed the provider takes a 4.69 MB
+// image, so its limit is on raw bytes, and the owner's upload limit (5,242,880 bytes) already keeps every image
+// within it. A batch is bounded by its total base64 size below.
 
 // A document source's address: the file's plain name, with a part's pages.
 function documentAddress(item: Item): string {
@@ -442,8 +511,7 @@ export function joinDocumentResults(results: ResearchGroupResult[]): ResearchGro
 
 async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promise<ResearchGroupResult> {
   const items = planItems(await ctx.documents())
-  const skipped = items.filter(tooLargeImage)
-  const batches = planBatches(items.filter((item) => !tooLargeImage(item)))
+  const batches = planBatches(items)
   // No web tools: the documents are the only source.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { tools: _tools, ...definition } = agents.research.definition
@@ -500,22 +568,6 @@ async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promi
     })
     results.push({ ...result, sources, findings, unsettled })
   }
-  // The images not sent, each as an error source; joined after the batches, so they are kept while there is room.
-  if (skipped.length > 0)
-    results.push({
-      group: 'documents',
-      sources: skipped.map((item, i) => ({
-        ref: `s${i + 1}`,
-        kind: 'document' as const,
-        address: documentAddress(item),
-        documentId: item.documentId,
-        result: 'error' as const,
-        extract: IMAGE_TOO_LARGE,
-        flagged: null,
-      })),
-      findings: [],
-      unsettled: [],
-    })
   if (results.length === 0) return { group: 'documents', sources: [], findings: [], unsettled: [] }
   try {
     return joinDocumentResults(results)
@@ -529,10 +581,16 @@ export const researchGroupHandler: JobHandler = async (ctx) => {
   if (input.group === 'documents')
     return { type: 'research_group.v1', result: await documentsGroup(ctx, input) }
   const request = buildResearchGroupRequest(agents.research, input)
-  const turns = await modelTurns(ctx, input.group, request, { ...CAPS, maxContinuations: 6 })
-  const result = await readWithRepair(ctx, input.group, request, turns.text, (text) =>
+  const turns = await modelTurns(ctx, input.group, request, {
+    ...CAPS,
+    runSearchCap: RUN_SEARCH_CAP,
+    maxContinuations: 6,
+  })
+  const parsed = await readWithRepair(ctx, input.group, request, turns.text, (text) =>
     readGroupReply(text, input.group),
   )
+  // The message gives no pages to a job (only the evaluation does), so the returned addresses are the tool results'.
+  const result = checkReadAddresses(parsed, returnedAddresses(turns.content))
   return { type: 'research_group.v1', result }
 }
 

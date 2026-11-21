@@ -135,11 +135,20 @@ function scriptedModel(): ModelClient {
     async send(request) {
       const reply = { ...(await standIn.send(request)), messageId: `msg_research_${(n += 1)}` }
       if (!request.tools?.length) return reply
+      // The pages the reply cites were fetched in this turn (I6: a read source must be one the provider returned).
+      const first = request.messages[0]?.content
+      const group = /^Research group: (\w+)\./.exec(typeof first === 'string' ? first : '')?.[1]
+      const fetched = (group ? (GROUP_REPLIES[group]?.sources ?? []) : []).map((s, i) => ({
+        type: 'web_fetch_tool_result',
+        tool_use_id: `srvtoolu_web_fetch_${i}`,
+        content: { type: 'web_fetch_result', url: s.address },
+      }))
       return {
         ...reply,
         content: [
           ...uses('web_search', SEARCHES),
           ...uses('web_fetch', FETCHES),
+          ...fetched,
           { type: 'text', text: reply.text },
         ],
         usage: { ...reply.usage, serverToolSearches: SEARCHES, serverToolFetches: FETCHES },

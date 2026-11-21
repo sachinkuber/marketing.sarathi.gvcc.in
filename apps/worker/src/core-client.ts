@@ -14,6 +14,8 @@ export interface StartedAttempt {
   filesHash: string | null
   // When the attempt token expires, in epoch seconds. Absent from a core that does not send it.
   expiresAt?: number
+  // The web searches recorded so far by every job of the job's run. Absent from a core that does not send it.
+  runSearches?: number
   // The owner's answers to the questions the job asked, oldest first. Absent from a core that does not send them.
   answers?: AgentAnswer[]
 }
@@ -151,6 +153,7 @@ export const replySchemas = {
       agent: z.string().nullable(),
       filesHash: z.string().nullable(),
       expiresAt: z.number().int().optional(),
+      runSearches: z.number().int().min(0).optional(),
       answers: z
         .array(
           z.object({

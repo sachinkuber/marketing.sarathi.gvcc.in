@@ -132,6 +132,9 @@ export interface JobContext {
   input: unknown
   // When the attempt's token expires: nothing may be started that cannot end before it.
   deadline: Date
+  // The web searches the job's run had recorded when this attempt started (all its jobs, earlier attempts
+  // included). Absent: none known. modelTurns holds each request to the run's search cap less this.
+  runSearches?: number
   // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9). The step that
   // decides whether to ask must carry them in its request (in its messages, say): a step whose request is unchanged
   // replays its checkpoint on the next attempt, decides the same way again, and asks again after every answer.
@@ -233,6 +236,7 @@ export async function runJob(
     jobClass: job.jobClass,
     input: started.input,
     deadline: started.expiresAt === undefined ? new Date(8.64e15) : new Date(started.expiresAt * 1000),
+    runSearches: started.runSearches ?? 0,
     answers: started.answers ?? [],
     async ask(question) {
       const { questionId } = await deps.core.raiseQuestion(job.id, started.token, question)

@@ -13,13 +13,14 @@ const usage = (searches: number, fetches = 0) => ({
   serverToolFetches: fetches,
 })
 
-function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_600_000)) {
+function script(replies: ModelStepResult[], deadline = new Date(Date.now() + 3_600_000), runSearches = 0) {
   const seen: { step: string; request: ModelRequest }[] = []
   const ctx: JobContext = {
     jobId: 'j',
     jobClass: 'production',
     input: null,
     deadline,
+    runSearches,
     async modelStep(step, request) {
       seen.push({ step, request })
       const next = replies[seen.length - 1]
@@ -87,6 +88,63 @@ describe('modelTurns', () => {
       { type: 'web_search_20260209', maxUses: 1 },
       { type: 'web_fetch_20260209', maxUses: 10 },
     ])
+  })
+
+  it('the run cap removes web_search once the run has used its searches', async () => {
+    const { ctx, seen } = script(
+      [{ text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) }],
+      undefined,
+      150,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // No web_search tool at all; fetch stays.
+    expect(seen[0]!.request.tools).toEqual([{ type: 'web_fetch_20260209', maxUses: 10 }])
+  })
+
+  it('the run cap limits a request to what the run has left', async () => {
+    const { ctx, seen } = script(
+      [{ text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) }],
+      undefined,
+      141,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    expect(seen[0]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 9 })
+  })
+
+  it('the run cap shares the remainder across turns', async () => {
+    const { ctx, seen } = script(
+      [
+        {
+          text: '',
+          stopReason: 'pause_turn',
+          content: [{ type: 'text', text: 'a' }],
+          usage: usage(6),
+        },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // 10 left for the run: the first request may use 10; after 6 are made, the second may use 4.
+    expect(seen[0]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 10 })
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 4 })
+  })
+
+  // R29: the exception to "no web_search once the run cap is spent" is a continuation whose history already
+  // holds web_search blocks: it keeps the tool with max_uses 1 (the API may refuse that history without it).
+  it('a spent run cap still keeps web_search at max_uses 1 in a continuation whose history holds its blocks', async () => {
+    const blocks = [{ type: 'server_tool_use', name: 'web_search' }]
+    const { ctx, seen } = script(
+      [
+        { text: '', stopReason: 'pause_turn', content: blocks, usage: usage(10) },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 1 })
   })
 
   it('gives each request its own copy of the messages', async () => {

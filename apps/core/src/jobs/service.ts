@@ -162,6 +162,9 @@ export interface StartedAttempt {
   filesHash: string | null
   // When the attempt token expires (epoch seconds): the worker plans its requests to end before it.
   expiresAt: number
+  // The web searches recorded so far by every job of the job's run (all attempts): the worker holds each
+  // request to the run's search cap less this (research: searchesPerBrandStep).
+  runSearches: number
   // The owner's answers to the questions the job asked, oldest first; empty for a job that never asked.
   answers: AgentAnswer[]
 }
@@ -316,6 +319,11 @@ export async function startAttempt(
       [row.run_id, jobId, settledTypes(deps)],
     )
     const answers = await answersOf(client, brandId, jobId)
+    const used = await client.query<{ searches: number }>(
+      'select coalesce(sum(server_tool_searches), 0)::int as searches from app.model_call where brand_id = $1 and run_id = $2',
+      [brandId, row.run_id],
+    )
+    const runSearches = used.rows[0]?.searches ?? 0
 
     const issuedAt = Math.floor(deps.now().getTime() / 1000)
     const claims: AttemptClaims = {
@@ -339,6 +347,7 @@ export async function startAttempt(
       agent: row.agent,
       filesHash: row.files_hash,
       expiresAt: claims.expiresAt,
+      runSearches,
       answers,
     }
   })

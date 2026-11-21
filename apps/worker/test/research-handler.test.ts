@@ -5,8 +5,11 @@ import type { JobContext, ModelStepResult } from '../src/runner.ts'
 import {
   BATCH_MAX_BASE64,
   joinDocumentResults,
+  normaliseAddress,
+  returnedAddresses,
   researchGroupHandler,
   requireCaps,
+  requireRunSearchCap,
   researchMergeHandler,
   ResearchReplyInvalid,
 } from '../src/agents/research.ts'
@@ -58,19 +61,35 @@ function stub(input: unknown, script: Script, docs: Partial<JobContext> = {}) {
   }
   return { ctx, seen }
 }
+// A final reply whose turn fetched every page the `source()` helper names (s1 to s9), so a web group's
+// sources pass the address check (I6) unless a test says otherwise.
 const ends = (text: string): ModelStepResult => ({
-  text,
-  stopReason: 'end_turn',
-  content: [{ type: 'text', text }],
-  usage: {
-    inputTokens: 1,
-    outputTokens: 1,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    serverToolSearches: 0,
-    serverToolFetches: 0,
-  },
+  ...bare(text),
+  content: [
+    ...Array.from({ length: 9 }, (_v, i) => ({
+      type: 'web_fetch_tool_result',
+      tool_use_id: `f${i + 1}`,
+      content: { type: 'web_fetch_result', url: `https://shop.example/s${i + 1}` },
+    })),
+    { type: 'text', text },
+  ],
 })
+// A final reply that returned nothing from the web.
+function bare(text: string): ModelStepResult {
+  return {
+    text,
+    stopReason: 'end_turn',
+    content: [{ type: 'text', text }],
+    usage: {
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      serverToolSearches: 0,
+      serverToolFetches: 0,
+    },
+  }
+}
 
 describe('the research group handler', () => {
   it('the site group sends both web tools and returns a valid group result', async () => {
@@ -265,109 +284,35 @@ describe('the documents group', () => {
     expect(seen[0]!.step).toBe('documents#0')
   })
 
-  // R41: the provider's 5 MB image limit may be measured on the base64 text (about 3.75 MiB of image). An image
-  // whose base64 is over 5,242,880 characters is not sent: it is recorded as an error source the owner can act on,
-  // and the rest of the batch is read as usual.
-  const TOO_LARGE = 'Too large for the AI to read. Save it under 3.7 MB and upload it again.'
-  const photo = {
-    id: DOC,
-    fileName: 'shop front.jpg',
-    mediaType: 'image/jpeg',
-    sizeBytes: Math.round(4.5 * 1024 * 1024),
-    parts: [],
-  }
-  const leaflet = { id: DOC2, fileName: 'leaflet.pdf', mediaType: 'application/pdf', sizeBytes: 5, parts: [] }
-  const citesEach: Script = (_step, request) => {
-    const content = request.messages[0]!.content as { type: string }[]
-    const n = content.filter((b) => b.type === 'document' || b.type === 'image').length
-    const sources = Array.from({ length: n }, (_v, i) =>
-      source(`s${i + 1}`, { kind: 'document', address: null, documentId: DOC2, extract: `doc ${i + 1}` }),
-    )
-    return ends(
-      JSON.stringify(
-        groupResult('documents', {
-          sources,
-          findings: [
-            finding(
-              'what_they_sell',
-              'Pumps',
-              sources.map((x) => x.ref),
-            ),
-          ],
-        }),
-      ),
-    )
-  }
-
-  it('an image too large for the provider is skipped and recorded as an error; the rest is still sent', async () => {
-    const read: string[] = []
-    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC, DOC2] }, citesEach, {
-      documents: async () => [photo, leaflet],
-      document: async (id) => {
-        read.push(id)
-        if (id === DOC) throw new Error('the too-large image must not be read')
-        return { mediaType: 'application/pdf', bytes: Buffer.from('hello') }
-      },
-    })
-    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
-    expect(read).toEqual([DOC2])
-    expect(seen).toHaveLength(1)
-    const content = seen[0]!.request.messages[0]!.content as { type: string; text?: string }[]
-    expect(content.filter((b) => b.type === 'image')).toHaveLength(0)
-    expect(content.filter((b) => b.type === 'document')).toHaveLength(1)
-    expect(
-      content
-        .filter((b) => b.type === 'text')
-        .map((b) => b.text)
-        .join('\n'),
-    ).not.toContain('shop front.jpg')
-    expect(researchGroupResultSchema.safeParse(out).success).toBe(true)
-    expect(out.findings).toHaveLength(1)
-    const skipped = out.sources.find((s) => s.documentId === DOC)
-    expect(skipped).toEqual({
-      ref: expect.stringMatching(/^s\d+$/),
-      kind: 'document',
-      address: 'shop front.jpg',
-      documentId: DOC,
-      result: 'error',
-      extract: TOO_LARGE,
-      flagged: null,
-    })
-    expect(out.sources.find((s) => s.documentId === DOC2)?.result).toBe('read')
-  })
-
-  it('a job whose only document is a too-large image makes no model call and records the error', async () => {
-    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC] }, citesEach, {
+  // R41, relaxed: the 2026-11-21 probe showed the provider accepts a 4.69 MB image, so the limit is on raw
+  // bytes. An image is sent when it is within the 5,242,880-byte upload limit.
+  it('an image within the upload limit is sent', async () => {
+    const photo = {
+      id: DOC,
+      fileName: 'shop front.jpg',
+      mediaType: 'image/jpeg',
+      sizeBytes: 5_242_880,
+      parts: [],
+    }
+    const citesImage: Script = () =>
+      ends(
+        JSON.stringify(
+          groupResult('documents', {
+            sources: [source('s1', { kind: 'document', address: null, documentId: DOC })],
+            findings: [finding('what_they_sell', 'Pumps', ['s1'])],
+          }),
+        ),
+      )
+    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC] }, citesImage, {
       documents: async () => [photo],
+      document: async () => ({ mediaType: 'image/jpeg', bytes: Buffer.alloc(5_242_880) }),
     })
     const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
-    expect(seen).toHaveLength(0)
-    expect(researchGroupResultSchema.safeParse(out).success).toBe(true)
-    expect(out.sources).toEqual([
-      {
-        ref: 's1',
-        kind: 'document',
-        address: 'shop front.jpg',
-        documentId: DOC,
-        result: 'error',
-        extract: TOO_LARGE,
-        flagged: null,
-      },
-    ])
-    expect(out.findings).toEqual([])
-  })
-
-  it('an image whose base64 is exactly 5,242,880 characters is still sent', async () => {
-    // 3,932,160 bytes encode to exactly 5,242,880 base64 characters.
-    const edge = { ...photo, sizeBytes: 3_932_160 }
-    const { ctx, seen } = stub({ group: 'documents', intake, documentIds: [DOC] }, citesEach, {
-      documents: async () => [edge],
-      document: async () => ({ mediaType: 'image/jpeg', bytes: Buffer.alloc(3_932_160) }),
-    })
-    await researchGroupHandler(ctx)
     expect(seen).toHaveLength(1)
     const content = seen[0]!.request.messages[0]!.content as { type: string; source?: { data: string } }[]
-    expect(content.find((b) => b.type === 'image')!.source!.data).toHaveLength(5_242_880)
+    // 5,242,880 raw bytes are 6,990,508 base64 characters.
+    expect(content.find((b) => b.type === 'image')!.source!.data).toHaveLength(6_990_508)
+    expect(out.sources.map((s) => s.result)).toEqual(['read'])
   })
 
   it('a job that lists no documents makes no model call', async () => {
@@ -771,6 +716,111 @@ describe('joining keeps what the owner should see', () => {
   })
 })
 
+// I6: a web source recorded as read must be an address the provider returned in this job.
+const fetched = (url: string) => ({
+  type: 'web_fetch_tool_result',
+  tool_use_id: 'f1',
+  content: { type: 'web_fetch_result', url, content: { type: 'document' } },
+})
+const searched = (...urls: string[]) => ({
+  type: 'web_search_tool_result',
+  tool_use_id: 'q1',
+  content: urls.map((url) => ({ type: 'web_search_result', url, title: 't' })),
+})
+const endsWith = (text: string, content: unknown[]): ModelStepResult => ({
+  ...bare(text),
+  content: [...content, { type: 'text', text }],
+})
+
+describe('the addresses the provider returned (I6)', () => {
+  it('normalises scheme and host case, a leading www., the fragment and a trailing slash', () => {
+    expect(normaliseAddress('HTTPS://WWW.Shop.Example/About/#team')).toBe('https://shop.example/About')
+    expect(normaliseAddress('https://shop.example/')).toBe('https://shop.example')
+    expect(normaliseAddress('https://shop.example/a?b=1')).toBe('https://shop.example/a?b=1')
+    // Not an address: compared as the trimmed text.
+    expect(normaliseAddress(' not a url ')).toBe('not a url')
+  })
+
+  it('collects fetched pages and search result addresses from every block, and the given pages', () => {
+    const set = returnedAddresses(
+      [
+        fetched('https://www.Shop.example/a/'),
+        searched('https://news.example/x#top', 'https://other.example/y'),
+        { type: 'text', text: 'https://not-a-result.example/' },
+        { type: 'web_fetch_tool_result', content: { type: 'web_fetch_tool_error', error_code: 'x' } },
+        { type: 'web_search_tool_result', content: { type: 'web_search_tool_result_error' } },
+        null,
+      ],
+      ['https://given.example/p'],
+    )
+    expect([...set].sort()).toEqual([
+      'https://given.example/p',
+      'https://news.example/x',
+      'https://other.example/y',
+      'https://shop.example/a',
+    ])
+  })
+})
+
+describe('the source address check', () => {
+  const input = { group: 'site', intake }
+
+  it('a read source whose address the provider never returned becomes an error and its findings lose it', async () => {
+    const result = groupResult('site', {
+      sources: [source('s1'), source('s2', { address: 'https://invented.example/page' })],
+      findings: [finding('business_name', 'Shop', ['s1', 's2']), finding('what_they_sell', 'Pumps', ['s2'])],
+    })
+    const { ctx } = stub(input, () => endsWith(JSON.stringify(result), [fetched('https://shop.example/s1')]))
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(researchGroupResultSchema.safeParse(out).success).toBe(true)
+    expect(out.sources.find((s) => s.ref === 's1')!.result).toBe('read')
+    expect(out.sources.find((s) => s.ref === 's2')).toMatchObject({
+      result: 'error',
+      extract: 'Not read in this run.',
+      flagged: null,
+    })
+    expect(out.findings).toEqual([finding('business_name', 'Shop', ['s1'])])
+    expect(out.unsettled.map((u) => u.key)).toContain('what_they_sell')
+  })
+
+  it('a source whose address matches after normalising is kept', async () => {
+    const result = groupResult('site', {
+      sources: [
+        source('s1', { address: 'HTTPS://www.Shop.Example/s1/#top' }),
+        source('s2', { kind: 'search', address: 'https://news.example/x' }),
+      ],
+      findings: [finding('business_name', 'Shop', ['s1', 's2'])],
+    })
+    const { ctx } = stub(input, () =>
+      endsWith(JSON.stringify(result), [
+        fetched('https://shop.example/s1'),
+        searched('https://news.example/x/'),
+      ]),
+    )
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(out.sources.map((s) => s.result)).toEqual(['read', 'read'])
+    expect(out.findings).toEqual(result.findings)
+  })
+
+  it('addresses returned in a paused turn count, and sources that were not read are left alone', async () => {
+    const result = groupResult('site', {
+      sources: [
+        source('s1'),
+        source('s2', { address: 'https://login.example/wall', result: 'blocked', extract: 'Login wall.' }),
+      ],
+    })
+    const paused: ModelStepResult = {
+      text: '',
+      stopReason: 'pause_turn',
+      content: [fetched('https://shop.example/s1')],
+      usage: bare('').usage,
+    }
+    const { ctx } = stub(input, (step) => (step === 'site#0' ? paused : bare(JSON.stringify(result))))
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(out.sources.map((s) => s.result)).toEqual(['read', 'blocked'])
+  })
+})
+
 describe('the research definition caps', () => {
   it('a definition without the per-job caps is refused', () => {
     expect(() => requireCaps({ caps: { searchesPerJob: 20 } } as never)).toThrow(/fetchesPerJob/)
@@ -778,6 +828,11 @@ describe('the research definition caps', () => {
       searches: 20,
       fetches: 30,
     })
+  })
+
+  it('the run search cap comes from the definition and is required', () => {
+    expect(() => requireRunSearchCap({ caps: {} })).toThrow(/searchesPerBrandStep/)
+    expect(requireRunSearchCap({ caps: { searchesPerBrandStep: 150 } })).toBe(150)
   })
 })
 
