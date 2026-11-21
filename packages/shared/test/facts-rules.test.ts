@@ -237,6 +237,29 @@ describe('a result against its input', () => {
     const tomorrow = factsRulesResultSchema.parse(result({ facts: [fact({ reviewDate: '2026-11-22' })] }))
     expect(factsRulesAgainstInput(tomorrow, input)).toEqual([])
   })
+
+  it('an answer to an agent question is a listed source (ruling R11); an unknown id still is not', () => {
+    const ANSWERED = 'a5a50000-0000-4000-8000-000000000008'
+    const answers = [{ sourceId: ANSWERED }]
+    const citing = factsRulesResultSchema.parse(
+      result({
+        facts: [fact({ sourceIds: [ANSWERED] })],
+        rules: [rule({ sourceIds: [ANSWERED, NEVER_SAY] })],
+      }),
+    )
+    expect(factsRulesAgainstInput(citing, input, answers)).toEqual([])
+    // Without the answers it is not listed: the job's answers are part of what the result may cite.
+    expect(factsRulesAgainstInput(citing, input)).toEqual([
+      { path: ['facts', 0, 'sourceIds', 0], message: 'not one of the input sources' },
+      { path: ['rules', 0, 'sourceIds', 0], message: 'not one of the input sources' },
+    ])
+    const unknown = factsRulesResultSchema.parse(
+      result({ facts: [fact({ sourceIds: [ANSWERED, ELSEWHERE] })] }),
+    )
+    expect(factsRulesAgainstInput(unknown, input, answers)).toEqual([
+      { path: ['facts', 0, 'sourceIds', 1], message: 'not one of the input sources' },
+    ])
+  })
 })
 
 describe('the facts and rules agent', () => {
@@ -264,6 +287,12 @@ describe('the facts and rules agent', () => {
     expect(file.properties.ask.anyOf).toContainEqual({ type: 'null' })
     expect(file.properties.rules.items.properties.kind.enum).toEqual([...SAFETY_RULE_KINDS])
     expect(file.properties.facts.items.properties.reviewDate.format).toBe('date')
+  })
+
+  it('the prompt says an answer to an agent question is an owner statement a fact can cite (ruling R11)', () => {
+    const { system } = loadAgentDefinition(FACTS_RULES)
+    expect(system).toMatch(/`owner_answer`[^\n]*also listed as an `owner_statement` source/)
+    expect(system).not.toMatch(/when no source does, leave the fact out/)
   })
 
   it('the prompt names every rule kind, the answers rules come from, and the kinds a fact never rests on alone', () => {

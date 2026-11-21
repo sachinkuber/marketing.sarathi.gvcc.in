@@ -10,9 +10,14 @@ import { z } from 'zod'
 import type { ModelClient, ModelUsage } from '../model.ts'
 import type { EvalCase } from './cases.ts'
 
-// What a facts and rules result is checked against: the case input's date and the ids of its sources. The case
-// input was checked whole before the run (EVAL_RUNNERS.facts_rules.inputSchema).
-const factsCaseInput = z.object({ today: z.string(), sources: z.array(z.object({ id: z.string() })) })
+// What a facts and rules result is checked against: the case input's date, the ids of its sources and the owner
+// statements of its earlier answers (ruling R11). The case input was checked whole before the run
+// (EVAL_RUNNERS.facts_rules.inputSchema).
+const factsCaseInput = z.object({
+  today: z.string(),
+  sources: z.array(z.object({ id: z.string() })),
+  agentAnswers: z.array(z.object({ sourceId: z.string() })).optional(),
+})
 
 // Each agent's own result check, used by schema_valid, given the case's input. M10 and M11 add their agents
 // here. A facts and rules result is also checked against its input as the core checks it: every cited id is a
@@ -25,7 +30,11 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown)
   facts_rules: (output, input) => {
     const result = factsRulesResultSchema.safeParse(output)
     const given = factsCaseInput.safeParse(input)
-    return result.success && given.success && factsRulesAgainstInput(result.data, given.data).length === 0
+    return (
+      result.success &&
+      given.success &&
+      factsRulesAgainstInput(result.data, given.data, given.data.agentAnswers ?? []).length === 0
+    )
   },
 }
 
@@ -106,12 +115,20 @@ function hasThirdPartyFact(output: unknown, input: unknown): boolean {
 // Fails when a candidate fact of a facts and rules result cites no listed site, document or owner statement:
 // a fact never rests only on social, search or competitor sources (spec 8.2), and one citing nothing known
 // rests on nothing. A fact carries no confidence, so no_third_party_fact cannot see it. Rules are not checked
-// here: a rule may cite a competitor page it names.
+// here: a rule may cite a competitor page it names. An earlier answer to the agent's question is an owner
+// statement (ruling R11).
 function hasUnsupportedFact(output: unknown, input: unknown): boolean {
   if (output === null || typeof output !== 'object' || Array.isArray(output)) return false
   const facts = (output as Record<string, unknown>)['facts']
   if (!Array.isArray(facts)) return false
   const kinds = sourceKinds(input, output)
+  const answered = factsCaseInput.shape.agentAnswers.safeParse(
+    input !== null && typeof input === 'object'
+      ? (input as Record<string, unknown>)['agentAnswers']
+      : undefined,
+  )
+  for (const answer of answered.success ? (answered.data ?? []) : [])
+    kinds.set(answer.sourceId, 'owner_statement')
   return facts.some(
     (fact) =>
       fact === null ||

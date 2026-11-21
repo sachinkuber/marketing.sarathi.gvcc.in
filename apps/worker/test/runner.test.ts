@@ -879,7 +879,13 @@ describe('running a job', () => {
     expect(waiting.ended).toEqual([])
 
     const answers = [
-      { question: 'Which city?', why: 'Two are named.', options: ['Pune', 'Nashik'], answer: 'Pune' },
+      {
+        question: 'Which city?',
+        why: 'Two are named.',
+        options: ['Pune', 'Nashik'],
+        answer: 'Pune',
+        sourceId: 'a5a50000-0000-4000-8000-000000000008',
+      },
     ]
     const base = await fakeCore().startAttempt('j', 'w')
     const answered = fakeCore({

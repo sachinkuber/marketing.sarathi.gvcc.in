@@ -303,7 +303,9 @@ describe('with a real worker', () => {
 
     await until(() => isFinished(jobId))
     const [job] = await q('select outcome from app.job_input where job_id = $1', [jobId])
-    // Trimmed, as the owner's words are stored.
+    const [answered] = await questionsOf(jobId)
+    expect(answered!.source_id).toEqual(expect.any(String))
+    // Trimmed, as the owner's words are stored, with the owner statement that records them (ruling R11).
     expect(job!.outcome).toEqual({
       text: `read:${jobId}`,
       answers: [
@@ -312,6 +314,7 @@ describe('with a real worker', () => {
           why: QUESTION.why,
           options: QUESTION.options,
           answer: 'Pune, near the station.',
+          sourceId: answered!.source_id,
         },
       ],
     })
@@ -524,15 +527,20 @@ describe('without a worker (the job is claimed by hand)', () => {
     const entries = await auditOf('onboarding.agent_question_answered', questionId)
     expect(entries).toEqual([{ actor_id: ownerId, detail: { questionId, jobId } }])
 
-    // The job's next attempt is the second, and it is given the answer.
+    // The job's next attempt is the second, and it is given the answer with the owner statement that records it,
+    // so the agent can cite the answer as a source (ruling R11).
     const next = await claim(jobId)
     expect(next.status).toBe(200)
-    expect(next.body).toMatchObject({
-      attemptNumber: 2,
-      answers: [
-        { question: QUESTION.question, why: QUESTION.why, options: QUESTION.options, answer: wording },
-      ],
-    })
+    expect(next.body.attemptNumber).toBe(2)
+    expect(next.body.answers).toEqual([
+      {
+        question: QUESTION.question,
+        why: QUESTION.why,
+        options: QUESTION.options,
+        answer: wording,
+        sourceId: question!.source_id,
+      },
+    ])
   })
 
   it('an unanswered question is reminded after 72 hours and again 72 hours later, never before', async () => {

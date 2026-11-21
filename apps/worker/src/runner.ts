@@ -135,6 +135,7 @@ export interface JobContext {
   // The owner's answers to the questions this job asked on earlier attempts, oldest first (spec 9). The step that
   // decides whether to ask must carry them in its request (in its messages, say): a step whose request is unchanged
   // replays its checkpoint on the next attempt, decides the same way again, and asks again after every answer.
+  // Each answer carries `sourceId`, the owner statement that records it, so an agent may cite it (ruling R11).
   answers: AgentAnswer[]
   // Asks the owner instead of guessing what blocks the job's output: the question is posted, and JobWaiting ends
   // the job without a result. Its next attempt, started by the answer, finds the answer in `answers`; the step that

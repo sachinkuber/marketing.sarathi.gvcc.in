@@ -138,11 +138,14 @@ export async function createJob(
 }
 
 // The owner's answer to a question an attempt of the job asked (spec 9). Every later attempt is given them all.
+// `sourceId` is the owner statement the answer route wrote with the answer, so an agent can cite the answer as a
+// source (ruling R11).
 export interface AgentAnswer {
   question: string
   why: string
   options: string[]
   answer: string
+  sourceId: string
 }
 
 export interface StartedAttempt {
@@ -213,9 +216,11 @@ export async function hasOpenQuestion(client: PoolClient, brandId: string, jobId
   return (rowCount ?? 0) > 0
 }
 
+// The answer route writes an answer and its owner statement in one update, so an answered question has a source.
 async function answersOf(client: PoolClient, brandId: string, jobId: string): Promise<AgentAnswer[]> {
   const { rows } = await client.query<AgentAnswer>(
-    `select question, why, coalesce(options, '[]'::jsonb) as options, answer from app.agent_question
+    `select question, why, coalesce(options, '[]'::jsonb) as options, answer, source_id as "sourceId"
+       from app.agent_question
       where brand_id = $1 and job_id = $2 and answer is not null
       order by created_at, id`,
     [brandId, jobId],

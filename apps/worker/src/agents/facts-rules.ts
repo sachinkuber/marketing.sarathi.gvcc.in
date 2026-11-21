@@ -12,7 +12,9 @@ export const FACTS_RULES_DIR = fileURLToPath(new URL('../../../../agents/facts_r
 // everything else came from the owner, research or the web, so each extract, document name, address, profile
 // value, question and answer is wrapped as data, with the ids a fact or rule may cite as attributes. The
 // owner's answers to the job's earlier agent questions follow as owner_answer data, so a resumed attempt's
-// request differs from the one that asked (JobContext.answers).
+// request differs from the one that asked (JobContext.answers). Each is also listed with the sources as the
+// owner statement that records it (its exact answer, with the question as context), so a fact or rule it
+// settles can cite it (ruling R11).
 export function buildFactsRulesRequest(
   agent: LoadedAgent,
   input: FactsRulesInput,
@@ -21,9 +23,8 @@ export function buildFactsRulesRequest(
   const parts = [
     `Today is ${input.today}.`,
     wrapData('brand_name', input.brandName),
-    section(
-      'Sources:',
-      input.sources.map((source) =>
+    section('Sources:', [
+      ...input.sources.map((source) =>
         wrapData('source', source.extract, {
           id: source.id,
           kind: source.kind,
@@ -31,7 +32,14 @@ export function buildFactsRulesRequest(
           ...(source.documentName === null ? {} : { document: source.documentName }),
         }),
       ),
-    ),
+      ...answers.map((answer) =>
+        wrapData('source', answer.answer, {
+          id: answer.sourceId,
+          kind: 'owner_statement',
+          question: answer.question,
+        }),
+      ),
+    ]),
     section(
       'The profile the owner accepted:',
       input.profile.map((item) =>

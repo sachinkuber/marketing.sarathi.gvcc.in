@@ -81,7 +81,7 @@ const researchCaseSchema = z.strictObject({
 
 // A questionnaire or facts and rules case may carry the owner's answers to questions the agent asked on an
 // earlier attempt, as the job's attempt does (JobContext.answers), so a case can check what the agent does once
-// it has been answered.
+// it has been answered. Each carries the owner statement that records it (ruling R11).
 const earlierAnswers = z
   .array(
     z.strictObject({
@@ -89,6 +89,7 @@ const earlierAnswers = z
       why: z.string().min(1).max(300),
       options: z.array(z.string().min(1).max(200)).max(5),
       answer: z.string().min(1).max(2000),
+      sourceId: z.uuid(),
     }),
   )
   .max(10)

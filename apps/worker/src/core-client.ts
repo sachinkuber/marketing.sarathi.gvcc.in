@@ -17,12 +17,14 @@ export interface StartedAttempt {
   // The owner's answers to the questions the job asked, oldest first. Absent from a core that does not send them.
   answers?: AgentAnswer[]
 }
-// The owner's answer to a question an earlier attempt of the job asked (spec 9).
+// The owner's answer to a question an earlier attempt of the job asked (spec 9), with the owner statement that
+// records it, so an agent can cite the answer as a source (ruling R11).
 export interface AgentAnswer {
   question: string
   why: string
   options: string[]
   answer: string
+  sourceId: string
 }
 // What a job asks the owner when it cannot settle something: why, and options with a suggestion where it can.
 export interface AgentQuestion {
@@ -156,6 +158,7 @@ export const replySchemas = {
             why: z.string(),
             options: z.array(z.string()),
             answer: z.string(),
+            sourceId: z.string().min(1),
           }),
         )
         .optional(),

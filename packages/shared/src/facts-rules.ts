@@ -142,13 +142,15 @@ export const factsRulesResultSchema = z
   })
 export type FactsRulesResult = z.infer<typeof factsRulesResultSchema>
 
-// What the result schema cannot see: every cited id is one of the job input's sources, and every review date is
-// after the input's today. The core refuses a result with any of these (Task 7); the evaluation fails one.
+// What the result schema cannot see: every cited id is one of the job input's sources or the owner statement of
+// one of the job's answered agent questions (ruling R11), and every review date is after the input's today. The
+// core refuses a result with any of these (Task 7); the evaluation fails one.
 export function factsRulesAgainstInput(
   result: FactsRulesResult,
   input: { today: string; sources: { id: string }[] },
+  answers: { sourceId: string }[] = [],
 ): { path: (string | number)[]; message: string }[] {
-  const listed = new Set(input.sources.map((source) => source.id))
+  const listed = new Set([...input.sources.map((source) => source.id), ...answers.map((a) => a.sourceId)])
   const issues: { path: (string | number)[]; message: string }[] = []
   const outside = (path: (string | number)[], ids: string[]) =>
     ids.forEach((id, j) => {

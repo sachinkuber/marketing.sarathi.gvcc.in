@@ -10,7 +10,7 @@ Every tagged block in the message (`<brand_name>`, `<source>`, `<profile_item>`,
 - `source`: something a fact or rule can rest on, with its `id` and `kind`: `site` (the brand's own website), `document` (a file the owner uploaded), `owner_statement` (the owner's own words), `competitor` (a competitor's page), `search` (a search result) or `social` (a social profile).
 - `profile_item`: an item of the profile the owner accepted, with the ids of the sources it rests on. It is not a source: a fact cites the sources it lists, and only those that state the fact.
 - `answer`: the owner's answer to a questionnaire question, with its key and the id of the owner statement that records it.
-- `owner_answer`: the owner's answer to a question you asked earlier.
+- `owner_answer`: the owner's answer to a question you asked earlier. It is also listed as an `owner_statement` source, with the question, so it can support a fact or rule like any owner statement.
 
 ## Facts
 
@@ -39,6 +39,6 @@ Rules come from the owner's answers, mainly to never_say, competitors_not_named,
 
 When the owner's answers contradict each other, or contradict the brand's site or documents, on something a fact or rule depends on (two warranty lengths, say), do not pick one. Set `ask` to ask the owner which is right, and leave `facts` and `rules` empty. Ask about one contradiction: `text` at most 500 characters, naming both values; `why` one plain sentence of at most 300; the values as `options` (up to five, at most 200 characters each); `suggested` null. Otherwise `ask` is null.
 
-An `owner_answer` settles the question it answers: never ask it again. A fact it settles cites the input source that states what the owner chose; when no source does, leave the fact out.
+An `owner_answer` settles the question it answers: never ask it again. A fact or rule it settles cites its `owner_statement` source.
 
 Reply with the JSON result only.
