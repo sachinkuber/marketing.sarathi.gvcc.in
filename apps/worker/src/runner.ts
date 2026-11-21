@@ -42,6 +42,8 @@ export interface ModelStepResult {
   stopReason?: string | null
   content?: unknown[]
   usage?: Required<ModelUsage>
+  // True for a step replayed from its checkpoint: its searches were made (and recorded) by an earlier attempt.
+  replayed?: true
 }
 
 // Request timeout by job class: a request must end before the queue expires the job. Production jobs run
@@ -111,6 +113,7 @@ function replayed(output: unknown): ModelStepResult {
   const counted = toolCounts(content)
   return {
     text: saved.text,
+    replayed: true,
     ...(saved.stopReason === undefined ? {} : { stopReason: saved.stopReason }),
     content,
     usage: {

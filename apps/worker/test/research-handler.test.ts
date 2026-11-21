@@ -741,6 +741,32 @@ describe('the addresses the provider returned (I6)', () => {
     expect(normaliseAddress(' not a url ')).toBe('not a url')
   })
 
+  it('http and https are the same address', () => {
+    expect(normaliseAddress('http://shop.example/a')).toBe(normaliseAddress('https://shop.example/a'))
+  })
+
+  it('counts the requested URL of a successful fetch (a redirect returns another), not of a failed one', () => {
+    const use = (id: string, url: string) => ({
+      type: 'server_tool_use',
+      id,
+      name: 'web_fetch',
+      input: { url },
+    })
+    const set = returnedAddresses([
+      use('t1', 'http://x.example/a'),
+      { ...fetched('https://x.example/b'), tool_use_id: 't1' },
+      use('t2', 'https://failed.example/p'),
+      {
+        type: 'web_fetch_tool_result',
+        tool_use_id: 't2',
+        content: { type: 'web_fetch_tool_error', error_code: 'url_not_accessible' },
+      },
+      // A result with no matching tool use adds only its own URL.
+      { ...fetched('https://z.example/q'), tool_use_id: 'nope' },
+    ])
+    expect([...set].sort()).toEqual(['https://x.example/a', 'https://x.example/b', 'https://z.example/q'])
+  })
+
   it('collects fetched pages and search result addresses from every block, and the given pages', () => {
     const set = returnedAddresses(
       [
@@ -800,6 +826,77 @@ describe('the source address check', () => {
     const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
     expect(out.sources.map((s) => s.result)).toEqual(['read', 'read'])
     expect(out.findings).toEqual(result.findings)
+  })
+
+  it('a redirected fetch keeps a source cited at the requested address', async () => {
+    const result = groupResult('site', {
+      sources: [source('s1', { address: 'http://shop.example/a' })],
+      findings: [finding('business_name', 'Shop', ['s1'])],
+    })
+    const { ctx } = stub(input, () =>
+      endsWith(JSON.stringify(result), [
+        { type: 'server_tool_use', id: 'f9', name: 'web_fetch', input: { url: 'http://shop.example/a' } },
+        { ...fetched('https://shop.example/b'), tool_use_id: 'f9' },
+      ]),
+    )
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(out.sources[0]!.result).toBe('read')
+    expect(out.findings).toHaveLength(1)
+  })
+
+  it('a finding that was one side of a disagreement stops being marked as one when the other side is dropped', async () => {
+    const result = groupResult('site', {
+      sources: [source('s1'), source('s2', { address: 'https://invented.example/p' })],
+      findings: [
+        finding('places_served', 'Pune, per the home page', ['s1'], {
+          conflict: true,
+          confidence: 'assumed',
+        }),
+        finding('places_served', 'Mumbai, per a page', ['s2'], { conflict: true, confidence: 'assumed' }),
+      ],
+    })
+    const { ctx } = stub(input, () => endsWith(JSON.stringify(result), [fetched('https://shop.example/s1')]))
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(out.findings).toHaveLength(1)
+    expect(out.findings[0]!.conflict).toBe(false)
+    expect(out.unsettled.map((u) => u.key)).not.toContain('places_served')
+  })
+
+  it('a web group whose run has used its searches sends no web_search tool', async () => {
+    const { ctx, seen } = stub({ group: 'site', intake }, () => ends(JSON.stringify(groupResult('site'))), {
+      runSearches: 150,
+    })
+    await researchGroupHandler(ctx)
+    expect(seen[0]!.request.tools).toEqual([
+      { type: 'web_fetch_20260209', maxUses: 30, maxContentTokens: 40000 },
+    ])
+  })
+
+  it('a web source in a documents reply was not read: it becomes an error and its findings lose it', async () => {
+    const doc = { id: DOC, fileName: 'leaflet.pdf', mediaType: 'application/pdf', sizeBytes: 5, parts: [] }
+    const reply = groupResult('documents', {
+      sources: [
+        source('s1', { kind: 'document', address: null, documentId: DOC }),
+        source('s2', { kind: 'site', address: 'https://invented.example/' }),
+      ],
+      findings: [finding('what_they_sell', 'Pumps', ['s1']), finding('places_served', 'Pune', ['s2'])],
+    })
+    const { ctx } = stub(
+      { group: 'documents', intake, documentIds: [DOC] },
+      () => ends(JSON.stringify(reply)),
+      {
+        documents: async () => [doc],
+        document: async () => ({ mediaType: 'application/pdf', bytes: Buffer.from('hello') }),
+      },
+    )
+    const out = (await researchGroupHandler(ctx)).result as ResearchGroupResult
+    expect(out.sources.find((s) => s.kind === 'site')).toMatchObject({
+      result: 'error',
+      extract: 'Not read in this run.',
+    })
+    expect(out.sources.find((s) => s.kind === 'document')!.result).toBe('read')
+    expect(out.findings.map((f) => f.key)).toEqual(['what_they_sell'])
+    expect(out.unsettled.map((u) => u.key)).toContain('places_served')
   })
 
   it('addresses returned in a paused turn count, and sources that were not read are left alone', async () => {

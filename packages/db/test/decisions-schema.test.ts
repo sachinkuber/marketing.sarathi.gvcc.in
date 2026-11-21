@@ -235,8 +235,8 @@ describe('migration 0028: owner statements and question state', () => {
         createSchema: false,
         log: () => undefined,
         direction: 'down',
-        // 0029 (the reminder sweep's brand list) comes off first.
-        count: 2,
+        // 0030 (the run index) and 0029 (the reminder sweep's brand list) come off first.
+        count: 3,
       })
       expect(await Promise.all(tables.map(count))).toEqual(before)
       const cols = await own.admin.query(
@@ -256,7 +256,7 @@ describe('migration 0028: owner statements and question state', () => {
     }
   })
 
-  // Takes 0029 and 0028 off a database with the seeded brand, so the next `migrate` applies 0028 to existing rows.
+  // Takes 0030, 0029 and 0028 off a database with the seeded brand, so the next `migrate` applies 0028 to existing rows.
   async function at0027(): Promise<{ own: TestDatabase; url: string; uid: string }> {
     const own = await createTestDatabase()
     await seedBrand(own, A, 'brand-a')
@@ -269,7 +269,7 @@ describe('migration 0028: owner statements and question state', () => {
       createSchema: false,
       log: () => undefined,
       direction: 'down',
-      count: 2,
+      count: 3,
     })
     const uid = (await own.admin.query('select id from auth."user" limit 1')).rows[0].id as string
     return { own, url, uid }

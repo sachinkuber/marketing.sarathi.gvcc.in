@@ -177,8 +177,8 @@ describe('migration 0025: research ledger and knowledge carry-overs', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // Take 0029, 0028, 0027, 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
-      await runner({ ...base, direction: 'down', count: 5 })
+      // Take 0030, 0029, 0028, 0027, 0026 and 0025 off, price two models, apply them again: only the sonnet rows gain a search price.
+      await runner({ ...base, direction: 'down', count: 6 })
       for (const [model, from] of [
         ['claude-sonnet-5-5', '2026-01-01'],
         ['claude-sonnet-5-5', '2026-06-01'],
@@ -290,8 +290,8 @@ describe('migration 0027: document parts', () => {
         createSchema: false,
         log: () => undefined,
         direction: 'down',
-        // 0029 comes off first.
-        count: 4,
+        // 0030 and 0029 come off first.
+        count: 5,
       })
       const kept = await own.admin.query('select size_bytes from app.brand_document order by size_bytes')
       expect(kept.rows).toEqual([{ size_bytes: 4 }, { size_bytes: big }])

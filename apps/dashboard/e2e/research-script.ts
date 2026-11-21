@@ -168,7 +168,8 @@ export function withWebTools(inner: ModelClient): ModelClient {
       const group = /^Research group: (\w+)\./.exec(typeof first === 'string' ? first : '')?.[1]
       const fetched = (group ? (WEB_GROUPS[group]?.sources ?? []) : []).map((s, i) => ({
         type: 'web_fetch_tool_result',
-        tool_use_id: `srvtoolu_web_fetch_${i}`,
+        // Every id points at a real tool use above (there are FETCHES of them).
+        tool_use_id: `srvtoolu_web_fetch_${i % FETCHES}`,
         content: { type: 'web_fetch_result', url: s.address },
       }))
       return {

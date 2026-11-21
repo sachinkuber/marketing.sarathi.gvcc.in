@@ -53,6 +53,7 @@ export async function modelTurns(
   const messages = [...request.messages]
   const content: unknown[] = []
   let searches = 0
+  let freshSearches = 0
   let fetches = 0
 
   for (let turn = 0; ; turn += 1) {
@@ -66,13 +67,22 @@ export async function modelTurns(
       tool.type === 'web_search_20260209' ? caps.searches : caps.fetches
     const runLeft = (tool: ModelTool): number =>
       tool.type === 'web_search_20260209' && caps.runSearchCap !== undefined
-        ? caps.runSearchCap - (ctx.runSearches ?? 0) - searches
+        ? caps.runSearchCap - (ctx.runSearches ?? 0) - freshSearches
         : Number.POSITIVE_INFINITY
     // A tool whose budget is spent (its turn cap or the run's) is left out. Exception (R29): a continuation
     // whose history holds that tool's blocks keeps it with max_uses 1, because it is not known whether the API
     // accepts such a history with the tool omitted or with max_uses 0 (see the R13 probe in
-    // anthropic-live.test.ts, not yet run). So the run cap is enforced at run time, with at most one search over
-    // it per continuation until that probe is run.
+    // anthropic-live.test.ts, not yet run).
+    //
+    // What this bounds. On a first attempt nothing can pass the run cap: 4 web groups x (20 + 6 R29 extras) = 104,
+    // under 150. On a retry the run's recorded searches (ctx.runSearches) are counted, with two known gaps:
+    // attempts that start together read the same stale count, so the run can pass 150 by up to the others'
+    // allowances (about 60) plus R29 extras; and a call whose reply was lost records 0 searches, so its retry
+    // spends that turn again. The old worst case of about 312 is reduced only for recorded calls.
+    //
+    // The run term counts only searches made fresh in this attempt (`freshSearches`): a replayed step's searches
+    // are already in ctx.runSearches. The job's own cap still counts all of them. Near the cap a changed maxUses
+    // changes the request's hash, so a replay misses its checkpoint and the turn is sent again (accepted).
     const inHistory = (tool: ModelTool): boolean =>
       content.some((b) => {
         const block = b as { type?: unknown; name?: unknown }
@@ -89,6 +99,7 @@ export async function modelTurns(
     if (tools.length > 0) next.tools = tools
     const reply = await ctx.modelStep(`${step}#${turn}`, next)
     searches += reply.usage?.serverToolSearches ?? 0
+    if (!reply.replayed) freshSearches += reply.usage?.serverToolSearches ?? 0
     fetches += reply.usage?.serverToolFetches ?? 0
     const blocks = reply.content
     if (reply.stopReason === 'end_turn') {

@@ -147,6 +147,29 @@ describe('modelTurns', () => {
     expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 1 })
   })
 
+  // I4: ctx.runSearches already holds the searches an earlier attempt made and recorded, so a replayed step's
+  // searches are not taken off the run's remainder a second time. The job's own cap still counts them.
+  it('a replayed turn with saved searches is not charged to the run twice', async () => {
+    const { ctx, seen } = script(
+      [
+        {
+          text: '',
+          stopReason: 'pause_turn',
+          content: [{ type: 'text', text: 'a' }],
+          usage: usage(10),
+          replayed: true,
+        },
+        { text: 'ok', stopReason: 'end_turn', content: [], usage: usage(0) },
+      ],
+      undefined,
+      140,
+    )
+    await modelTurns(ctx, 'dig', request, { searches: 20, fetches: 10, runSearchCap: 150 })
+    // The run had 10 left at the start; the replayed 10 are in the 140 already, so 10 are still left. The job's
+    // own cap (20) does count them: 10 left there too.
+    expect(seen[1]!.request.tools![0]).toEqual({ type: 'web_search_20260209', maxUses: 10 })
+  })
+
   it('gives each request its own copy of the messages', async () => {
     const blocks = [{ type: 'text', text: 'a' }]
     const { ctx, seen } = script([

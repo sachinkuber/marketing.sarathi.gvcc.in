@@ -220,8 +220,8 @@ function readGroupReply(text: string, group: SourceGroup): ResearchGroupResult {
   return result.data
 }
 
-// An address as compared for I6: lower-case scheme and host, a leading `www.` dropped, no fragment and no
-// trailing slash. Text that is not an address is compared as its trimmed self.
+// An address as compared for I6: lower-case scheme and host, http and https the same, a leading `www.` dropped,
+// no fragment and no trailing slash. Text that is not an address is compared as its trimmed self.
 export function normaliseAddress(address: string): string {
   const text = address.trim()
   let url: URL
@@ -231,23 +231,36 @@ export function normaliseAddress(address: string): string {
     return text
   }
   const host = url.host.replace(/^www\./, '')
-  return `${url.protocol}//${host}${url.pathname.replace(/\/+$/, '')}${url.search}`
+  const scheme = url.protocol === 'http:' ? 'https:' : url.protocol
+  return `${scheme}//${host}${url.pathname.replace(/\/+$/, '')}${url.search}`
 }
 
 // The addresses the provider returned in a job: the pages given in the message (`given`), the URL of each
-// `web_fetch_tool_result` and the URL of each result in a `web_search_tool_result`, in every content block of
-// every turn (paused turns included), normalised.
+// `web_fetch_tool_result`, the URL requested by a `web_fetch` that succeeded (its `server_tool_use` input,
+// paired by tool_use_id with a result that is not an error: a redirect returns another URL), and the URL of each
+// result in a `web_search_tool_result`, in every content block of every turn (paused turns included), normalised.
 export function returnedAddresses(content: unknown[], given: string[] = []): Set<string> {
   const found = new Set<string>(given.map(normaliseAddress))
   const add = (url: unknown): void => {
     if (typeof url === 'string' && url !== '') found.add(normaliseAddress(url))
   }
+  const requested = new Map<string, unknown>()
   for (const entry of content) {
     if (entry === null || typeof entry !== 'object') continue
-    const block = entry as { type?: unknown; content?: unknown }
+    const block = entry as { type?: unknown; id?: unknown; name?: unknown; input?: unknown }
+    if (block.type === 'server_tool_use' && block.name === 'web_fetch' && typeof block.id === 'string')
+      requested.set(block.id, (block.input as { url?: unknown } | null | undefined)?.url)
+  }
+  for (const entry of content) {
+    if (entry === null || typeof entry !== 'object') continue
+    const block = entry as { type?: unknown; content?: unknown; tool_use_id?: unknown }
     if (block.type === 'web_fetch_tool_result') {
-      const result = block.content as { url?: unknown } | null | undefined
-      if (result !== null && typeof result === 'object') add(result.url)
+      const result = block.content as { type?: unknown; url?: unknown } | null | undefined
+      if (result !== null && typeof result === 'object') {
+        add(result.url)
+        if (result.type !== 'web_fetch_tool_error' && typeof block.tool_use_id === 'string')
+          add(requested.get(block.tool_use_id))
+      }
     } else if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
       for (const item of block.content as unknown[])
         if (item !== null && typeof item === 'object') add((item as { url?: unknown }).url)
@@ -282,7 +295,11 @@ export function checkReadAddresses(result: ResearchGroupResult, returned: Set<st
   for (const key of lost)
     if (!kept.some((f) => f.key === key) && !unsettled.some((entry) => entry.key === key))
       unsettled.push({ key, why: 'The source was not read in this run; ask the owner.' })
-  return { ...result, sources, findings: kept, unsettled }
+  // A finding marked as a disagreement stops being one when no other finding for its key survives.
+  const findings = kept.map((f) =>
+    f.conflict && kept.filter((o) => o.key === f.key).length === 1 ? { ...f, conflict: false } : f,
+  )
+  return { ...result, sources, findings, unsettled }
 }
 
 function readMergeReply(text: string): ResearchResult {
@@ -540,9 +557,11 @@ async function documentsGroup(ctx: JobContext, input: ResearchGroupInput): Promi
     const step = await ctx.modelStep(stepName, { ...request, timeoutMs })
     if (step.stopReason !== undefined && step.stopReason !== 'end_turn')
       throw new ModelStopped(step.stopReason)
-    const result = await readWithRepair(ctx, stepName, request, step.text, (text) =>
+    const parsed = await readWithRepair(ctx, stepName, request, step.text, (text) =>
       readGroupReply(text, 'documents'),
     )
+    // This group has no web tools and is given no pages: a web source in its reply was not read (R30, as I6).
+    const result = checkReadAddresses(parsed, new Set())
     // The label numbered the documents s1, s2, …: a document source is tied to its file, and a part's pages go
     // in its address. A document source outside the batch's numbering is dropped, with the refs to it.
     const dropped = new Set<string>()
