@@ -1,10 +1,55 @@
 'use client'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { z } from 'zod'
-import type { suggestionSource } from '../api/schemas'
-import { SOURCE_KIND_WORD, dayOn } from './onboarding-words'
+import { ApiError, api } from '../api/client'
+import { caseAddedReply, type suggestionSource } from '../api/schemas'
+import { SOURCE_KIND_WORD, dayOn, failureWords } from './onboarding-words'
 
 type Source = z.infer<typeof suggestionSource>
+
+export const CASE_ADDED = 'Added as a candidate case.'
+
+// "Add as a case" on a suggestion the owner edited or dropped: the correction becomes a candidate evaluation case.
+export function AddAsCase({ base, suggestionId }: { base: string; suggestionId: string }) {
+  const sending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  async function add() {
+    if (sending.current) return
+    sending.current = true
+    setBusy(true)
+    setError(null)
+    try {
+      await api(caseAddedReply, 'POST', `${base}/suggestions/${suggestionId}/case`, {})
+      setDone(CASE_ADDED)
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'already_added') setDone('Already added.')
+      else setError(failureWords(e, 'The case was not added. Try again.'))
+    } finally {
+      sending.current = false
+      setBusy(false)
+    }
+  }
+  if (done)
+    return (
+      <p className="sub" role="status">
+        {done}
+      </p>
+    )
+  return (
+    <div>
+      {error ? (
+        <p className="errtext" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <button className="btn sm onb-touch" type="button" disabled={busy} onClick={() => void add()}>
+        Add as a case
+      </button>
+    </div>
+  )
+}
 
 // A source as the owner reads it: what kind it is, where it was read (an address, a document's name, or the
 // owner's own word), when, and what it said.

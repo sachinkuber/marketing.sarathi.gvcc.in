@@ -5,7 +5,7 @@ import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import { suggestionDecisionReply, onboardingReply, suggestionItem, suggestionsReply } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
-import { SourceRow } from './onboarding-parts'
+import { AddAsCase, SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import { KEY_LABEL, TOPICS, failureWords, isForbidden } from './onboarding-words'
 
@@ -23,6 +23,7 @@ const confidenceTag = (c: Item['confidence']) => (c === 'found' ? 'ok' : c === '
 
 function ItemCard(props: {
   item: Item
+  brandId: string
   busy: boolean
   error: string | undefined
   onDecide: (
@@ -54,7 +55,11 @@ function ItemCard(props: {
           </span>
           {item.decision === 'edited' ? ` Edited to: ${textOf(item.decidedValue)}` : null}
         </p>
-      ) : editing ? (
+      ) : null}
+      {item.decision === 'edited' || item.decision === 'rejected' ? (
+        <AddAsCase base={`/brands/${props.brandId}/onboarding`} suggestionId={item.id} />
+      ) : null}
+      {item.decision ? null : editing ? (
         <div className="field">
           <label htmlFor={`edit-${item.key}`}>{`Your wording for ${name}`}</label>
           <textarea
@@ -315,6 +320,7 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
                   <ItemCard
                     key={item.id}
                     item={item}
+                    brandId={brandId}
                     busy={busy}
                     error={itemErrors[item.id] || undefined}
                     onDecide={(it, body) => void decide(it, body)}

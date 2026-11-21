@@ -1,14 +1,15 @@
 'use client'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { api } from '../api/client'
-import { agentQuestionsReply, onboardingReply } from '../api/schemas'
+import { agentQuestionsReply, briefStartedReply, caseAddedReply, onboardingReply } from '../api/schemas'
 import { useLoad } from '../api/use-load'
 import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
 import { OwnerOnly } from './OwnerOnly'
-import { costWords, isForbidden } from './onboarding-words'
+import { CASE_ADDED } from './onboarding-parts'
+import { costWords, isForbidden, refusalWords } from './onboarding-words'
 
 type Asked = z.infer<typeof agentQuestionsReply>['questions'][number]
 
@@ -18,6 +19,9 @@ const STEP_WORD: Record<string, string> = {
   profile: 'Draft profile: suggestions wait for your decision',
   facts_rules: 'Facts and rules: confirm what the platform may state and what it must never say',
   questionnaire: 'Questionnaire: answer what the research could not find',
+  brief_choices: 'Brief choices',
+  brief: 'Strategy brief',
+  done: 'Onboarded',
   question: 'Questions',
   fact: 'Facts',
   rule: 'Rules',
@@ -28,14 +32,203 @@ const LATER = new Set(['facts_rules', 'fact', 'rule', 'choice'])
 
 // Where Continue leads: intake until research has started, progress while it runs, then the draft profile while
 // suggestions wait, then the questionnaire.
-function nextPath(brandId: string, step: string, openSuggestions: number): string {
+function nextPath(
+  brandId: string,
+  step: string,
+  openSuggestions: number,
+  briefItemId: string | null,
+): string {
   const base = `/b/${brandId}/onboarding`
   if (step === 'intake') return `${base}/intake`
   if (step === 'research') return `${base}/research`
+  if (step === 'brief_choices') return `${base}/brief-choices`
+  if (step === 'brief' || step === 'done')
+    return briefItemId ? `/b/${brandId}/inbox/${briefItemId}` : `${base}/brief-choices`
   if (LATER.has(step)) return `${base}/facts-rules`
   if (step === 'profile' && openSuggestions > 0) return `${base}/profile`
   if (step === 'profile' || step === 'questionnaire') return `${base}/questionnaire`
   return `${base}/profile`
+}
+
+type Overview = z.infer<typeof onboardingReply>
+
+// The strategy brief on the overview: gate 1, a brief that needs re-approval or a decision, and one being written.
+function BriefStatus({
+  brandId,
+  data,
+  onChanged,
+}: {
+  brandId: string
+  data: Overview
+  onChanged: () => void
+}) {
+  const sending = useRef(false)
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const { brief, briefJob } = data
+  const writing = briefJob?.state === 'waiting' || briefJob?.state === 'running'
+  async function again() {
+    if (sending.current) return
+    sending.current = true
+    setBusy(true)
+    setProblem(null)
+    try {
+      await api(briefStartedReply, 'POST', `/brands/${brandId}/onboarding/brief`)
+      onChanged()
+    } catch (e) {
+      setProblem(refusalWords(e, 'The brief could not be started. Try again.'))
+    } finally {
+      sending.current = false
+      setBusy(false)
+    }
+  }
+  const invalidated = brief?.state === 'invalidated'
+  const showAgain = !writing && (invalidated || brief?.needsDecision === true)
+  if (!data.gate1 && !brief && !briefJob) return null
+  return (
+    <div className="stack">
+      {data.gate1 ? (
+        <p className="callout ok" role="status">
+          Onboarded: the strategy brief is approved.
+        </p>
+      ) : null}
+      {writing ? (
+        <p className="callout" role="status">
+          Writing the brief…
+        </p>
+      ) : null}
+      {!writing && brief?.state === 'awaiting_approval' && !brief.needsDecision ? (
+        <p className="callout" role="status">
+          The brief is waiting for your approval.
+        </p>
+      ) : null}
+      {invalidated ? (
+        <p className="callout warn" role="status">
+          The brief needs re-approval: a fact it cites changed.
+        </p>
+      ) : null}
+      {brief?.needsDecision ? (
+        <p className="callout warn" role="status">
+          The brief was revised three times. Approve it, reject it, or write it again.
+        </p>
+      ) : null}
+      {problem ? (
+        <p className="errtext" role="alert">
+          {problem}
+        </p>
+      ) : null}
+      {showAgain ? (
+        <div>
+          <button className="btn onb-touch" type="button" disabled={busy} onClick={() => void again()}>
+            Write the brief again
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+const MAX_EXAMPLE = 4000
+const MAX_NOTE = 1000
+
+// A good or a bad post the owner gives as an example; it becomes a candidate evaluation case (C8).
+function Examples({ brandId }: { brandId: string }) {
+  const sending = useRef(false)
+  const [kind, setKind] = useState<'good' | 'bad'>('good')
+  const [text, setText] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [added, setAdded] = useState(false)
+  async function add(event: React.FormEvent) {
+    event.preventDefault()
+    if (sending.current || text.trim() === '') return
+    sending.current = true
+    setBusy(true)
+    setProblem(null)
+    setAdded(false)
+    try {
+      await api(caseAddedReply, 'POST', `/brands/${brandId}/onboarding/examples`, {
+        example: kind,
+        text: text.trim(),
+        ...(note.trim() === '' ? {} : { note: note.trim() }),
+      })
+      setText('')
+      setNote('')
+      setAdded(true)
+    } catch (e) {
+      setProblem(refusalWords(e, 'The example was not added. Try again.'))
+    } finally {
+      sending.current = false
+      setBusy(false)
+    }
+  }
+  return (
+    <form className="stack" onSubmit={(e) => void add(e)} aria-labelledby="examples-h">
+      <b id="examples-h">Examples of good and bad posts</b>
+      <p className="muted small">
+        Paste a post you like, or one you never want to see. The platform is tested against it later.
+      </p>
+      <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', gap: 16 }}>
+        <legend className="sr-only">Kind of example</legend>
+        <label htmlFor="example-good" className="onb-touch">
+          <input
+            id="example-good"
+            type="radio"
+            name="example-kind"
+            checked={kind === 'good'}
+            onChange={() => setKind('good')}
+          />{' '}
+          Good
+        </label>
+        <label htmlFor="example-bad" className="onb-touch">
+          <input
+            id="example-bad"
+            type="radio"
+            name="example-kind"
+            checked={kind === 'bad'}
+            onChange={() => setKind('bad')}
+          />{' '}
+          Bad
+        </label>
+      </fieldset>
+      <div className="field">
+        <label htmlFor="example-text">The post</label>
+        <textarea
+          id="example-text"
+          className="input"
+          maxLength={MAX_EXAMPLE}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="example-note">Why (optional)</label>
+        <input
+          id="example-note"
+          className="input"
+          maxLength={MAX_NOTE}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </div>
+      {problem ? (
+        <p className="errtext" role="alert">
+          {problem}
+        </p>
+      ) : null}
+      {added ? (
+        <p className="sub" role="status">
+          {CASE_ADDED}
+        </p>
+      ) : null}
+      <div>
+        <button className="btn onb-touch" type="submit" disabled={busy || text.trim() === ''}>
+          Add the example
+        </button>
+      </div>
+    </form>
+  )
 }
 
 export function OnboardingScreen({ brandId }: { brandId: string }) {
@@ -105,11 +298,16 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
           {asked.map((q) => (
             <AgentQuestion key={q.id} brandId={brandId} question={q} />
           ))}
+          <BriefStatus brandId={brandId} data={data} onChanged={load.retry} />
           <div>
-            <Link className="btn primary onb-touch" href={nextPath(brandId, data.step, data.openSuggestions)}>
+            <Link
+              className="btn primary onb-touch"
+              href={nextPath(brandId, data.step, data.openSuggestions, data.brief?.itemId ?? null)}
+            >
               Continue
             </Link>
           </div>
+          <Examples brandId={brandId} />
         </div>
       )}
     </main>

@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
@@ -16,7 +17,7 @@ import {
 } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
-import { Ask, SourceRow } from './onboarding-parts'
+import { AddAsCase, Ask, SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import {
   OWNER_ONLY,
@@ -211,6 +212,21 @@ function FactCard({ item, base, onChanged }: { item: Item; base: string; onChang
           onYes={() => void decide({ decision: 'rejected' })}
         />
       </div>
+    </li>
+  )
+}
+
+// A suggestion the owner edited or dropped: it can become a candidate evaluation case.
+function Corrected({ item, base }: { item: Item; base: string }) {
+  const key = item.step === 'fact' ? 'statement' : 'text'
+  const edited = item.decision === 'edited'
+  return (
+    <li className="dp-item" data-id={item.id}>
+      <p className="dp-value onb-wrap">{asText(item.proposed, key)}</p>
+      <p className="muted small onb-wrap">
+        {edited ? `You changed it to: ${asText(item.decidedValue, key)}` : 'You dropped it.'}
+      </p>
+      <AddAsCase base={base} suggestionId={item.id} />
     </li>
   )
 }
@@ -684,6 +700,9 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
   const job = data?.job ?? null
   const activeFacts = data?.facts.active ?? []
   const activeRules = data?.rules.active ?? []
+  const corrected = [...(data?.facts.suggestions ?? []), ...(data?.rules.suggestions ?? [])].filter(
+    (i) => i.decision === 'edited' || i.decision === 'rejected',
+  )
 
   return (
     <main id="content" className="page">
@@ -743,6 +762,13 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
               </div>
             </div>
           ) : null}
+          {job && !isOpenJob(job.state) && job.state !== 'failed' && facts.length + rules.length === 0 ? (
+            <div>
+              <Link className="btn primary onb-touch" href={`/b/${brandId}/onboarding/brief-choices`}>
+                Continue to brief choices
+              </Link>
+            </div>
+          ) : null}
 
           <section className="panel" aria-label="Facts to confirm">
             <h2 className="pad onb-h">Facts to confirm</h2>
@@ -788,6 +814,20 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
               <AddRule base={base} onChanged={reload} />
             </div>
           </section>
+
+          {corrected.length > 0 ? (
+            <section className="panel" aria-label="Your corrections">
+              <h2 className="pad onb-h">Your corrections</h2>
+              <p className="pad muted small">
+                Add a correction as a case so the platform is tested on it later.
+              </p>
+              <ul className="list">
+                {corrected.map((i) => (
+                  <Corrected key={i.id} item={i} base={base} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
           <section className="panel" aria-label="Confirmed facts">
             <h2 className="pad onb-h">Confirmed facts</h2>
