@@ -25,7 +25,11 @@ import { openQueue } from '@mkt/queue'
 import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
 import { agentFilesHash } from '@mkt/shared'
-import { registerResearchHandlers, registerSummaryHandlers } from '../../core/src/agents/register.ts'
+import {
+  registerQuestionnaireHandlers,
+  registerResearchHandlers,
+  registerSummaryHandlers,
+} from '../../core/src/agents/register.ts'
 import { tick } from '../../core/src/approvals/requests.ts'
 import { DbAudit } from '../../core/src/audit/db-audit.ts'
 import { AttemptLimiter } from '../../core/src/auth/limiter.ts'
@@ -177,6 +181,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
   registerSummaryHandlers(results, jobs)
   // Research: a group result stores its sources, and the last group starts the merge.
   registerResearchHandlers(results, jobs.settled, jobs)
+  registerQuestionnaireHandlers(results)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(

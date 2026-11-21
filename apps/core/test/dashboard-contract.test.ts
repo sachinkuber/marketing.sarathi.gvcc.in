@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   agentsReply,
   alertsReply,
+  answerSavedReply,
   approvalSettingsReply,
   auditReply,
   auditVerifyReply,
@@ -24,6 +25,9 @@ import {
   suggestionsReply,
   overdueAllReply,
   overdueReply,
+  questionnaireFinishedReply,
+  questionnaireReply,
+  questionnaireStartedReply,
   researchStartedReply,
   roleChangedReply,
   runDetailReply,
@@ -433,6 +437,64 @@ describe('the dashboard schemas accept the core’s replies', () => {
       const gone = await owner.request('DELETE', `${base()}/documents/${summary.id}`)
       expect(gone.status).toBe(204)
       expect(deletedReply.parse(gone.text === '' ? null : JSON.parse(gone.text))).toBeNull()
+    })
+    it('questionnaire: start, the job waiting, the questions with answers, a save and the finish', async () => {
+      // The brand's research ended in the documents test above.
+      await q(`update app.onboarding set step = 'profile' where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('questionnaire', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/questionnaire', import.meta.url)))],
+      )
+      const started = await owner.request('POST', `${base()}/questionnaire`, { body: {} })
+      expect(started.status).toBe(200)
+      const { runId: qRun } = questionnaireStartedReply.parse(started.json)
+      const waiting = questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json)
+      expect(waiting).toEqual({ questionnaire: null, job: { state: 'waiting' } })
+      expect((await overview()).questionnaire).toEqual({
+        state: 'waiting',
+        total: 0,
+        answered: 0,
+        finished: false,
+      })
+
+      const made = await q(`insert into app.questionnaire (brand_id, run_id) values ($1, $2) returning id`, [
+        brand,
+        qRun,
+      ])
+      const asked = await q(
+        `insert into app.question (brand_id, questionnaire_id, key, position, text, why, suggested_answer, options)
+         values ($1, $2, 'business_name', 1, 'What is the name?', 'The brief names it.', 'Aztek', '["Aztek","Aztek Labs"]'::jsonb)
+         returning id`,
+        [brand, made.rows[0].id],
+      )
+      const saved = await owner.request('PUT', `${base()}/questionnaire/answers/${asked.rows[0].id}`, {
+        body: { value: 'Aztek' },
+      })
+      expect(saved.status).toBe(200)
+      expect(answerSavedReply.parse(saved.json)).toEqual({ answered: true })
+      const read = questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json)
+      expect(read.questionnaire?.questions).toEqual([
+        {
+          id: asked.rows[0].id,
+          key: 'business_name',
+          position: 1,
+          text: 'What is the name?',
+          why: 'The brief names it.',
+          options: ['Aztek', 'Aztek Labs'],
+          suggestedAnswer: 'Aztek',
+          answer: 'Aztek',
+        },
+      ])
+      expect((await overview()).questionnaire).toMatchObject({ total: 1, answered: 1, finished: false })
+      const finished = await owner.request('POST', `${base()}/questionnaire/finish`, { body: {} })
+      expect(finished.status).toBe(200)
+      expect(questionnaireFinishedReply.parse(finished.json)).toEqual({ answered: 1, blank: 0 })
+      expect(await overview()).toMatchObject({ step: 'facts_rules', questionnaire: { finished: true } })
+      expect(
+        questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json).questionnaire
+          ?.finishedAt,
+      ).toEqual(expect.any(String))
     })
   })
 

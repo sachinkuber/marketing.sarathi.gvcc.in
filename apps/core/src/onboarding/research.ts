@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import type { AuditSink } from '../ports.ts'
+import { readQuestionnaireBlock, type QuestionnaireBlock } from './questionnaire.ts'
 
 // Owner intake (spec 4) and starting research (spec 8.1).
 const httpsUrl = z
@@ -209,6 +210,8 @@ export interface Overview {
     gaps: { key: string; why: string }[]
   }
   openSuggestions: number
+  // The questionnaire's state and progress; null before the first start.
+  questionnaire: QuestionnaireBlock | null
   cost: Money
 }
 
@@ -241,6 +244,7 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       documents: counts.rows[0]!.documents,
       research: null,
       openSuggestions: counts.rows[0]!.open,
+      questionnaire: await readQuestionnaireBlock(client, brandId),
       cost: money(t.usd, t.inr, t.uncosted > 0),
     }
     const runId = ob.rows[0]?.research_run_id

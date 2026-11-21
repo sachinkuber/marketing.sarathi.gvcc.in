@@ -83,7 +83,7 @@ describe('startServer', () => {
     await expect(fetch(`${server.url}/health/live`)).rejects.toThrow()
   }, 30_000)
 
-  it('registers the summary, check and research result handlers, and the research groups settled hook', async () => {
+  it('registers the summary, check, research and questionnaire result handlers, and the research groups settled hook', async () => {
     await requireDatabase()
     const db = await createQueueTestDatabase()
     registered.length = 0
@@ -112,6 +112,7 @@ describe('startServer', () => {
       expect(registered).toHaveLength(1)
       expect([...registered[0]!.keys()].sort()).toEqual([
         'placeholder_check.v1',
+        'questionnaire.v1',
         'research.v1',
         'research_group.v1',
         'summary.v1',

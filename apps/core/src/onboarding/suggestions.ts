@@ -116,6 +116,44 @@ function textOf(value: unknown, field: string): string | null {
 
 const normalise = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
 
+// Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
+// current item is locked first, so a write on the same key elsewhere waits, then supersedes this one.
+export async function supersedeProfileItem(
+  client: PoolClient,
+  input: {
+    brandId: string
+    key: string
+    value: unknown
+    status: Confidence
+    sourceIds: string[]
+    fromSuggestion: string | null
+  },
+): Promise<string> {
+  await client.query(
+    `select id from app.profile_item where brand_id = $1 and key = $2 and superseded_by is null for update`,
+    [input.brandId, input.key],
+  )
+  const made = await client.query<{ id: string }>(
+    `insert into app.profile_item (brand_id, key, value, status, source_ids, from_suggestion)
+     values ($1, $2, $3::jsonb, $4, $5::uuid[], $6) returning id`,
+    [
+      input.brandId,
+      input.key,
+      JSON.stringify(input.value),
+      input.status,
+      input.sourceIds,
+      input.fromSuggestion,
+    ],
+  )
+  const id = made.rows[0]!.id
+  await client.query(
+    `update app.profile_item set superseded_by = $3
+      where brand_id = $1 and key = $2 and superseded_by is null and id <> $3`,
+    [input.brandId, input.key, id],
+  )
+  return id
+}
+
 async function decideWithin(
   client: PoolClient,
   deps: Deps,
@@ -149,23 +187,14 @@ async function decideWithin(
   let createdId: string | null = null
 
   if (accepted && row.step === 'profile') {
-    // Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
-    // current item is locked first, so a decision on the same key elsewhere waits, then supersedes this one.
-    await client.query(
-      `select id from app.profile_item where brand_id = $1 and key = $2 and superseded_by is null for update`,
-      [input.brandId, row.key],
-    )
-    const made = await client.query<{ id: string }>(
-      `insert into app.profile_item (brand_id, key, value, status, source_ids, from_suggestion)
-       values ($1, $2, $3::jsonb, $4, $5::uuid[], $6) returning id`,
-      [input.brandId, row.key, JSON.stringify(chosen), row.confidence, row.source_ids, row.id],
-    )
-    createdId = made.rows[0]!.id
-    await client.query(
-      `update app.profile_item set superseded_by = $3
-        where brand_id = $1 and key = $2 and superseded_by is null and id <> $3`,
-      [input.brandId, row.key, createdId],
-    )
+    createdId = await supersedeProfileItem(client, {
+      brandId: input.brandId,
+      key: row.key,
+      value: chosen,
+      status: row.confidence,
+      sourceIds: row.source_ids,
+      fromSuggestion: row.id,
+    })
   } else if (accepted && row.step === 'fact') {
     createdId = await writeFact(client, input, row, chosen)
   } else if (accepted && row.step === 'rule') {

@@ -121,6 +121,10 @@ describe('no route under /brands/:brandId answers for a brand the person is not 
       ['get', 'onboarding'],
       ['put', 'onboarding/intake'],
       ['post', 'onboarding/research'],
+      ['post', 'onboarding/questionnaire'],
+      ['get', 'onboarding/questionnaire'],
+      ['put', 'onboarding/questionnaire/answers/:questionId'],
+      ['post', 'onboarding/questionnaire/finish'],
       ['get', 'onboarding/agent-questions'],
       ['post', 'onboarding/agent-questions/:questionId/answer'],
     ] as const) {

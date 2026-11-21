@@ -499,11 +499,51 @@ export const onboardingReply = z.strictObject({
     })
     .nullable(),
   openSuggestions: z.number().int().nonnegative(),
+  questionnaire: z
+    .strictObject({
+      state: z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed']),
+      total: z.number().int().nonnegative(),
+      answered: z.number().int().nonnegative(),
+      finished: z.boolean(),
+    })
+    .nullable(),
   cost: maybeMoney,
 })
 
 export const intakeSavedReply = z.strictObject({ intake: intakeShape })
 export const researchStartedReply = z.strictObject({ runId: z.string(), jobIds: z.array(z.string()) })
+
+export const questionnaireStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const questionnaireQuestion = z.strictObject({
+  id: z.string(),
+  key: z.string(),
+  position: z.number().int().positive(),
+  text: z.string(),
+  why: z.string(),
+  options: z.array(z.string()),
+  suggestedAnswer: z.string().nullable(),
+  answer: z.string().nullable(),
+})
+export const questionnaireReply = z.strictObject({
+  questionnaire: z
+    .strictObject({
+      id: z.string(),
+      finishedAt: z.string().nullable(),
+      questions: z.array(questionnaireQuestion),
+    })
+    .nullable(),
+  job: z
+    .strictObject({
+      state: z.enum(['waiting', 'running', 'waiting_for_answer', 'done', 'failed']),
+      questionId: z.string().optional(),
+    })
+    .nullable(),
+})
+export const answerSavedReply = z.strictObject({ answered: z.boolean() })
+export const questionnaireFinishedReply = z.strictObject({
+  answered: z.number().int().nonnegative(),
+  blank: z.number().int().nonnegative(),
+})
 
 export const documentSummary = z.strictObject({
   id: z.string(),

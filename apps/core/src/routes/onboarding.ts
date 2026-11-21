@@ -8,6 +8,12 @@ import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/su
 import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
 import { inputOf, validate } from '../validate.ts'
 import type { JobsDeps } from '../jobs/service.ts'
+import {
+  finishQuestionnaire,
+  readQuestionnaire,
+  saveAnswer,
+  startQuestionnaire,
+} from '../onboarding/questionnaire.ts'
 import { intakeSchema, readOverview, saveIntake, startResearch } from '../onboarding/research.ts'
 
 export interface OnboardingRouteDeps {
@@ -30,6 +36,15 @@ const answerBody = z.strictObject({
     .trim()
     .min(1)
     .max(2000)
+    .refine((v) => !v.includes('\u0000'), 'must not contain U+0000'),
+})
+
+// Saved as typed: at most 2000 characters (the facts agent's input limit); empty deletes the answer.
+const answerParams = z.strictObject({ brandId: z.uuid(), questionId: z.uuid() })
+const savedAnswerBody = z.strictObject({
+  value: z
+    .string()
+    .max(2000, 'An answer can be at most 2000 characters.')
     .refine((v) => !v.includes('\u0000'), 'must not contain U+0000'),
 })
 
@@ -119,6 +134,83 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
       ],
     })
   }
+
+  if (deps.jobs) {
+    const jobs = deps.jobs
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/questionnaire',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary: 'Start the questionnaire: one job, from the draft profile, the gaps and the sources not read',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startQuestionnaire(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
+  }
+
+  table.add({
+    method: 'get',
+    path: '/brands/:brandId/onboarding/questionnaire',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'The questionnaire: its questions in order with the answers so far, and its job state',
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json(await readQuestionnaire(deps.pool, brandContextOf(res).brandId))
+      },
+    ],
+  })
+
+  table.add({
+    method: 'put',
+    path: '/brands/:brandId/onboarding/questionnaire/answers/:questionId',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'Save an answer as typed; an empty value deletes it; refused once the questionnaire is finished',
+    handlers: [
+      validate({ params: answerParams, body: savedAnswerBody }),
+      async (_req, res) => {
+        const { params, body } = inputOf<{
+          params: z.infer<typeof answerParams>
+          body: z.infer<typeof savedAnswerBody>
+        }>(res)
+        res.json(
+          await saveAnswer(deps.pool, {
+            brandId: brandContextOf(res).brandId,
+            questionId: params.questionId,
+            value: body.value,
+            actor: { userId: principalOf(res).userId },
+          }),
+        )
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/brands/:brandId/onboarding/questionnaire/finish',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary:
+      'Finish the questionnaire: each answer becomes an owner statement, profile answers become profile items, and onboarding moves to facts and rules',
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json(
+          await finishQuestionnaire(deps.pool, deps, {
+            brandId: brandContextOf(res).brandId,
+            actor: { userId: principalOf(res).userId },
+          }),
+        )
+      },
+    ],
+  })
 
   table.add({
     method: 'get',

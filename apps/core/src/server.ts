@@ -7,7 +7,11 @@ import { createS3Client, S3ExportStore } from './audit/s3-store.ts'
 import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
-import { registerResearchHandlers, registerSummaryHandlers } from './agents/register.ts'
+import {
+  registerQuestionnaireHandlers,
+  registerResearchHandlers,
+  registerSummaryHandlers,
+} from './agents/register.ts'
 import type { ResultHandlers } from './jobs/results.ts'
 import type { SettledHooks } from './jobs/service.ts'
 import { ecbFxSource } from './triggers/fx.ts'
@@ -50,6 +54,7 @@ export async function startServer(
     queue,
     backlogLimit: config.queueBacklogLimit,
   })
+  registerQuestionnaireHandlers(results)
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,

@@ -95,6 +95,9 @@ alter table app.agent_question
   add constraint agent_question_answer_source check ((answer is null) = (source_id is null));
 create unique index agent_question_one_open on app.agent_question (brand_id, job_id) where answer is null;
 
+-- An empty answer deletes the row (the answer route): until the questionnaire is finished an answer is saved as typed.
+grant delete on app.answer to mkt_app;
+
 alter table app.research_source force row level security;
 alter table app.suggestion force row level security;
 alter table app.verified_fact force row level security;
@@ -105,6 +108,7 @@ alter table app.agent_question force row level security;
 -- No owner row is deleted: every question, answer and agent question stays. Only the added columns, checks and the
 -- index go, so who stated an owner statement, which source an answer produced and the questionnaire's finished state
 -- (finished_at, finished_by) are no longer recorded.
+revoke delete on app.answer from mkt_app;
 drop index app.agent_question_one_open;
 alter table app.agent_question
   drop constraint agent_question_answer_source,

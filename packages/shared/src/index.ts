@@ -44,6 +44,7 @@ export {
   type SourceKind,
 } from './research.ts'
 export { askSchema, type Ask } from './agent-question.ts'
+export { INPUT_ADDRESS_MAX, INPUT_NAME_MAX, INPUT_VALUE_MAX } from './input-text.ts'
 export {
   MAX_QUESTIONS,
   MIN_QUESTIONS,
