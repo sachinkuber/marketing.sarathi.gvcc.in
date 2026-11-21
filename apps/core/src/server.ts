@@ -8,6 +8,7 @@ import type { Config } from './config.ts'
 import { buildCore } from './core.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import {
+  registerFactsRulesHandlers,
   registerQuestionnaireHandlers,
   registerResearchHandlers,
   registerSummaryHandlers,
@@ -55,6 +56,7 @@ export async function startServer(
     backlogLimit: config.queueBacklogLimit,
   })
   registerQuestionnaireHandlers(results)
+  registerFactsRulesHandlers(results, { audit: deps.audit })
   // config.trustProxy tells the app how many proxies sit in front, so req.ip (the invite limiter's key) is the client's.
   const { app } = buildCore({
     config,

@@ -35,12 +35,13 @@ const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS)
 const MAX_COMPETITORS = 5
 
 // Text the input carries is only bounded: cut to the schema's limit, and dropped when nothing is left.
-const clip = (value: string, max: number): string | null => {
+export const clip = (value: string, max: number): string | null => {
   const cut = value.slice(0, max)
   const safe = /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut
   return safe === '' ? null : safe
 }
-const asText = (value: unknown): string => (typeof value === 'string' ? value : (JSON.stringify(value) ?? ''))
+export const asText = (value: unknown): string =>
+  typeof value === 'string' ? value : (JSON.stringify(value) ?? '')
 
 // ---- Starting ----
 

@@ -49,6 +49,7 @@ export {
   MAX_QUESTIONS,
   MIN_QUESTIONS,
   QUESTION_KEYS,
+  QUESTION_MAX,
   questionnaireInputSchema,
   questionnaireResultSchema,
   SAFETY_KEYS,
@@ -57,10 +58,13 @@ export {
   type QuestionnaireResult,
 } from './questionnaire.ts'
 export {
+  DOCUMENT_NAME_MAX,
   factsRulesAgainstInput,
   factsRulesInputSchema,
   factsRulesResultSchema,
+  INPUT_EXTRACT_MAX,
   MAX_FACTS,
+  MAX_INPUT_SOURCES,
   MAX_RULES,
   SAFETY_RULE_KINDS,
   type FactsRulesInput,

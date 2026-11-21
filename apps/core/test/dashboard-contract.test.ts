@@ -14,6 +14,10 @@ import {
   deletedReply,
   documentSummary,
   documentsReply,
+  factAddedReply,
+  factChangedReply,
+  factsRulesReply,
+  factsRulesStartedReply,
   homeReply,
   intakeSavedReply,
   inviteCreatedReply,
@@ -30,6 +34,8 @@ import {
   questionnaireStartedReply,
   researchStartedReply,
   roleChangedReply,
+  ruleAddedReply,
+  ruleChangedReply,
   runDetailReply,
   runStartedReply,
   runsReply,
@@ -502,6 +508,81 @@ describe('the dashboard schemas accept the core’s replies', () => {
         questionnaireReply.parse((await owner.request('GET', `${base()}/questionnaire`)).json).questionnaire
           ?.finishedAt,
       ).toEqual(expect.any(String))
+    })
+
+    it('facts and rules: start, the job, the lists, add your own, replace, retire and turn off', async () => {
+      // The brand's questionnaire was finished in the test above.
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('facts_rules', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/facts_rules', import.meta.url)))],
+      )
+      const started = await owner.request('POST', `${base()}/facts-rules`, { body: {} })
+      expect(started.status).toBe(200)
+      factsRulesStartedReply.parse(started.json)
+      const read = async () => {
+        const reply = await owner.request('GET', `${base()}/facts-rules`)
+        expect(reply.status).toBe(200)
+        return factsRulesReply.parse(reply.json)
+      }
+      expect(await read()).toEqual({
+        job: { state: 'waiting' },
+        facts: { suggestions: [], active: [] },
+        rules: { suggestions: [], active: [] },
+      })
+      expect((await overview()).factsRules).toEqual({
+        state: 'waiting',
+        openFacts: 0,
+        openRules: 0,
+        activeFacts: 0,
+        activeRules: 0,
+      })
+      const reviewDate = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10)
+      const fact = await owner.request('POST', `${base()}/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate },
+      })
+      expect(fact.status).toBe(200)
+      const { factId } = factAddedReply.parse(fact.json)
+      const rule = await owner.request('POST', `${base()}/rules`, {
+        body: { kind: 'forbidden_word', text: 'cheap', why: 'We are not the cheapest.' },
+      })
+      expect(rule.status).toBe(200)
+      const { ruleId } = ruleAddedReply.parse(rule.json)
+      const listed = await read()
+      expect(listed.facts.active).toEqual([
+        {
+          id: factId,
+          statement: 'Open since 2019.',
+          reviewDate,
+          sources: [
+            expect.objectContaining({ kind: 'owner_statement', extract: 'Open since 2019.', flagged: null }),
+          ],
+        },
+      ])
+      expect(listed.facts.suggestions[0]?.decision).toBe('accepted')
+      expect(listed.rules.active).toEqual([
+        { id: ruleId, kind: 'forbidden_word', text: 'cheap', why: 'We are not the cheapest.' },
+      ])
+      expect((await overview()).factsRules).toMatchObject({ activeFacts: 1, activeRules: 1 })
+      const replaced = await owner.request('POST', `${base()}/facts/${factId}/replace`, {
+        body: { statement: 'Open since 2018.', reviewDate },
+      })
+      expect(replaced.status).toBe(200)
+      const { factId: newId } = factChangedReply.parse(replaced.json)
+      const retired = await owner.request('POST', `${base()}/facts/${newId}/retire`, { body: {} })
+      expect(retired.status).toBe(200)
+      expect(factChangedReply.parse(retired.json)).toEqual({ factId: newId })
+      const off = await owner.request('POST', `${base()}/rules/${ruleId}/turn-off`, { body: {} })
+      expect(off.status).toBe(200)
+      expect(ruleChangedReply.parse(off.json)).toEqual({ ruleId })
+      // A job waiting on a question carries its id.
+      expect(
+        factsRulesReply.parse({
+          job: { state: 'waiting_for_answer', questionId: ruleId },
+          facts: { suggestions: [], active: [] },
+          rules: { suggestions: [], active: [] },
+        }).job?.questionId,
+      ).toBe(ruleId)
     })
   })
 

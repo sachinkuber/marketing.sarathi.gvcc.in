@@ -26,6 +26,7 @@ import { createQueueTestDatabase } from '@mkt/queue/testing'
 import { requireDatabase } from '@mkt/test-support'
 import { agentFilesHash } from '@mkt/shared'
 import {
+  registerFactsRulesHandlers,
   registerQuestionnaireHandlers,
   registerResearchHandlers,
   registerSummaryHandlers,
@@ -182,6 +183,7 @@ export async function startStack(env: Record<string, string | undefined> = proce
   // Research: a group result stores its sources, and the last group starts the merge.
   registerResearchHandlers(results, jobs.settled, jobs)
   registerQuestionnaireHandlers(results)
+  registerFactsRulesHandlers(results, jobs)
   // A price and a rate, so the run shows a cost in both currencies (the same figures as the worker's test).
   const today = new Date().toISOString().slice(0, 10)
   await db.admin.query(

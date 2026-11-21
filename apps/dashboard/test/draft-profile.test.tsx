@@ -15,6 +15,8 @@ const overview = (gaps: { key: string; why: string }[] = []) => ({
   documents: 0,
   research: { runId: 'r1', state: 'succeeded', groups: [], merge: 'done', gaps },
   openSuggestions: 3,
+  questionnaire: null,
+  factsRules: null,
   cost: none,
 })
 const source = (over: Record<string, unknown> = {}) => ({

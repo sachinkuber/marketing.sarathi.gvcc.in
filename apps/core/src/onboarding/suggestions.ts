@@ -49,31 +49,7 @@ export async function addSuggestions(
       )
   }
   const ids: string[] = []
-  for (const item of input.items) {
-    const made = await client.query<{ id: string }>(
-      `insert into app.suggestion (brand_id, run_id, step, key, proposed, why, source_ids, confidence, options)
-       values ($1, $2, $3, $4, $5::jsonb, $6, $7::uuid[], $8, $9::jsonb) returning id`,
-      [
-        input.brandId,
-        input.runId,
-        item.step,
-        item.key,
-        JSON.stringify(item.proposed),
-        item.why,
-        item.sourceIds,
-        item.confidence,
-        item.options === undefined ? null : JSON.stringify(item.options),
-      ],
-    )
-    const id = made.rows[0]!.id
-    await client.query(
-      `update app.suggestion set superseded_by = $4
-        where brand_id = $1 and step = $2 and key = $3 and id <> $4
-          and decision is null and superseded_by is null`,
-      [input.brandId, item.step, item.key, id],
-    )
-    ids.push(id)
-  }
+  for (const item of input.items) ids.push(await insertSuggestion(client, input.brandId, input.runId, item))
   await deps.audit.record(
     {
       action: 'onboarding.suggestions_added',
@@ -87,6 +63,39 @@ export async function addSuggestions(
     client,
   )
   return ids
+}
+
+// One suggestion, which supersedes the undecided suggestion of the same brand, step and key; a decided one is
+// never touched. Its sources are the caller's to check.
+export async function insertSuggestion(
+  client: PoolClient,
+  brandId: string,
+  runId: string | null,
+  item: SuggestionInput,
+): Promise<string> {
+  const made = await client.query<{ id: string }>(
+    `insert into app.suggestion (brand_id, run_id, step, key, proposed, why, source_ids, confidence, options)
+     values ($1, $2, $3, $4, $5::jsonb, $6, $7::uuid[], $8, $9::jsonb) returning id`,
+    [
+      brandId,
+      runId,
+      item.step,
+      item.key,
+      JSON.stringify(item.proposed),
+      item.why,
+      item.sourceIds,
+      item.confidence,
+      item.options === undefined ? null : JSON.stringify(item.options),
+    ],
+  )
+  const id = made.rows[0]!.id
+  await client.query(
+    `update app.suggestion set superseded_by = $4
+      where brand_id = $1 and step = $2 and key = $3 and id <> $4
+        and decision is null and superseded_by is null`,
+    [brandId, item.step, item.key, id],
+  )
+  return id
 }
 
 interface SuggestionRow {
@@ -115,6 +124,8 @@ function textOf(value: unknown, field: string): string | null {
 }
 
 const normalise = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
+// A verified fact's hash: the sha256 of its normalised statement, so the same fact in other spacing or case matches.
+export const factHash = (statement: string) => createHash('sha256').update(normalise(statement)).digest('hex')
 
 // Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
 // current item is locked first, so a write on the same key elsewhere waits, then supersedes this one.
@@ -154,7 +165,9 @@ export async function supersedeProfileItem(
   return id
 }
 
-async function decideWithin(
+// One decision inside the caller's transaction. `ownAddition` marks a suggestion the owner wrote and accepted in
+// the same action (facts and rules, "add your own", ruling R2): its audit entry says so.
+export async function decideWithin(
   client: PoolClient,
   deps: Deps,
   input: {
@@ -164,6 +177,7 @@ async function decideWithin(
     value?: unknown
     reason?: string
     actor: { userId: string }
+    ownAddition?: boolean
   },
 ): Promise<{ createdId: string | null }> {
   if (input.value !== undefined && input.decision !== 'edited')
@@ -222,7 +236,12 @@ async function decideWithin(
       subject: row.id,
       brandId: input.brandId,
       outcome: 'success',
-      detail: { suggestionId: row.id, step: row.step, decision: input.decision },
+      detail: {
+        suggestionId: row.id,
+        step: row.step,
+        decision: input.decision,
+        ...(input.ownAddition ? { ownAddition: true } : {}),
+      },
     },
     client,
   )
@@ -280,15 +299,7 @@ async function writeFact(
     `insert into app.verified_fact
        (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date, from_suggestion)
      values ($1, $2, $3, $4::uuid[], $5, $6, $7) returning id`,
-    [
-      input.brandId,
-      statement,
-      createHash('sha256').update(normalise(statement)).digest('hex'),
-      sourceIds,
-      input.actor.userId,
-      given,
-      row.id,
-    ],
+    [input.brandId, statement, factHash(statement), sourceIds, input.actor.userId, given, row.id],
   )
   return made.rows[0]!.id
 }
@@ -365,6 +376,16 @@ export async function acceptFound(
   })
 }
 
+// A source as the owner reads it: the stored flag marker and escape are taken off the extract, the flag kept apart.
+export interface SourceView {
+  id: string
+  kind: SourceKind
+  address: string | null
+  readAt: string
+  extract: string
+  flagged: { reason: string } | null
+}
+
 export interface SuggestionView {
   id: string
   step: SuggestionStep
@@ -378,15 +399,36 @@ export interface SuggestionView {
   decidedReason: string | null
   decidedAt: string | null
   createdAt: string
-  // The extract as the owner reads it: the stored flag marker and escape are taken off, the flag kept apart.
-  sources: {
-    id: string
-    kind: SourceKind
-    address: string | null
-    readAt: string
-    extract: string
-    flagged: { reason: string } | null
-  }[]
+  sources: SourceView[]
+}
+
+// The sources whose ids are in the array column `ids` of a row aliased with `brand_id`, as a JSON list in the order
+// they were read, for sourceViews below.
+export const sourcesJson = (row: string, ids: string) =>
+  `coalesce((select json_agg(json_build_object('id', r.id, 'kind', r.kind, 'address', r.address,
+                                             'readAt', r.read_at, 'extract', r.extract)
+                      order by r.read_at, r.id)
+              from app.research_source r
+             where r.brand_id = ${row}.brand_id and r.id = any(${row}.${ids})), '[]'::json)`
+
+export function sourceViews(sources: unknown): SourceView[] {
+  return (
+    sources as {
+      id: string
+      kind: SourceKind
+      address: string | null
+      readAt: string
+      extract: string
+    }[]
+  ).map((source) => ({
+    ...source,
+    readAt: new Date(source.readAt).toISOString(),
+    // Only research extracts carry the stored flag marker and the 500-character cut. An owner statement is
+    // the owner's own words, returned exactly as stated and never read as flagged.
+    ...(RESEARCH_KINDS.includes(source.kind)
+      ? readStoredExtract(source.extract)
+      : { extract: source.extract, flagged: null }),
+  }))
 }
 
 export async function listSuggestions(
@@ -394,50 +436,36 @@ export async function listSuggestions(
   brandId: string,
   step?: SuggestionStep,
 ): Promise<SuggestionView[]> {
-  return withBrand(pool, brandId, async (client) => {
-    const found = await client.query(
-      `select s.id, s.step, s.key, s.proposed, s.why, s.confidence, s.options, s.decision, s.decided_value,
-              s.decided_reason, s.decided_at, s.created_at,
-              coalesce((select json_agg(json_build_object('id', r.id, 'kind', r.kind, 'address', r.address,
-                                                         'readAt', r.read_at, 'extract', r.extract)
-                                  order by r.read_at, r.id)
-                          from app.research_source r
-                         where r.brand_id = s.brand_id and r.id = any(s.source_ids)), '[]'::json) as sources
-         from app.suggestion s
-        where s.brand_id = $1 and s.superseded_by is null and ($2::app.suggestion_step is null or s.step = $2)
-        order by s.created_at desc, s.id`,
-      [brandId, step ?? null],
-    )
-    return found.rows.map((r) => ({
-      id: r.id,
-      step: r.step,
-      key: r.key,
-      proposed: r.proposed,
-      why: r.why,
-      confidence: r.confidence,
-      options: r.options,
-      decision: r.decision,
-      decidedValue: r.decided_value,
-      decidedReason: r.decided_reason,
-      decidedAt: r.decided_at ? new Date(r.decided_at).toISOString() : null,
-      createdAt: new Date(r.created_at).toISOString(),
-      sources: (
-        r.sources as {
-          id: string
-          kind: SourceKind
-          address: string | null
-          readAt: string
-          extract: string
-        }[]
-      ).map((source) => ({
-        ...source,
-        readAt: new Date(source.readAt).toISOString(),
-        // Only research extracts carry the stored flag marker and the 500-character cut. An owner statement is
-        // the owner's own words, returned exactly as stated and never read as flagged.
-        ...(RESEARCH_KINDS.includes(source.kind)
-          ? readStoredExtract(source.extract)
-          : { extract: source.extract, flagged: null }),
-      })),
-    }))
-  })
+  return withBrand(pool, brandId, (client) => listSuggestionsWithin(client, brandId, step))
+}
+
+// The suggestions not replaced, open and decided, newest first, with their sources.
+export async function listSuggestionsWithin(
+  client: PoolClient,
+  brandId: string,
+  step?: SuggestionStep,
+): Promise<SuggestionView[]> {
+  const found = await client.query(
+    `select s.id, s.step, s.key, s.proposed, s.why, s.confidence, s.options, s.decision, s.decided_value,
+            s.decided_reason, s.decided_at, s.created_at, ${sourcesJson('s', 'source_ids')} as sources
+       from app.suggestion s
+      where s.brand_id = $1 and s.superseded_by is null and ($2::app.suggestion_step is null or s.step = $2)
+      order by s.created_at desc, s.id`,
+    [brandId, step ?? null],
+  )
+  return found.rows.map((r) => ({
+    id: r.id,
+    step: r.step,
+    key: r.key,
+    proposed: r.proposed,
+    why: r.why,
+    confidence: r.confidence,
+    options: r.options,
+    decision: r.decision,
+    decidedValue: r.decided_value,
+    decidedReason: r.decided_reason,
+    decidedAt: r.decided_at ? new Date(r.decided_at).toISOString() : null,
+    createdAt: new Date(r.created_at).toISOString(),
+    sources: sourceViews(r.sources),
+  }))
 }

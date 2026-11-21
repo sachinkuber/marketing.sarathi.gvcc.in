@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import type { AuditSink } from '../ports.ts'
+import { readFactsRulesBlock, type FactsRulesBlock } from './facts-rules-state.ts'
 import { readQuestionnaireBlock, type QuestionnaireBlock } from './questionnaire-state.ts'
 import { researchRunIsOpen } from './runs.ts'
 
@@ -198,6 +199,8 @@ export interface Overview {
   openSuggestions: number
   // The questionnaire's state and progress; null before the first start.
   questionnaire: QuestionnaireBlock | null
+  // Facts and rules: the job state, the suggestions waiting and what is in force; null before the first start.
+  factsRules: FactsRulesBlock | null
   cost: Money
 }
 
@@ -231,6 +234,7 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       research: null,
       openSuggestions: counts.rows[0]!.open,
       questionnaire: await readQuestionnaireBlock(client, brandId),
+      factsRules: await readFactsRulesBlock(client, brandId),
       cost: money(t.usd, t.inr, t.uncosted > 0),
     }
     const runId = ob.rows[0]?.research_run_id

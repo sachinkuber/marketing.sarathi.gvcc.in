@@ -52,6 +52,58 @@ export function jobState(row: {
   return row.attempts > 0 ? 'running' : 'waiting'
 }
 
+export interface AgentJob {
+  runId: string
+  jobId: string
+  state: AgentJobState
+  questionId?: string
+}
+
+// The job of a brand's latest run of an onboarding agent that runs one job and can ask (the questionnaire, facts
+// and rules), with the question it waits on; null when the agent was never started for the brand.
+export async function latestAgentJob(
+  client: PoolClient,
+  brandId: string,
+  agent: string,
+): Promise<AgentJob | null> {
+  const found = await client.query<{
+    run_id: string
+    job_id: string
+    finished: boolean
+    dead: boolean
+    cancelled: boolean
+    attempts: number
+    question_id: string | null
+  }>(
+    `select r.id as run_id, i.job_id, i.finished_at is not null as finished,
+            coalesce(c.dead_at is not null, false) as dead, coalesce(c.cancel_requested, false) as cancelled,
+            (select count(*) from app.job_attempt a where a.job_id = i.job_id)::int as attempts,
+            (select q.id from app.agent_question q
+              where q.brand_id = i.brand_id and q.job_id = i.job_id and q.answer is null limit 1) as question_id
+       from app.run r
+       join app.job_input i on i.brand_id = r.brand_id and i.run_id = r.id
+       left join app.job_control c on c.job_id = i.job_id
+      where r.brand_id = $1 and r.agent = $2
+      order by r.started_at desc, r.id desc, i.created_at desc limit 1`,
+    [brandId, agent],
+  )
+  const row = found.rows[0]
+  if (!row) return null
+  const state = jobState({
+    finished: row.finished,
+    dead: row.dead,
+    cancelled: row.cancelled,
+    attempts: row.attempts,
+    openQuestion: row.question_id !== null,
+  })
+  return {
+    runId: row.run_id,
+    jobId: row.job_id,
+    state,
+    ...(state === 'waiting_for_answer' && row.question_id ? { questionId: row.question_id } : {}),
+  }
+}
+
 // The questions the owner is asked are those whose job still waits on them: not finished, not dead, not cancelled.
 // A question of a job that ended otherwise has nothing left to resume, so it is neither listed as open nor reminded.
 const WAITING = `i.finished_at is null and c.dead_at is null and not c.cancel_requested`

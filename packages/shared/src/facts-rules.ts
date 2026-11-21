@@ -24,9 +24,9 @@ const RULE_TEXT_MAX = 300
 // the questionnaire). Sources: five research groups of at most 60 each, the answers' owner statements and the
 // brand's documents. An extract is research's (at most 500 characters) or an owner statement's exact wording,
 // which is never cut: an answer is at most 2,000 characters, an owner's edited profile value at most 4,000.
-const MAX_INPUT_SOURCES = 400
-const INPUT_EXTRACT_MAX = 4000
-const DOCUMENT_NAME_MAX = 255
+export const MAX_INPUT_SOURCES = 400
+export const INPUT_EXTRACT_MAX = 4000
+export const DOCUMENT_NAME_MAX = 255
 const ANSWER_MAX = 2000
 
 // ---- The facts and rules job's input, built by the core once the questionnaire is finished (spec 7, 8.2). ----

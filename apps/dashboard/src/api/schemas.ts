@@ -509,6 +509,15 @@ export const onboardingReply = z.strictObject({
       finished: z.boolean(),
     })
     .nullable(),
+  factsRules: z
+    .strictObject({
+      state: agentJobState,
+      openFacts: z.number().int().nonnegative(),
+      openRules: z.number().int().nonnegative(),
+      activeFacts: z.number().int().nonnegative(),
+      activeRules: z.number().int().nonnegative(),
+    })
+    .nullable(),
   cost: maybeMoney,
 })
 
@@ -587,3 +596,41 @@ export const suggestionItem = z.strictObject({
 })
 export const suggestionsReply = z.strictObject({ suggestions: z.array(suggestionItem) })
 export const suggestionDecisionReply = z.strictObject({ createdId: z.string().nullable() })
+
+// --- facts and rules (M10) ----------------------------------------------------------------------------------
+// The suggestions are the shared shape above; a fact in force carries its sources, a rule its kind and why.
+
+export const factsRulesStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const activeFact = z.strictObject({
+  id: z.string(),
+  statement: z.string(),
+  reviewDate: z.string(),
+  sources: z.array(suggestionSource),
+})
+export const activeRule = z.strictObject({
+  id: z.string(),
+  kind: z.enum([
+    'forbidden_topic',
+    'forbidden_claim',
+    'forbidden_word',
+    'competitor_not_named',
+    'tone_limit',
+    'pause_dates',
+  ]),
+  text: z.string(),
+  why: z.string(),
+})
+export const factsRulesReply = z.strictObject({
+  job: z
+    .strictObject({
+      state: agentJobState,
+      questionId: z.string().optional(),
+    })
+    .nullable(),
+  facts: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeFact) }),
+  rules: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeRule) }),
+})
+export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId: z.string() })
+export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })
+export const factChangedReply = z.strictObject({ factId: z.string() })
+export const ruleChangedReply = z.strictObject({ ruleId: z.string() })
