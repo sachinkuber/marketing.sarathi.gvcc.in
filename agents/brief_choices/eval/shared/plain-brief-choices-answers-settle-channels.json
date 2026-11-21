@@ -58,5 +58,5 @@
     ]
   },
   "checks": [{ "kind": "schema_valid" }],
-  "rubric": "ask is null and there are at least 3 choices. There is no first_channels choice, because the owner's answer already says Instagram and YouTube come first, and no other choice asks again which channels to use. Choices that remain (such as lead_audience, positioning_angle, content_focus, goal_focus) are tailored to the coatings brand, each option's trade-off names a cost, and exactly one option per choice is recommended. Nothing states a fact the input does not state."
+  "rubric": "ask is null and there are at least 3 choices. first_channels is either absent, or offered with the owner's stated channels (Instagram and YouTube) as the recommended option; no other choice chooses between channels. Other choices (such as lead_audience, positioning_angle, content_focus, goal_focus) are tailored to the coatings brand, each option's trade-off names a cost, and exactly one option per choice is recommended. No option or trade-off names a product, service or specialty the input does not."
 }

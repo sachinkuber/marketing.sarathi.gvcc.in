@@ -1,8 +1,8 @@
 import { z, type ZodType } from 'zod'
 import {
+  briefChoicesInputSchema,
   briefSchema,
   factsRulesInputSchema,
-  briefChoicesInputSchema,
   questionnaireInputSchema,
   RESEARCH_SOURCE_KINDS,
   researchGroupInputSchema,

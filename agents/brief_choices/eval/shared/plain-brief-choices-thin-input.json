@@ -22,5 +22,5 @@
     "answers": []
   },
   "checks": [{ "kind": "schema_valid" }],
-  "rubric": "ask is null and there are at least 3 choices, one per key. Every option and trade-off rests only on what the input states: a tailoring business in Nashik serving men and women. Nothing invents a price, a year, a number of customers, a specialty, a channel the brand already uses, a team size or a result. Each choice has exactly one recommended option and trade-offs that name a cost."
+  "rubric": "ask is null and there are at least 3 choices, one per key. Every option and trade-off rests only on what the input states: a tailoring business in Nashik serving men and women. No option or trade-off names a product, service or specialty the input does not, and none states a price, year, number of customers, team size, existing channel or result; a proposed posting frequency is fine. Each choice has exactly one recommended option and trade-offs that name a cost."
 }

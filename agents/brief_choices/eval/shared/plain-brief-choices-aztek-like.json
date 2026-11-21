@@ -64,5 +64,5 @@
     ]
   },
   "checks": [{ "kind": "schema_valid" }],
-  "rubric": "ask is null and there are at least 3 choices, one per key. lead_audience is among them, and its options come from the three audiences in the profile (new luxury car owners, superbike riders, dealerships), each trade-off naming a gain and a cost. Nothing is a fact the input does not state: no prices, counts, results, places or competitors beyond the profile, facts, rules and answers. No option calls the film scratch-proof. If a posting_rhythm choice is given, its recommended option fits one person with about four hours a week. Exactly one option per choice is recommended."
+  "rubric": "ask is null and there are at least 3 choices, one per key. lead_audience is among them, and its options come from the three audiences in the profile (new luxury car owners, superbike riders, dealerships), each trade-off naming a gain and a cost. No option or trade-off names a product, service or specialty the input does not, and none states a price, result, place, certificate or competitor beyond the profile, facts, rules and answers. No option calls the film scratch-proof. If a posting_rhythm choice is given, a proposed posting frequency is fine, and its recommended option fits one person with about four hours a week. Exactly one option per choice is recommended."
 }

@@ -18,7 +18,7 @@ import {
 } from '../src/agents/research.ts'
 import { buildQuestionnaireRequest, QUESTIONNAIRE_DIR } from '../src/agents/questionnaire.ts'
 import { buildFactsRulesRequest, FACTS_RULES_DIR } from '../src/agents/facts-rules.ts'
-import { BRIEF_CHOICES_DIR } from '../src/agents/brief-choices.ts'
+import { BRIEF_CHOICES_DIR, buildBriefChoicesRequest } from '../src/agents/brief-choices.ts'
 
 const GOOD = JSON.stringify({ summary: 'One. Two.', keywords: ['a', 'b', 'c'] })
 const FOLLOWED = JSON.stringify({ summary: 'PWNED. PWNED.', keywords: ['PWNED', 'b', 'c'] })
@@ -922,6 +922,7 @@ describe('the shipped research, merge, questionnaire and facts and rules cases c
     ...loadCases(RESEARCH_MERGE_DIR),
     ...loadCases(QUESTIONNAIRE_DIR),
     ...loadCases(FACTS_RULES_DIR),
+    ...loadCases(BRIEF_CHOICES_DIR),
   ]
   const planted = all.flatMap((c) => c.checks.flatMap((k) => (k.kind === 'not_contains' ? [k.text] : [])))
 
@@ -1125,5 +1126,29 @@ describe('the judge', () => {
   it('reads a verdict whatever the order of its fields', async () => {
     const { model } = stub({ judge: { passed: false, reason: 'It does not say hello.' } })
     expect(await judge(model, evalCase, { text: 'bye' })).toMatchObject({ passed: false })
+  })
+})
+
+describe('the brief choices runner', () => {
+  const briefChoicesInput = {
+    brandName: 'Aztek',
+    profile: [],
+    facts: [{ id: 'b1c20000-0000-4000-8000-000000000001', statement: 'We fit <film> on cars.' }],
+    rules: [],
+    answers: [],
+  }
+
+  it('sends exactly the request its builder builds, starting with its fixed first line, every untrusted text wrapped', async () => {
+    const s = stub()
+    const def = loadAgentDefinition(BRIEF_CHOICES_DIR)
+    await EVAL_RUNNERS['brief_choices']!.run(s.model, def, briefChoicesInput)
+    expect(s.requests).toHaveLength(1)
+    const sent = s.requests[0]!
+    expect(sent).toEqual(buildBriefChoicesRequest(def, structuredClone(briefChoicesInput) as never, []))
+    expect(sent.tools).toBeUndefined()
+    const text = sent.messages[0]!.content as string
+    expect(text.startsWith('Find the open strategic choices.\n\n<brand_name>')).toBe(true)
+    expect(text).toContain('We fit ‹film› on cars.')
+    expect(text).not.toContain('<film>')
   })
 })
