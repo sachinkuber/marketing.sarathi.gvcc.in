@@ -654,7 +654,7 @@ After the final review's fix wave, 2026-11-21, on the development server from th
 
 ## Phase 2, milestone 10: Decisions
 
-Built 2026-11-21 on branch `m10-decisions`. Plan: `docs/plans/2026-11-21-m10-decisions.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 25, 26 and 27, tests 47 and 53, and the halves of 43, 44 and 45 that belong here). This milestone adds the questionnaire, the facts and rules the owner confirms, and the questions an agent asks instead of guessing. It also closes most of what milestone 9 deferred. Nothing from it is on production: it waits for the owner's approval of the steps in `docs/operations.md`, "Production steps at the end of milestone 10". It adds three migrations: 0028, 0029 and 0030.
+Built 2026-11-21 on branch `m10-decisions`. Plan: `docs/plans/2026-11-21-m10-decisions.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 25, 26 and 27, tests 47 and 53, and the halves of 43, 44 and 45 that belong here). This milestone adds the questionnaire, the facts and rules the owner confirms, and the questions an agent asks instead of guessing. It also closes most of what milestone 9 deferred. It is on production since 2026-11-21, deployed with the owner's approval of the steps in `docs/operations.md`, "Production steps at the end of milestone 10" (see "On production" in the findings below). It adds three migrations: 0028, 0029 and 0030.
 
 | Package | State | Evidence |
 |---|---|---|
@@ -736,6 +736,20 @@ Where an M9 line above is out of date, this section says what changed.
   - Task 2: a job waiting for an answer could be marked dead on the queue's last retry. Fixed in b2a676e.
   - Task 13: Node's 5 s `keepAliveTimeout` against a proxy that reuses connections gave "socket hang up" in the e2e harness. Fixed in the harness (7ee1025), and for production in the core itself by the final review (R42).
   - Final review: a kept questionnaire suggestion became an owner statement (R40); a page the model labelled site counted for a fact whatever its domain (R41); an agent question with no options sent a suggestion the owner never saw (the suggestion is now in the answer box); finishing a re-run questionnaire moved a later step back to facts and rules; a replace that kept a fact's wording wrote an owner statement and dropped its sources (now it moves only the review date, audited as `onboarding.fact_changed` with change `review_date_changed`); the PDF split treated a child's exit as its death before its last message was read (it now waits for the channel to close, or a 1 s drain).
+- On production (2026-11-21 and 22, times IST; the step-by-step record is in `docs/operations.md`):
+  - Deployed 38a062c at 23:06 after a backup and the read-only checks (all 0). Migrations 0028 to 0030 ran, and the smoke check passed (8 passed, 2 skipped; on production it runs without `--direct` since the relay). The core's cgroup has `memory.oom.group` 0 and a 1 GiB limit.
+  - The first live evaluation found what the recorded tests could not. `facts_rules` passed 9 of 9 at once. `research` passed 10 of 10, but it was still version 1, which production had recorded with milestone 9's files, so it is now version 2. `questionnaire` took four fix rounds (PRs #23 to #26), going 5, 8, 7, 8 and then 10 of 10:
+    - It suggested what the input did not state.
+    - In one hostile case it dropped the safety questions; the result check refused that result.
+    - It kept giving one-option lists, which the worker now turns into a suggestion (`withoutLoneOptions`).
+    - Two of my own fixes went too far: they cut options and blocked an assumed value.
+  - The judge now writes its reason before its verdict, after one verdict contradicted its own reason.
+  - Before each later PR the fix was graded on production without recording (`EVAL_RUNNERS`, `runChecks` and `judge` in the evaluation workspace). Recorded evaluations cost US$2.16.
+  - The owner released `questionnaire` v1, `facts_rules` v1 and `research` v2 at 00:40 on 22 Nov.
+  - Image and PDF check on a test brand (`gvcc-test`, website gvcc.in, now closed): a 5,072,133-byte PNG was read, and a 150-page PDF was "Prepared in 2 parts" and read across both. The run took 65 s and cost US$1.42, against US$0.78 for Aztek's milestone 9 run; the deeper visibility and competitor research costs more.
+  - Two research findings from that run, for milestone 11:
+    - **A site built by script reads as empty.** gvcc.in's home page came back as "only tracking tags and no usable text" (the fetch tool does not run JavaScript), so the website group found nothing. Only the search results carried the site's own description.
+    - **A short brand name pulls in namesakes.** The searches for "GVCC" brought back a church, a chamber of commerce, a conservation corps and a country club's Instagram, recorded as read sources (none flagged). The merge kept them out: it made only two suggestions, both assumed (five Bengaluru web firms as competitors, and that gvcc.in does not appear in searches for its own name). Still, sources about other organisations sit in the brand's research, and narrowing searches by the intake website's domain or the business type is worth a look.
 - Open for the owner:
   - C1: the Facebook, LinkedIn and YouTube pages for Aztek. A profile not given is not researched and shows as a gap.
   - C4: confirm the competitor list (UltrashieldX, Cosmo PPF/Sunshield, Intakt PPF, XPEL, 3M India). Until then competitors are suggestions only.
