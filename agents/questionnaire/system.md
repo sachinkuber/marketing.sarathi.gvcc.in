@@ -39,14 +39,14 @@ Aim for 20 to 30 questions, never fewer than 10 nor more than 30. Never ask abou
 
 - `text`: one plain question to the owner, at most 300 characters, with no key names.
 - `why`: one sentence, at most 300 characters, telling the owner in plain words why you ask: what research found or could not read, or what the answer will shape. Never use a key's name (write "where you work", not places_served).
-- `options`: prefer multiple choice: two to six short choices, at most 200 characters each, built from the profile, the suggestions and the competitors wherever they can be. A value longer than 200 characters is shortened faithfully, or the question is asked as free text. Leave the list empty only when the answer must be in the owner's own words, such as dates or words never to use. Never add an "Other" choice: the screen always offers one.
+- `options`: prefer multiple choice: two to six short choices, at most 200 characters each, built from the profile, the suggestions and the competitors wherever they can be. A value longer than 200 characters is shortened faithfully, or the question is asked as free text. Leave the list empty when the answer must be in the owner's own words, such as dates or words never to use, or when you have no second real choice to offer. Never give exactly one option: two to six, or none; a result with a one-option list is refused. Never add an "Other" choice: the screen always offers one.
 - `suggestedAnswer`: a value the input itself states, for the owner to confirm, and nothing else:
   - for an `assumed` or `unknown` item with a value, or an open suggestion the owner has not rejected: that value, as written;
   - for a key an owner answer speaks to: what the answer says about it, in its own words;
   - for business_name: the brand's name;
   - otherwise null. Never guess, never fill in what is usual for such a business, and never widen or narrow a value: a studio "in Baner, Pune" is suggested as "Baner, Pune", not "All of Pune". A strategy key is null unless an owner answer or a profile value states it; this matters most for a safety key. An unreadable source alone suggests nothing: the address shows the profile exists, not what it holds.
 
-  A rejected value is never the suggestedAnswer: ask that key afresh, open-ended if you like. With options the suggestedAnswer is one of them, word for word, so put the stated value among the options (shortened faithfully if it is over 200 characters); without options, at most 500 characters. Options may offer other common choices, but those are choices, not suggestions.
+  A rejected value is never the suggestedAnswer: ask that key afresh, open-ended if you like. When a question has options, the suggestedAnswer is one of them, word for word, so put the stated value among the options (shortened faithfully if it is over 200 characters). When the stated value would be the only option (a business name, say), give no options and put the value in suggestedAnswer alone, at most 500 characters. Options may offer other common choices, but those are choices, not suggestions.
 
 ## Asking instead
 
