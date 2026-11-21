@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QuestionnaireScreen, SAVE_MS } from '../src/screens/Questionnaire'
+import { POLL_MS, QuestionnaireScreen, SAVE_MS } from '../src/screens/Questionnaire'
 import { Dom, brandId, sessionAs } from './dom-support'
 
 const push = vi.fn()
@@ -256,5 +256,95 @@ describe('the questionnaire screen, driven', () => {
       { url: answerUrl, method: 'POST', body: { answer: '2012' } },
       { url: answerUrl, method: 'POST', body: { answer: 'In 2010' } },
     ])
+  })
+
+  it('a typed answer still waiting is saved when the owner leaves the page', async () => {
+    await open(asking([question('q1')]))
+    dom.replies.push({ status: 200, body: { answered: true } })
+    dom.type('a-q1', 'Typed just now')
+    expect(dom.writes()).toEqual([])
+    // Leave the page the way the screen sees it (unmount), keeping the stubbed platform for the late save.
+    const internals = dom as unknown as { root: { unmount(): void } | null }
+    act(() => internals.root?.unmount())
+    internals.root = null
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(dom.writes()).toEqual([put('q1', 'Typed just now')])
+  })
+
+  it('a save refused because the questionnaire is finished re-reads, so the form becomes read-only', async () => {
+    await open(asking([question('q1')]))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const done = question('q1', { answer: 'Kept' })
+    dom.replies.push(
+      { status: 409, body: { error: { code: 'questionnaire_finished', message: FINISHED_WORDS } } },
+      {
+        status: 200,
+        body: asking([done], {
+          questionnaire: { id: 'z1', finishedAt: '2026-11-21T10:00:00.000Z', questions: [done] },
+        }),
+      },
+    )
+    dom.type('a-q1', 'x')
+    await tick(SAVE_MS)
+    await tick(0)
+    expect(dom.text()).toContain('This questionnaire is finished. Its answers are kept.')
+    expect(dom.field('a-q1')?.disabled).toBe(true)
+  })
+
+  it('Finish sends once however often it is pressed', async () => {
+    await open(asking([question('q1', { answer: 'Aztek' })]))
+    await dom.click('Finish questionnaire')
+    dom.replies.push({ status: 200, body: { answered: 1, blank: 0 } })
+    const yes = dom.button('Yes, finish')
+    act(() => {
+      yes.click()
+      yes.click()
+    })
+    await dom.settle()
+    expect(dom.writes().filter((w) => w.url.endsWith('/finish'))).toHaveLength(1)
+  })
+
+  describe('polling', () => {
+    const flush = async () => {
+      for (let i = 0; i < 10; i += 1) await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
+    }
+    const gets = () => dom.calls.filter((c) => c.method === 'GET').length
+    const running = { status: 200, body: { questionnaire: null, job: { state: 'running' } } }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      dom.settle = flush
+    })
+
+    it('a running job is read again after 5 seconds', async () => {
+      expect(POLL_MS).toBe(5000)
+      dom.replies.push(running, running)
+      await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
+      expect(gets()).toBe(1)
+      await tick(4999)
+      expect(gets()).toBe(1)
+      await tick(1)
+      await flush()
+      expect(gets()).toBe(2)
+    })
+
+    it('a 404 stops the polling and says so', async () => {
+      dom.replies.push(running, { status: 404, body: { error: { code: 'not_found', message: 'x' } } })
+      await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
+      await tick(5000)
+      await flush()
+      expect(dom.text()).toContain('This brand was not found.')
+      const before = gets()
+      await tick(20_000)
+      expect(gets()).toBe(before)
+    })
+
+    it('there is no further read after the screen is left', async () => {
+      dom.replies.push(running, running)
+      await dom.mount(<QuestionnaireScreen brandId={brandId} />, sessionAs('owner'))
+      dom.stop()
+      await tick(20_000)
+      expect(gets()).toBe(1)
+    })
   })
 })

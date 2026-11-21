@@ -404,6 +404,14 @@ describe('onboarding screens, driven', () => {
     )
   })
 
+  it('Continue leads to facts and rules from that step on', async () => {
+    dom.replies.push({ status: 200, body: overview({ step: 'facts_rules' }) })
+    await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+    expect(dom.host.querySelector(`a[href="/b/${brandId}/onboarding/facts-rules"]`)?.textContent).toBe(
+      'Continue',
+    )
+  })
+
   it('Continue leads to the draft profile while suggestions are open, then to the questionnaire', async () => {
     const cases: [string, number, string][] = [
       ['profile', 3, 'profile'],

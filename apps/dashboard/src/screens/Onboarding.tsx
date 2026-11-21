@@ -11,6 +11,7 @@ const STEP_WORD: Record<string, string> = {
   intake: 'Intake: the website, social links, competitors and documents',
   research: 'Research: the agents are reading what you gave them',
   profile: 'Draft profile: suggestions wait for your decision',
+  facts_rules: 'Facts and rules: confirm what the platform may state and what it must never say',
   questionnaire: 'Questionnaire: answer what the research could not find',
   question: 'Questions',
   fact: 'Facts',
@@ -18,12 +19,15 @@ const STEP_WORD: Record<string, string> = {
   choice: 'Choices',
 }
 
+const LATER = new Set(['facts_rules', 'fact', 'rule', 'choice'])
+
 // Where Continue leads: intake until research has started, progress while it runs, then the draft profile while
 // suggestions wait, then the questionnaire.
 function nextPath(brandId: string, step: string, openSuggestions: number): string {
   const base = `/b/${brandId}/onboarding`
   if (step === 'intake') return `${base}/intake`
   if (step === 'research') return `${base}/research`
+  if (LATER.has(step)) return `${base}/facts-rules`
   if (step === 'profile' && openSuggestions > 0) return `${base}/profile`
   if (step === 'profile' || step === 'questionnaire') return `${base}/questionnaire`
   return `${base}/profile`

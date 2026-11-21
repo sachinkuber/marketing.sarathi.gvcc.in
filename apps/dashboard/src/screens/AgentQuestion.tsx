@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import type { z } from 'zod'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 import { agentQuestion, agentQuestionAnsweredReply } from '../api/schemas'
 import { failureWords } from './onboarding-words'
 
@@ -16,10 +16,13 @@ export function AgentQuestion({
   brandId,
   question,
   onSent,
+  onRefresh,
 }: {
   brandId: string
   question: Pick<Question, 'id' | 'question' | 'why' | 'options' | 'suggested'>
   onSent?: () => void
+  // Called when the core says the question is no longer open, so the screen reads again.
+  onRefresh?: () => void
 }) {
   const [choice, setChoice] = useState(question.suggested ?? '')
   const [own, setOwn] = useState('')
@@ -49,6 +52,8 @@ export function AgentQuestion({
       onSent?.()
     } catch (e) {
       sending.current = false
+      if (e instanceof ApiError && (e.code === 'already_answered' || e.code === 'job_not_waiting'))
+        onRefresh?.()
       setError(failureWords(e, 'The answer was not sent. Check your connection, then send it again.'))
     } finally {
       setBusy(false)

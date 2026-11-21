@@ -70,16 +70,9 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   const [confirming, setConfirming] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [finishError, setFinishError] = useState<string | null>(null)
-
-  useEffect(() => {
-    live.current = true
-    const pending = timers.current
-    return () => {
-      live.current = false
-      for (const timer of pending.values()) clearTimeout(timer)
-      pending.clear()
-    }
-  }, [])
+  // A second press before the first reply must not send again.
+  const finishSending = useRef(false)
+  const startSending = useRef(false)
 
   // Reads now, then again every POLL_MS while the job runs or waits. The timer is cleared when the screen goes;
   // a read that fails keeps what is shown and tries again; a refusal that will not change stops it.
@@ -109,7 +102,8 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
           const open = list.questions.filter((q) => q.answer === null)
           const found = open.find((q) => q.id === fresh.job?.questionId) ?? open[0]
           if (found) setAsked(found)
-        } else if (fresh.job?.state === 'done') {
+        } else {
+          // The job is no longer waiting on the owner, so the question and its "Sent" note go.
           setAsked(null)
         }
         setData(fresh)
@@ -156,6 +150,9 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
           if (live.current) setStatus((s) => ({ ...s, [id]: { kind: 'saved' } }))
           return true
         } catch (e) {
+          // The questionnaire was finished elsewhere: read it again, so the form becomes read-only.
+          if (live.current && e instanceof ApiError && e.code === 'questionnaire_finished')
+            setAttempt((n) => n + 1)
           if (live.current)
             setStatus((s) => ({
               ...s,
@@ -175,6 +172,20 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
     [base],
   )
 
+  // Leaving the page sends what is still waiting to be saved; the screen is gone, so nothing is shown for it.
+  useEffect(() => {
+    live.current = true
+    const pending = timers.current
+    return () => {
+      live.current = false
+      for (const [id, timer] of [...pending]) {
+        clearTimeout(timer)
+        void save(id)
+      }
+      pending.clear()
+    }
+  }, [save])
+
   function change(id: string, value: string) {
     touched.current.add(id)
     valuesRef.current = { ...valuesRef.current, [id]: value }
@@ -189,6 +200,8 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   }
 
   async function start() {
+    if (startSending.current) return
+    startSending.current = true
     setStarting(true)
     setStartError(null)
     try {
@@ -197,6 +210,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
     } catch (e) {
       setStartError(failureWords(e, 'The questionnaire could not be prepared. Try again.'))
     } finally {
+      startSending.current = false
       setStarting(false)
     }
   }
@@ -210,6 +224,8 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
   const blank = questions.length - filled.length
 
   async function finish() {
+    if (finishSending.current) return
+    finishSending.current = true
     setFinishing(true)
     setFinishError(null)
     try {
@@ -230,17 +246,21 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
       if (results.includes(false)) {
         setFinishError('Some answers were not saved. Fix the ones marked, then finish again.')
         setConfirming(false)
+        finishSending.current = false
+        setFinishing(false)
         return
       }
       await api(questionnaireFinishedReply, 'POST', `${base}/questionnaire/finish`)
       router.push(`/b/${brandId}/onboarding/facts-rules`)
+      return
     } catch (e) {
       setFinishError(failureWords(e, 'The questionnaire could not be finished. Try again.'))
       setConfirming(false)
       setAttempt((n) => n + 1)
-    } finally {
-      if (live.current) setFinishing(false)
     }
+    // Only a refusal gets here: the page is left on a success, so the button stays off.
+    finishSending.current = false
+    if (live.current) setFinishing(false)
   }
 
   if (isForbidden(error)) return <OwnerOnly />
@@ -277,8 +297,13 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
               The latest state could not be read. This screen keeps trying.
             </p>
           ) : null}
-          {asked && job?.state !== 'done' ? (
-            <AgentQuestion key={asked.id} brandId={brandId} question={asked} />
+          {asked ? (
+            <AgentQuestion
+              key={asked.id}
+              brandId={brandId}
+              question={asked}
+              onRefresh={() => setAttempt((n) => n + 1)}
+            />
           ) : null}
           {job && isOpenJob(job.state) ? (
             <p className="callout" role="status">
@@ -289,7 +314,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
             <div className="panel pad stack">
               <p className="sub">
                 {job?.state === 'failed'
-                  ? 'The questionnaire could not be written. Check that the questionnaire agent has a live release, then prepare it again.'
+                  ? 'The questionnaire could not be written. Prepare it again. If it fails again, check that the questionnaire agent has a live release.'
                   : 'The questionnaire turns the gaps in the draft profile into questions, each with a suggested answer.'}
               </p>
               {startError ? (
@@ -352,7 +377,7 @@ export function QuestionnaireScreen({ brandId }: { brandId: string }) {
               {confirming ? (
                 <>
                   <p>{`${answered} answered by you, ${kept} suggested ${kept === 1 ? 'answer' : 'answers'} kept, ${blank} left blank. The kept suggestions become your answers. Finish now?`}</p>
-                  <div className="wrap-row">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     <button
                       className="btn primary onb-touch"
                       type="button"
