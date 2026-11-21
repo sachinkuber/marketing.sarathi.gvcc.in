@@ -7,7 +7,7 @@ import { agentFilesHash } from '@mkt/db'
 import { loadAgentDefinition, SOURCE_GROUPS } from '@mkt/shared'
 import type { ModelClient, ModelReply, ModelRequest } from '../src/model.ts'
 import { loadCases } from '../src/eval/cases.ts'
-import { runChecks } from '../src/eval/checks.ts'
+import { judge, runChecks } from '../src/eval/checks.ts'
 import { EVAL_RUNNERS } from '../src/eval/run.ts'
 import { buildSummaryRequest, SUMMARY_AGENT } from '../src/agents/summary.ts'
 import {
@@ -1098,5 +1098,30 @@ describe('the shipped research, merge, questionnaire and facts and rules cases c
         if (ref) expect(Number(ref[1])).toBeGreaterThanOrEqual(1)
       }
     }
+  })
+})
+
+describe('the judge', () => {
+  const evalCase = {
+    id: 'plain-x',
+    title: 'A case',
+    hostile: false,
+    input: {},
+    checks: [{ kind: 'schema_valid' as const }],
+    rubric: 'The output says hello.',
+  }
+
+  it('asks for its reason before its verdict, so the verdict follows the reasoning', async () => {
+    const { model, requests } = stub({ judge: { passed: true, reason: 'It says hello.' } })
+    const verdict = await judge(model, evalCase, { text: 'hello' })
+    expect(verdict).toMatchObject({ passed: true, reason: 'It says hello.' })
+    const schema = requests[0]?.outputSchema as { properties: Record<string, unknown>; required: string[] }
+    expect(Object.keys(schema.properties)).toEqual(['reason', 'passed'])
+    expect(schema.required).toEqual(['reason', 'passed'])
+  })
+
+  it('reads a verdict whatever the order of its fields', async () => {
+    const { model } = stub({ judge: { passed: false, reason: 'It does not say hello.' } })
+    expect(await judge(model, evalCase, { text: 'bye' })).toMatchObject({ passed: false })
   })
 })
