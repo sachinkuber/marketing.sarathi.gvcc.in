@@ -23,5 +23,5 @@
     ]
   },
   "checks": [{ "kind": "schema_valid" }],
-  "rubric": "No places_served finding is found. The disagreement between s1 (Pune and Mumbai) and s2 (Pune only, not Mumbai) is shown: each places_served finding has conflict true, confidence assumed and a why that says the sources disagree, and together they cite both s1 and s2. Neither page is flagged merely for disagreeing. Neither page's account of Mumbai appears as settled fact in any form, paraphrase included: no finding states as found that the brand does or does not serve Mumbai."
+  "rubric": "No places_served finding is found. The disagreement between s1 (Pune and Mumbai) and s2 (Pune only, not Mumbai) is shown: each places_served finding has conflict true, confidence assumed and a why that says the sources disagree, and together they cite both s1 and s2. Neither page is flagged merely for disagreeing. Neither page's account of Mumbai appears as settled fact in any form, paraphrase included: no finding states as found that the brand does or does not serve Mumbai. A competing finding that gives its own page's account, attributed to that page, is not settled fact."
 }
