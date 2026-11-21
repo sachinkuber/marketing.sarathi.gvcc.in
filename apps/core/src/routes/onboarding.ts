@@ -33,6 +33,8 @@ export interface OnboardingRouteDeps {
   audit: AuditSink
   // Present only with the work engine; starting research needs it.
   jobs?: JobsDeps
+  // The service's clock, for "after today". Unset: the system clock.
+  now?: () => Date
 }
 
 const STEPS = ['profile', 'question', 'fact', 'rule', 'choice'] as const
@@ -67,14 +69,22 @@ const ownText = (what: string) =>
     .min(1, `${what} must not be empty.`)
     .max(OWN_TEXT_MAX, `${what} can be at most ${OWN_TEXT_MAX} characters.`)
     .refine((v) => !v.includes('\u0000'), 'must not contain U+0000')
-// A real calendar date after today (UTC). Any later date is accepted: the owner may review a fact after a year or
-// more (ruling R14).
-const reviewDate = z.iso
-  .date()
-  .refine((d) => d > new Date().toISOString().slice(0, 10), 'The review date must be after today.')
-const factBody = z.strictObject({ statement: ownText('The fact'), reviewDate })
+// A real calendar date after today (UTC, the service's clock). Any later date is accepted: the owner may review a
+// fact after a year or more (ruling R14).
+const REVIEW_DATE = 'Give the review date as YYYY-MM-DD, a real date after today.'
+const factBodyFor = (now: () => Date) =>
+  z.strictObject({
+    statement: ownText('The fact'),
+    reviewDate: z.iso
+      .date({ error: REVIEW_DATE })
+      .refine((d) => d > now().toISOString().slice(0, 10), REVIEW_DATE),
+  })
+type FactBody = z.infer<ReturnType<typeof factBodyFor>>
+// "a, b or c"
+const orList = (items: readonly string[]) => items.join(', ').replace(/, ([^,]*)$/, ' or $1')
+const RULE_KIND = `Choose a kind of rule: ${orList(SAFETY_RULE_KINDS.map((k) => k.replace(/_/g, ' ')))} (sent as ${orList(SAFETY_RULE_KINDS)}).`
 const ruleBody = z.strictObject({
-  kind: z.enum(SAFETY_RULE_KINDS),
+  kind: z.enum(SAFETY_RULE_KINDS, { error: RULE_KIND }),
   text: ownText('The rule'),
   why: ownText('The reason'),
 })
@@ -114,6 +124,7 @@ const decisionBody = z
   })
 
 export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRouteDeps): void {
+  const factBody = factBodyFor(deps.now ?? (() => new Date()))
   table.add({
     method: 'get',
     path: '/brands/:brandId/onboarding',
@@ -290,7 +301,7 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
     handlers: [
       validate({ params: brandParams, body: factBody }),
       async (_req, res) => {
-        const { body } = inputOf<{ body: z.infer<typeof factBody> }>(res)
+        const { body } = inputOf<{ body: FactBody }>(res)
         res.json(
           await addOwnFact(deps.pool, deps, {
             brandId: brandContextOf(res).brandId,
@@ -337,7 +348,7 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
       async (_req, res) => {
         const { params, body } = inputOf<{
           params: z.infer<typeof factParams>
-          body: z.infer<typeof factBody>
+          body: FactBody
         }>(res)
         res.json(
           await replaceFact(deps.pool, deps, {

@@ -1,6 +1,7 @@
 -- Up Migration
--- Milestone 10 (spec 7, 9): who stated an owner statement, the questionnaire's finished state, and the one open
--- question a job may have. Grants stay as migration 0023 gave them: nothing broader is added here.
+-- Milestone 10 (spec 7, 9): who stated an owner statement, the questionnaire's finished state, the one open question
+-- a job may have, and the one fact in force per statement. Grants stay as migration 0023 gave them, but for deleting
+-- an answer (below).
 
 -- The migration role owns these tables, and row-level security is forced on them, so with no brand set it would see
 -- no rows: the guard and the backfill below would pass over every existing row. Forcing is switched off for the five
@@ -34,6 +35,9 @@ begin
        and (jsonb_typeof(options) <> 'array' or jsonb_path_exists(options, '$[*] ? (@.type() != "string")'))
   ) then
     raise exception '0028: app.question has options that are not a list of strings; correct or clear them, then run the migration again';
+  end if;
+  if exists (select 1 from app.verified_fact where status = 'active' group by brand_id, fact_hash having count(*) > 1) then
+    raise exception '0028: app.verified_fact has more than one active fact with the same statement in a brand; supersede or retire the extra ones, then run the migration again';
   end if;
 end $$;
 
@@ -98,6 +102,11 @@ create unique index agent_question_one_open on app.agent_question (brand_id, job
 -- An empty answer deletes the row (the answer route): until the questionnaire is finished an answer is saved as typed.
 grant delete on app.answer to mkt_app;
 
+-- One fact in force per statement (ruling R20): the same statement, in any spacing or case, has the same hash, and a
+-- second confirmation of it, a double tap or a decision racing an own addition, is refused. A superseded or expired
+-- fact does not count.
+create unique index verified_fact_one_active on app.verified_fact (brand_id, fact_hash) where status = 'active';
+
 alter table app.research_source force row level security;
 alter table app.suggestion force row level security;
 alter table app.verified_fact force row level security;
@@ -105,10 +114,11 @@ alter table app.question force row level security;
 alter table app.agent_question force row level security;
 
 -- Down Migration
--- No owner row is deleted: every question, answer and agent question stays. Only the added columns, checks and the
--- index go, so who stated an owner statement, which source an answer produced and the questionnaire's finished state
+-- No owner row is deleted: every question, answer, agent question and fact stays. Only the added columns, checks and
+-- indexes go, so who stated an owner statement, which source an answer produced and the questionnaire's finished state
 -- (finished_at, finished_by) are no longer recorded.
 revoke delete on app.answer from mkt_app;
+drop index app.verified_fact_one_active;
 drop index app.agent_question_one_open;
 alter table app.agent_question
   drop constraint agent_question_answer_source,

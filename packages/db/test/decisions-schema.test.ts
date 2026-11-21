@@ -168,6 +168,29 @@ describe('migration 0028: owner statements and question state', () => {
     })
   })
 
+  it('one active fact per brand and statement hash (ruling R20)', async () => {
+    await asApp(async (c) => {
+      const uid = await userId(c)
+      const source = await ownerStatement(c, uid)
+      const fact = (hash: string, status = 'active') =>
+        c.query(
+          `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date, status)
+           values ($1, 's', $2, $3::uuid[], $4, current_date + 30, $5) returning id`,
+          [A, hash, [source], uid, status],
+        )
+      const first = (await fact('h-one')).rows[0].id as string
+      await c.query('savepoint s1')
+      expect(await code(() => fact('h-one'))).toBe('23505')
+      await c.query('rollback to savepoint s1')
+      // A fact out of force does not count: the same statement may be in force again once the old one is not.
+      await fact('h-one', 'superseded')
+      await fact('h-one', 'expired')
+      await c.query(`update app.verified_fact set status = 'expired' where id = $1`, [first])
+      await fact('h-one')
+      await fact('h-two')
+    })
+  })
+
   it('taking 0028 off keeps every answer and question', async () => {
     const own = await createTestDatabase()
     try {
@@ -225,6 +248,9 @@ describe('migration 0028: owner statements and question state', () => {
               or (table_name = 'agent_question' and column_name in ('suggested','reminded_at','source_id')))`,
       )
       expect(cols.rows).toEqual([])
+      expect(
+        (await own.admin.query(`select 1 from pg_indexes where indexname = 'verified_fact_one_active'`)).rows,
+      ).toEqual([])
     } finally {
       await own.drop()
     }
@@ -323,6 +349,31 @@ describe('migration 0028: owner statements and question state', () => {
           .stated_by,
       ).toBe(uid)
       expect(await validated(own)).toBe(true)
+    } finally {
+      await own.drop()
+    }
+  })
+
+  it('names two active facts with the same statement before it makes the one-active index', async () => {
+    const { own, url, uid } = await at0027()
+    try {
+      const { migrate } = await import('../src/migrate.ts')
+      for (let i = 0; i < 2; i++)
+        await own.admin.query(
+          `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
+           values ($1, 'same', 'dup', '{}', $2, current_date + 30)`,
+          [A, uid],
+        )
+      await expect(migrate(url)).rejects.toThrow(
+        /0028: app\.verified_fact has more than one active fact with the same statement in a brand/,
+      )
+      await own.admin.query(
+        `update app.verified_fact set status = 'expired' where ctid = (select ctid from app.verified_fact where fact_hash = 'dup' limit 1)`,
+      )
+      await migrate(url)
+      expect(
+        (await own.admin.query(`select 1 from pg_indexes where indexname = 'verified_fact_one_active'`)).rows,
+      ).toHaveLength(1)
     } finally {
       await own.drop()
     }

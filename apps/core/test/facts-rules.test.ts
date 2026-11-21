@@ -1121,3 +1121,261 @@ describe('a re-run', () => {
     })
   })
 })
+
+describe('one fact or rule in force per wording (ruling R20)', () => {
+  const addFact = (brandId: string, statement: string, reviewDate = day(90)) =>
+    owner.request('POST', api(brandId, '/facts'), { body: { statement, reviewDate } })
+  const addRule = (brandId: string, kind: string, text: string) =>
+    owner.request('POST', api(brandId, '/rules'), { body: { kind, text, why: 'Not us.' } })
+  const statementsOf = async (brandId: string) =>
+    (
+      await q(
+        `select count(*)::int as n from app.research_source where brand_id = $1 and kind = 'owner_statement'`,
+        [brandId],
+      )
+    )[0].n as number
+  const activeFacts = async (brandId: string) =>
+    (
+      await q(`select statement from app.verified_fact where brand_id = $1 and status = 'active'`, [brandId])
+    ).map((r) => r.statement)
+  const activeRules = async (brandId: string) =>
+    (await q('select kind, text from app.safety_rule where brand_id = $1 and active', [brandId])).map(
+      (r) => `${r.kind}:${r.text}`,
+    )
+
+  it('the same fact or rule added twice, in a row or at once, is confirmed once', async () => {
+    const f = await fresh()
+    expect((await addFact(f.brandId, 'Open since 2019.')).status).toBe(200)
+    const statements = await statementsOf(f.brandId)
+    // The same wording in other spacing and case is the same fact.
+    const again = await addFact(f.brandId, '  open   since 2019. ', day(200))
+    expect(again.status).toBe(409)
+    expect(again.json).toMatchObject({
+      error: {
+        code: 'already_confirmed',
+        message: 'This fact is already confirmed. Replace it to change its wording or review date.',
+      },
+    })
+    // Two taps at once: one is confirmed, the other refused.
+    const both = await Promise.all([
+      addFact(f.brandId, 'We serve Pune.'),
+      addFact(f.brandId, 'We serve Pune.'),
+    ])
+    expect(both.map((r) => r.status).sort()).toEqual([200, 409])
+    expect((await activeFacts(f.brandId)).sort()).toEqual(['Open since 2019.', 'We serve Pune.'])
+    // A refused addition writes no owner statement.
+    expect(await statementsOf(f.brandId)).toBe(statements + 1)
+
+    expect((await addRule(f.brandId, 'forbidden_word', 'cheap')).status).toBe(200)
+    const rule = await addRule(f.brandId, 'forbidden_word', ' Cheap ')
+    expect(rule.status).toBe(409)
+    expect(rule.json).toMatchObject({ error: { code: 'already_confirmed' } })
+    // The same text under another kind is another rule.
+    expect((await addRule(f.brandId, 'forbidden_claim', 'cheap')).status).toBe(200)
+    const rules = await Promise.all([
+      addRule(f.brandId, 'tone_limit', 'No slang.'),
+      addRule(f.brandId, 'tone_limit', 'No slang.'),
+    ])
+    expect(rules.map((r) => r.status).sort()).toEqual([200, 409])
+    expect((await activeRules(f.brandId)).sort()).toEqual([
+      'forbidden_claim:cheap',
+      'forbidden_word:cheap',
+      'tone_limit:No slang.',
+    ])
+
+    // Once out of force, the same wording can be confirmed again.
+    const factId = (
+      await q(`select id from app.verified_fact where brand_id = $1 and statement = 'We serve Pune.'`, [
+        f.brandId,
+      ])
+    )[0].id
+    expect(
+      (await owner.request('POST', api(f.brandId, `/facts/${factId}/retire`), { body: {} })).status,
+    ).toBe(200)
+    expect((await addFact(f.brandId, 'We serve Pune.')).status).toBe(200)
+    const ruleId = (
+      await q(`select id from app.safety_rule where brand_id = $1 and kind = 'tone_limit'`, [f.brandId])
+    )[0].id
+    expect(
+      (await owner.request('POST', api(f.brandId, `/rules/${ruleId}/turn-off`), { body: {} })).status,
+    ).toBe(200)
+    expect((await addRule(f.brandId, 'tone_limit', 'No slang.')).status).toBe(200)
+  })
+
+  it("replacing a fact with another fact's wording is refused; with its own wording it moves the review date", async () => {
+    const f = await fresh()
+    const a = (await addFact(f.brandId, 'Open since 2019.')).json.factId as string
+    expect((await addFact(f.brandId, 'We serve Pune.')).status).toBe(200)
+    const twin = await owner.request('POST', api(f.brandId, `/facts/${a}/replace`), {
+      body: { statement: 'we serve PUNE.', reviewDate: day(120) },
+    })
+    expect(twin.status).toBe(409)
+    expect(twin.json).toMatchObject({ error: { code: 'already_confirmed' } })
+    expect((await q('select status from app.verified_fact where id = $1', [a]))[0].status).toBe('active')
+    const same = await owner.request('POST', api(f.brandId, `/facts/${a}/replace`), {
+      body: { statement: 'Open since 2019.', reviewDate: day(500) },
+    })
+    expect(same.status, JSON.stringify(same.json)).toBe(200)
+    const rows = await q(
+      `select id, status, superseded_by, review_date::text as review_date from app.verified_fact
+        where brand_id = $1 and statement = 'Open since 2019.' order by confirmed_at, id`,
+      [f.brandId],
+    )
+    expect(rows.map((r) => [r.id, r.status, r.superseded_by])).toEqual([
+      [a, 'superseded', same.json.factId],
+      [same.json.factId, 'active', null],
+    ])
+    expect(rows[1].review_date).toBe(day(500))
+  })
+
+  it('accepting a suggestion whose fact or rule is already in force is refused', async () => {
+    const f = await fresh()
+    expect((await addFact(f.brandId, 'Open since 2019.')).status).toBe(200)
+    expect((await addRule(f.brandId, 'forbidden_word', 'cheap')).status).toBe(200)
+    // Suggestions offered before the owner confirmed the same fact and rule (a decision racing a re-run).
+    const offered = await q(
+      `insert into app.suggestion (brand_id, step, key, proposed, why, source_ids, confidence) values
+         ($1, 'fact', 'fact:raced', $2::jsonb, 'The site says so.', $3::uuid[], 'found'),
+         ($1, 'fact', 'fact:other', $4::jsonb, 'The site says so.', $3::uuid[], 'found'),
+         ($1, 'rule', 'rule:raced', '{"kind":"forbidden_word","text":"CHEAP"}'::jsonb, 'Said.', $5::uuid[], 'found')
+       returning id, key`,
+      [
+        f.brandId,
+        JSON.stringify({ statement: 'OPEN since 2019.', reviewDate: day(90) }),
+        [f.site],
+        JSON.stringify({ statement: 'Coats cars.', reviewDate: day(90) }),
+        [f.statements[1]],
+      ],
+    )
+    const id = (key: string) => offered.find((r) => r.key === key)!.id as string
+    for (const key of ['fact:raced', 'rule:raced']) {
+      const refused = await decide(f.brandId, id(key), { decision: 'accepted' })
+      expect(refused.status, key).toBe(409)
+      expect(refused.json).toMatchObject({ error: { code: 'already_confirmed' } })
+    }
+    // Edited into the wording of a fact in force: refused too, and no owner statement is written.
+    const statements = (
+      await q(
+        `select count(*)::int as n from app.research_source where brand_id = $1 and kind = 'owner_statement'`,
+        [f.brandId],
+      )
+    )[0].n
+    const edited = await decide(f.brandId, id('fact:other'), {
+      decision: 'edited',
+      value: { statement: 'Open since 2019.', reviewDate: day(90) },
+    })
+    expect(edited.status).toBe(409)
+    expect(
+      (
+        await q(
+          `select count(*)::int as n from app.research_source where brand_id = $1 and kind = 'owner_statement'`,
+          [f.brandId],
+        )
+      )[0].n,
+    ).toBe(statements)
+    // Accept all found leaves them open and confirms only the one that is new.
+    for (const step of ['fact', 'rule']) {
+      const bulk = await owner.request('POST', api(f.brandId, '/suggestions/accept-found'), {
+        body: { step },
+      })
+      expect(bulk.status).toBe(200)
+      expect(bulk.json).toEqual({ accepted: step === 'fact' ? 1 : 0 })
+    }
+    expect(
+      (await q('select decision from app.suggestion where id = $1', [id('fact:raced')]))[0].decision,
+    ).toBeNull()
+    expect(
+      (await q('select decision from app.suggestion where id = $1', [id('rule:raced')]))[0].decision,
+    ).toBeNull()
+    expect((await activeFacts(f.brandId)).sort()).toEqual(['Coats cars.', 'Open since 2019.'])
+    expect(await activeRules(f.brandId)).toEqual(['forbidden_word:cheap'])
+  })
+})
+
+describe('rules are graded by their sources (ruling R21)', () => {
+  it('a rule is found only when a cited source can stand behind it, so accept-all never confirms a third-party rule', async () => {
+    const f = await fresh()
+    const { jobId } = await started(f.brandId)
+    const posted = await post(
+      jobId,
+      result(
+        [],
+        [
+          rule('competitor_not_named', 'Never name Rival.', [f.competitor]),
+          rule('forbidden_claim', 'Never promise a lifetime warranty.', [f.site, f.competitor]),
+          rule('forbidden_word', 'cheap', [f.statements[1]!]),
+        ],
+      ),
+    )
+    expect(posted).toMatchObject({ status: 'applied', outcome: { facts: 0, rules: 3 } })
+    const graded = Object.fromEntries(
+      (await suggestionsOf(f.brandId)).map((r) => [(r.proposed as { kind: string }).kind, r.confidence]),
+    )
+    expect(graded).toEqual({
+      competitor_not_named: 'assumed',
+      forbidden_claim: 'found',
+      forbidden_word: 'found',
+    })
+    const bulk = await owner.request('POST', api(f.brandId, '/suggestions/accept-found'), {
+      body: { step: 'rule' },
+    })
+    expect(bulk.json).toEqual({ accepted: 2 })
+    expect(
+      (await q('select kind from app.safety_rule where brand_id = $1 order by kind', [f.brandId])).map(
+        (r) => r.kind,
+      ),
+    ).toEqual(['forbidden_claim', 'forbidden_word'])
+  })
+})
+
+describe('the review date and the rule kind (ruling R22)', () => {
+  it('a missing or malformed review date and an unknown kind say how to fix them', async () => {
+    const f = await fresh()
+    const message = 'Give the review date as YYYY-MM-DD, a real date after today.'
+    for (const reviewDate of [undefined, '21/11/2027', '2031-02-30', day(0)]) {
+      const reply = await owner.request('POST', api(f.brandId, '/facts'), {
+        body: { statement: 'Open since 2019.', ...(reviewDate === undefined ? {} : { reviewDate }) },
+      })
+      expect(reply.status, String(reviewDate)).toBe(400)
+      expect(reply.json.error.details, String(reviewDate)).toEqual([
+        { part: 'body', path: 'reviewDate', message },
+      ])
+    }
+    const kind = await owner.request('POST', api(f.brandId, '/rules'), {
+      body: { kind: 'never_ever', text: 'cheap', why: 'Not us.' },
+    })
+    expect(kind.status).toBe(400)
+    expect(kind.json.error.details).toEqual([
+      {
+        part: 'body',
+        path: 'kind',
+        message:
+          'Choose a kind of rule: forbidden topic, forbidden claim, forbidden word, competitor not named, tone limit or pause dates (sent as forbidden_topic, forbidden_claim, forbidden_word, competitor_not_named, tone_limit or pause_dates).',
+      },
+    ])
+  })
+
+  describe("on the service's own clock", () => {
+    // The service's clock is three years ahead of the system's, so a date a year from now is already past.
+    let late: Stack
+    let lateOwner: TestClient
+    beforeAll(async () => {
+      late = await createStack({ clock: { now: () => new Date(Date.now() + 3 * 365 * 86_400_000) } })
+      await addUser(late, { email: 'owner@late.test', password: PASSWORD, platformOwner: true })
+      lateOwner = (await enrolledClient(late, 'owner@late.test', PASSWORD)).client
+    }, 120_000)
+    afterAll(async () => late?.close())
+
+    it("the review date is checked against the service's clock", async () => {
+      const brandId = await addBrand(late, 'facts-late')
+      const early = await lateOwner.request('POST', `/api/v1/brands/${brandId}/onboarding/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate: day(365) },
+      })
+      expect(early.status).toBe(400)
+      const later = await lateOwner.request('POST', `/api/v1/brands/${brandId}/onboarding/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate: day(4 * 365) },
+      })
+      expect(later.status, JSON.stringify(later.json)).toBe(200)
+    })
+  })
+})

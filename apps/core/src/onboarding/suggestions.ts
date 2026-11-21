@@ -127,6 +127,53 @@ const normalise = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase()
 // A verified fact's hash: the sha256 of its normalised statement, so the same fact in other spacing or case matches.
 export const factHash = (statement: string) => createHash('sha256').update(normalise(statement)).digest('hex')
 
+// The brand's onboarding row, locked first by every write that can confirm a fact or rule (a decision, accept-all,
+// an own addition, a change, the facts and rules result), so each sees every earlier confirmation of the brand.
+export const lockOnboarding = (client: PoolClient, brandId: string) =>
+  client.query('select 1 from app.onboarding where brand_id = $1 for update', [brandId])
+
+const FACT_CONFIRMED = 'This fact is already confirmed. Replace it to change its wording or review date.'
+const RULE_CONFIRMED = 'This rule is already confirmed. To change it, turn it off and add it again.'
+
+// Ruling R20: one fact in force per statement (its hash), `except` the fact being replaced.
+export async function refuseActiveFactTwin(
+  client: PoolClient,
+  brandId: string,
+  statement: string,
+  except: string | null = null,
+): Promise<void> {
+  const twin = await client.query(
+    `select 1 from app.verified_fact
+      where brand_id = $1 and fact_hash = $2 and status = 'active' and ($3::uuid is null or id <> $3) limit 1`,
+    [brandId, factHash(statement), except],
+  )
+  if (twin.rows.length > 0) throw new AppError(409, 'already_confirmed', FACT_CONFIRMED)
+}
+
+// Ruling R20: one rule in force per kind and text, in any spacing or case.
+export async function refuseActiveRuleTwin(
+  client: PoolClient,
+  brandId: string,
+  kind: string,
+  text: string,
+): Promise<void> {
+  const rules = await client.query<{ text: string }>(
+    'select text from app.safety_rule where brand_id = $1 and kind = $2 and active',
+    [brandId, kind],
+  )
+  if (rules.rows.some((r) => normalise(r.text) === normalise(text)))
+    throw new AppError(409, 'already_confirmed', RULE_CONFIRMED)
+}
+
+// The index behind ruling R20 refuses a second fact in force that got past the check above (a brand with no
+// onboarding row has nothing to lock): it is the same refusal.
+export function confirmedTwin(error: unknown): unknown {
+  const e = error as { code?: string; constraint?: string }
+  return e.code === '23505' && e.constraint === 'verified_fact_one_active'
+    ? new AppError(409, 'already_confirmed', FACT_CONFIRMED)
+    : error
+}
+
 // Ruling R10: the profile holds one current item per key; a new one supersedes it in this transaction. The
 // current item is locked first, so a write on the same key elsewhere waits, then supersedes this one.
 export async function supersedeProfileItem(
@@ -269,6 +316,8 @@ async function writeFact(
       'review_date_needed',
       'This fact needs a review date. Give one as reviewDate in the form YYYY-MM-DD.',
     )
+  // Before anything is written, so a refusal leaves the transaction clean (accept-all carries on).
+  await refuseActiveFactTwin(client, input.brandId, statement)
 
   const kinds = row.source_ids.length
     ? (
@@ -316,6 +365,7 @@ async function writeRule(
   const kind = isObject(chosen) && chosen.kind !== undefined ? chosen.kind : base.kind
   if (typeof kind !== 'string' || !SAFETY_KINDS.includes(kind))
     throw invalid(`The rule needs a kind: one of ${SAFETY_KINDS.join(', ')}.`)
+  await refuseActiveRuleTwin(client, input.brandId, kind, text)
   const why = isObject(chosen) && typeof chosen.why === 'string' ? chosen.why : row.why
   const made = await client.query<{ id: string }>(
     `insert into app.safety_rule (brand_id, kind, text, why, confirmed_by, from_suggestion)
@@ -337,43 +387,62 @@ export async function decideSuggestion(
     actor: { userId: string }
   },
 ): Promise<{ createdId: string | null }> {
-  return withBrand(pool, input.brandId, (client) => decideWithin(client, deps, input))
+  try {
+    return await withBrand(pool, input.brandId, async (client) => {
+      await lockOnboarding(client, input.brandId)
+      return decideWithin(client, deps, input)
+    })
+  } catch (error) {
+    throw confirmedTwin(error)
+  }
 }
 
 // Accepts every open suggestion of a step that the agent marked found. Assumed and unknown ones stay open for
-// the owner. A fact whose sources cannot support it is left open too: it needs an edit, not a bulk accept.
+// the owner. A fact whose sources cannot support it is left open too: it needs an edit, not a bulk accept. So is
+// a fact or rule already in force (ruling R20).
 export async function acceptFound(
   pool: Pool,
   deps: Deps,
   input: { brandId: string; step: SuggestionStep; actor: { userId: string } },
 ): Promise<{ accepted: number }> {
-  return withBrand(pool, input.brandId, async (client) => {
-    const open = await client.query<{ id: string }>(
-      `select id from app.suggestion
-        where brand_id = $1 and step = $2 and confidence = 'found'
-          and decision is null and superseded_by is null
-        order by created_at, id
-        for update skip locked`,
-      [input.brandId, input.step],
-    )
-    let accepted = 0
-    for (const { id } of open.rows) {
-      try {
-        await decideWithin(client, deps, {
-          brandId: input.brandId,
-          suggestionId: id,
-          decision: 'accepted',
-          actor: input.actor,
-        })
-        accepted += 1
-      } catch (err) {
-        // Refusals happen before anything is written, so the transaction is still clean. A 409 means someone
-        // else decided or replaced the row meanwhile: skip it.
-        if (!(err instanceof AppError) || (err.status !== 422 && err.status !== 409)) throw err
-      }
+  try {
+    return await withBrand(pool, input.brandId, (client) => acceptFoundWithin(client, deps, input))
+  } catch (error) {
+    throw confirmedTwin(error)
+  }
+}
+
+async function acceptFoundWithin(
+  client: PoolClient,
+  deps: Deps,
+  input: { brandId: string; step: SuggestionStep; actor: { userId: string } },
+): Promise<{ accepted: number }> {
+  await lockOnboarding(client, input.brandId)
+  const open = await client.query<{ id: string }>(
+    `select id from app.suggestion
+      where brand_id = $1 and step = $2 and confidence = 'found'
+        and decision is null and superseded_by is null
+      order by created_at, id
+      for update skip locked`,
+    [input.brandId, input.step],
+  )
+  let accepted = 0
+  for (const { id } of open.rows) {
+    try {
+      await decideWithin(client, deps, {
+        brandId: input.brandId,
+        suggestionId: id,
+        decision: 'accepted',
+        actor: input.actor,
+      })
+      accepted += 1
+    } catch (err) {
+      // Refusals happen before anything is written, so the transaction is still clean. A 409 means someone
+      // else decided or replaced the row meanwhile, or the same fact or rule is already in force: skip it.
+      if (!(err instanceof AppError) || (err.status !== 422 && err.status !== 409)) throw err
     }
-    return { accepted }
-  })
+  }
+  return { accepted }
 }
 
 // A source as the owner reads it: the stored flag marker and escape are taken off the extract, the flag kept apart.

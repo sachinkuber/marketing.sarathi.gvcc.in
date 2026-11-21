@@ -26,16 +26,20 @@ import { platformOwnersOf } from '../notify/recipients.ts'
 import type { AuditSink } from '../ports.ts'
 import type { AgentJobState } from './agent-questions.ts'
 import { FACTS_RULES_AGENT, latestFactsRulesJob } from './facts-rules-state.ts'
-import { asText, clip } from './questionnaire.ts'
+import { asText, clip } from './input-text.ts'
 import { researchRunIsOpen } from './runs.ts'
 import { qualifiesAsFactSource, type SourceKind } from './sources.ts'
 import { readStoredExtract } from './stored-extract.ts'
 import {
   addSuggestions,
+  confirmedTwin,
   decideWithin,
   factHash,
   insertSuggestion,
   listSuggestionsWithin,
+  lockOnboarding,
+  refuseActiveFactTwin,
+  refuseActiveRuleTwin,
   sourcesJson,
   sourceViews,
   type SourceView,
@@ -47,10 +51,12 @@ import {
 // the finished questionnaire's answers and the brand's documents; the agent's result becomes fact and rule
 // suggestions; nothing becomes a verified fact or a safety rule but by the owner: a decision on a suggestion, an
 // own addition, or a change to what is confirmed. A confirmed fact or rule is never updated in place: a change
-// supersedes, retires or turns it off, and the audit records who.
+// supersedes, retires or turns it off, and the audit records who. One fact is in force per statement, and one rule
+// per kind and text (ruling R20).
 //
-// Lock order: the brand's onboarding row first (as starting research and the questionnaire take it), then the
-// suggestion, fact or rule rows.
+// Lock order: every function here takes the brand's onboarding row first (as starting research, the questionnaire,
+// a decision and accept-all do; the result handler after the job and run rows the engine holds), then the
+// suggestion, fact or rule rows. So the check for a fact or rule already in force sees every earlier confirmation.
 
 export const FACTS_RULES_RESULT_TYPE = 'facts_rules.v1'
 // The owner's own fact or rule (the result schema's limits).
@@ -66,9 +72,6 @@ const OWN_WHY = 'Added by the owner, in their own words.'
 const hash12 = (text: string) => factHash(text).slice(0, 12)
 export const factKey = (statement: string) => `fact:${hash12(statement)}`
 export const ruleKey = (kind: string, text: string) => `rule:${kind}:${hash12(text)}`
-
-const lockOnboarding = (client: PoolClient, brandId: string) =>
-  client.query('select 1 from app.onboarding where brand_id = $1 for update', [brandId])
 
 // ---- Starting ----
 
@@ -253,7 +256,8 @@ export async function startFactsRules(
 // of one of this job's answered agent questions (ruling R11), and every review date after the input's today; any
 // later date is accepted (ruling R14). The facts and rules become open suggestions (an undecided one with the same
 // key is superseded, a decided one is kept); one the owner already confirmed and keeps in force is not suggested
-// again. A fact is `found` when one of its sources can stand behind a verified fact, else `assumed`.
+// again. A fact or a rule is `found` when one of its sources can stand behind it (the brand's site, a document or
+// the owner's statement), else `assumed` (ruling R21), so accept-all never confirms one resting on third parties.
 export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHandler {
   return async (client, ctx) => {
     const parsed = factsRulesResultSchema.safeParse(ctx.result)
@@ -288,6 +292,9 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
         "A fact or rule cites a source that is not in this job's input. Cite only the sources the job was given.",
       )
     }
+    if (issues.some((issue) => !issue.path.includes('reviewDate'))) {
+      throw new AppError(422, 'result_invalid', 'The result is not a valid set of facts and rules.')
+    }
     if (issues.length > 0) {
       throw new AppError(
         422,
@@ -295,7 +302,7 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
         "A fact's review date is not after the job's date. Give a later review date.",
       )
     }
-    const cited = [...new Set(result.facts.flatMap((f) => f.sourceIds))]
+    const cited = [...new Set([...result.facts, ...result.rules].flatMap((item) => item.sourceIds))]
     const kinds = new Map(
       (
         await client.query<{ id: string; kind: SourceKind }>(
@@ -325,20 +332,25 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
       confirmed.add(key)
       return true
     }
+    const graded = (sourceIds: string[]) =>
+      qualifiesAsFactSource(
+        sourceIds.flatMap((id) => {
+          const kind = kinds.get(id)
+          return kind ? [kind] : []
+        }),
+      )
+        ? ('found' as const)
+        : ('assumed' as const)
     for (const f of result.facts) {
       const key = factKey(f.statement)
       if (!keep(key)) continue
-      const sourceKinds = f.sourceIds.flatMap((id) => {
-        const kind = kinds.get(id)
-        return kind ? [kind] : []
-      })
       items.push({
         step: 'fact',
         key,
         proposed: { statement: f.statement, reviewDate: f.reviewDate },
         why: f.why,
         sourceIds: f.sourceIds,
-        confidence: qualifiesAsFactSource(sourceKinds) ? 'found' : 'assumed',
+        confidence: graded(f.sourceIds),
       })
     }
     for (const r of result.rules) {
@@ -350,7 +362,7 @@ export function factsRulesResultHandler(deps: Pick<JobsDeps, 'audit'>): ResultHa
         proposed: { kind: r.kind, text: r.text },
         why: r.why,
         sourceIds: r.sourceIds,
-        confidence: 'found',
+        confidence: graded(r.sourceIds),
       })
     }
     await addSuggestions(client, deps, { brandId: ctx.brandId, runId: ctx.runId, items })
@@ -450,27 +462,36 @@ async function ownerStatement(
 // "Add your own" (spec 8.2, ruling R2): one transaction writes the owner statement, a suggestion citing it, and the
 // owner's acceptance of it through the decision path, so the verified fact or rule has the statement as its source
 // and the decision is audited as the owner's, marked as an own addition. An undecided suggestion with the same key
-// is superseded by it.
+// is superseded by it. The same fact or rule already in force is refused before anything is written (ruling R20):
+// a second tap waits for the first on the onboarding row, then finds its fact or rule.
 async function addOwn(
   pool: Pool,
   deps: { audit: AuditSink },
   input: { brandId: string; actor: { userId: string } },
-  text: string,
-  item: (statementId: string) => SuggestionInput,
+  own: {
+    text: string
+    refuseTwin: (client: PoolClient) => Promise<void>
+    item: (statementId: string) => SuggestionInput
+  },
 ): Promise<{ createdId: string; suggestionId: string }> {
-  return withBrand(pool, input.brandId, async (client) => {
-    await lockOnboarding(client, input.brandId)
-    const statementId = await ownerStatement(client, input.brandId, text, input.actor.userId)
-    const suggestionId = await insertSuggestion(client, input.brandId, null, item(statementId))
-    const { createdId } = await decideWithin(client, deps, {
-      brandId: input.brandId,
-      suggestionId,
-      decision: 'accepted',
-      actor: input.actor,
-      ownAddition: true,
+  try {
+    return await withBrand(pool, input.brandId, async (client) => {
+      await lockOnboarding(client, input.brandId)
+      await own.refuseTwin(client)
+      const statementId = await ownerStatement(client, input.brandId, own.text, input.actor.userId)
+      const suggestionId = await insertSuggestion(client, input.brandId, null, own.item(statementId))
+      const { createdId } = await decideWithin(client, deps, {
+        brandId: input.brandId,
+        suggestionId,
+        decision: 'accepted',
+        actor: input.actor,
+        ownAddition: true,
+      })
+      return { createdId: createdId!, suggestionId }
     })
-    return { createdId: createdId!, suggestionId }
-  })
+  } catch (error) {
+    throw confirmedTwin(error)
+  }
 }
 
 export async function addOwnFact(
@@ -478,14 +499,18 @@ export async function addOwnFact(
   deps: { audit: AuditSink },
   input: { brandId: string; statement: string; reviewDate: string; actor: { userId: string } },
 ): Promise<{ factId: string; suggestionId: string }> {
-  const { createdId, suggestionId } = await addOwn(pool, deps, input, input.statement, (statementId) => ({
-    step: 'fact',
-    key: factKey(input.statement),
-    proposed: { statement: input.statement, reviewDate: input.reviewDate },
-    why: OWN_WHY,
-    sourceIds: [statementId],
-    confidence: 'found',
-  }))
+  const { createdId, suggestionId } = await addOwn(pool, deps, input, {
+    text: input.statement,
+    refuseTwin: (client) => refuseActiveFactTwin(client, input.brandId, input.statement),
+    item: (statementId) => ({
+      step: 'fact',
+      key: factKey(input.statement),
+      proposed: { statement: input.statement, reviewDate: input.reviewDate },
+      why: OWN_WHY,
+      sourceIds: [statementId],
+      confidence: 'found',
+    }),
+  })
   return { factId: createdId, suggestionId }
 }
 
@@ -494,14 +519,18 @@ export async function addOwnRule(
   deps: { audit: AuditSink },
   input: { brandId: string; kind: SafetyRuleKind; text: string; why: string; actor: { userId: string } },
 ): Promise<{ ruleId: string; suggestionId: string }> {
-  const { createdId, suggestionId } = await addOwn(pool, deps, input, input.text, (statementId) => ({
-    step: 'rule',
-    key: ruleKey(input.kind, input.text),
-    proposed: { kind: input.kind, text: input.text },
-    why: input.why,
-    sourceIds: [statementId],
-    confidence: 'found',
-  }))
+  const { createdId, suggestionId } = await addOwn(pool, deps, input, {
+    text: input.text,
+    refuseTwin: (client) => refuseActiveRuleTwin(client, input.brandId, input.kind, input.text),
+    item: (statementId) => ({
+      step: 'rule',
+      key: ruleKey(input.kind, input.text),
+      proposed: { kind: input.kind, text: input.text },
+      why: input.why,
+      sourceIds: [statementId],
+      confidence: 'found',
+    }),
+  })
   return { ruleId: createdId, suggestionId }
 }
 
@@ -524,7 +553,10 @@ async function lockActiveFact(client: PoolClient, brandId: string, factId: strin
   if (found.rows[0].status !== 'active') throw factNotActive()
 }
 
-// The new fact rests on the owner's statement of it; the old one is kept, superseded by the new one.
+// The new fact rests on the owner's statement of it; the old one is kept, superseded by the new one. Another fact in
+// force with the new wording is refused (ruling R20); the fact's own wording is not, so its review date can move.
+// The old fact leaves force before the new one is written (one fact in force per statement, index
+// verified_fact_one_active), and then points at it.
 export async function replaceFact(
   pool: Pool,
   deps: { audit: AuditSink },
@@ -536,39 +568,50 @@ export async function replaceFact(
     actor: { userId: string }
   },
 ): Promise<{ factId: string }> {
-  return withBrand(pool, input.brandId, async (client) => {
-    await lockActiveFact(client, input.brandId, input.factId)
-    const statementId = await ownerStatement(client, input.brandId, input.statement, input.actor.userId)
-    const made = await client.query<{ id: string }>(
-      `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
-       values ($1, $2, $3, $4::uuid[], $5, $6) returning id`,
-      [
+  try {
+    return await withBrand(pool, input.brandId, async (client) => {
+      await lockOnboarding(client, input.brandId)
+      await lockActiveFact(client, input.brandId, input.factId)
+      await refuseActiveFactTwin(client, input.brandId, input.statement, input.factId)
+      const statementId = await ownerStatement(client, input.brandId, input.statement, input.actor.userId)
+      await client.query(
+        `update app.verified_fact set status = 'superseded' where brand_id = $1 and id = $2`,
+        [input.brandId, input.factId],
+      )
+      const made = await client.query<{ id: string }>(
+        `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
+         values ($1, $2, $3, $4::uuid[], $5, $6) returning id`,
+        [
+          input.brandId,
+          input.statement,
+          factHash(input.statement),
+          [statementId],
+          input.actor.userId,
+          input.reviewDate,
+        ],
+      )
+      const newFactId = made.rows[0]!.id
+      await client.query('update app.verified_fact set superseded_by = $3 where brand_id = $1 and id = $2', [
         input.brandId,
-        input.statement,
-        factHash(input.statement),
-        [statementId],
-        input.actor.userId,
-        input.reviewDate,
-      ],
-    )
-    const newFactId = made.rows[0]!.id
-    await client.query(
-      `update app.verified_fact set status = 'superseded', superseded_by = $3 where brand_id = $1 and id = $2`,
-      [input.brandId, input.factId, newFactId],
-    )
-    await deps.audit.record(
-      {
-        action: 'onboarding.fact_changed',
-        actor: input.actor.userId,
-        brandId: input.brandId,
-        subject: input.factId,
-        outcome: 'success',
-        detail: { factId: input.factId, newFactId, change: 'replaced' },
-      },
-      client,
-    )
-    return { factId: newFactId }
-  })
+        input.factId,
+        newFactId,
+      ])
+      await deps.audit.record(
+        {
+          action: 'onboarding.fact_changed',
+          actor: input.actor.userId,
+          brandId: input.brandId,
+          subject: input.factId,
+          outcome: 'success',
+          detail: { factId: input.factId, newFactId, change: 'replaced' },
+        },
+        client,
+      )
+      return { factId: newFactId }
+    })
+  } catch (error) {
+    throw confirmedTwin(error)
+  }
 }
 
 // A retired fact is kept, marked expired; nothing may cite it from then on.
@@ -578,6 +621,7 @@ export async function retireFact(
   input: { brandId: string; factId: string; actor: { userId: string } },
 ): Promise<{ factId: string }> {
   return withBrand(pool, input.brandId, async (client) => {
+    await lockOnboarding(client, input.brandId)
     await lockActiveFact(client, input.brandId, input.factId)
     await client.query(`update app.verified_fact set status = 'expired' where brand_id = $1 and id = $2`, [
       input.brandId,
@@ -605,6 +649,7 @@ export async function turnOffRule(
   input: { brandId: string; ruleId: string; actor: { userId: string } },
 ): Promise<{ ruleId: string }> {
   return withBrand(pool, input.brandId, async (client) => {
+    await lockOnboarding(client, input.brandId)
     const found = await client.query<{ active: boolean }>(
       'select active from app.safety_rule where brand_id = $1 and id = $2 for update',
       [input.brandId, input.ruleId],
