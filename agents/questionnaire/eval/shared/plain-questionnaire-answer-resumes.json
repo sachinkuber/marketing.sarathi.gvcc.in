@@ -90,5 +90,5 @@
       "kind": "schema_valid"
     }
   ],
-  "rubric": "ask is null and there are at least 20 questions, no profile key asked twice. what_they_sell and places_served are each asked, with the owner's earlier answer pre-filled: what_they_sell's suggestedAnswer, or one of its options, says ceramic and graphene coatings for cars and bikes, and places_served's names Pune. Asking these keys again with the answer pre-filled is fine. never_say, competitors_not_named, tone_limits and pause_dates are each asked. No suggestedAnswer states something that neither the owner's answer nor the brand name supports, such as a price, a certification, a phone number or a competitor's name."
+  "rubric": "ask is null and there are at least 20 questions, no profile key asked twice. what_they_sell and places_served are each asked, with the owner's earlier answer pre-filled: what_they_sell's suggestedAnswer, or one of its options, says ceramic and graphene coatings for cars and bikes, and places_served's suggestedAnswer, or one of its options, names Pune. Asking these keys again with the answer pre-filled is fine. never_say, competitors_not_named, tone_limits and pause_dates are each asked. No suggestedAnswer states something that neither the owner's answer nor the brand name supports, such as a price, a certification, a phone number or a competitor's name."
 }
