@@ -601,9 +601,14 @@ Full run on the development server, 2026-11-20, from the tree of this milestone'
 - `npm ci && npm run e2e` in the browser image: 8 passed (2.2m).
 - `node --test infra/prod/test/proxy.test.mjs infra/prod/test/smoke.test.mjs` in the infrastructure image: 39 tests, all passed, including the 101 MiB upload path, a 413 on the same path with a trailing segment, another method or another path, and the new `document-body` smoke check.
 
+After the final review's fix wave, 2026-11-21, on the development server from the fix wave's tree:
+
+- `npm run verify`: 169 test files passed, 2 skipped (171); 1717 tests passed, 4 skipped (1721); 987 s; gitleaks found no leaks.
+- `npm run e2e` in the browser image: 8 passed (2.2m).
+
 ## Findings
 
-- Rulings in milestone 9 (each cheap to change; the full list is R1 to R38 in the build ledger):
+- Rulings in milestone 9 (each cheap to change; the full list is R1 to R42 in the build ledger):
   - R5, R7: a job whose agent files differ from the live release ends its attempt (`agent_files_mismatch`) and the queue gives up; a requeue keeps the job's hash, so a job created before a release can only be cancelled.
   - R12: a job's attempt deadline is known to the worker; it never starts a model request that cannot finish 60 s before the deadline.
   - R14, R15, R18, R19, R20: a PDF is split before the transaction; every PDF is loaded by `pdf-lib` and an unreadable one is refused; part bytes are bounded (twice the original or 32 MiB) and a split has a 120 s deadline; a decompression bomb at load is an accepted risk; links and actions are stripped from the parts.
@@ -613,13 +618,37 @@ Full run on the development server, 2026-11-20, from the tree of this milestone'
   - R28, R38: the overview reads each group's sources from its job outcome joined to `research_source`; the research block also returns the merge's `gaps`.
   - Research start guard (commit 7d8a189, no ruling number): a new research run cannot start while an earlier run's groups still run.
   - R36: a kill switch on `research` holds the merge as well; it is the owner's single stop control.
+  - R40: the final review's fix wave (below) closed I1 to I5, M1, M3, M5, the shared-hosting suffixes and the brand switcher's name; the rest went to milestone 10.
+  - R41: an image whose base64 is over 5,242,880 characters (about 3.75 MiB of image) is not sent to the model; it becomes an `error` source ("Too large for the AI to read. Save it under 3.7 MB and upload it again.") and the rest of the documents are read. The owner's 5 MB upload limit is unchanged.
+  - R42: `web_fetch` carries `maxContentTokens` from the definition (40,000 for research), sent as `max_content_tokens`, so one large page cannot fill a step; the worker also refuses to save a step over the core's 8 MB checkpoint limit (costed, not saved, a clear error).
+- The 150-search cap per research run is not enforced at run time. Each group's request caps its own searches, which bounds a first attempt (5 groups × 20, and at most 26 per web group with continuations). It does not hold by construction across retries: a retry after a lost reply sends that turn again with a full budget, so the worst case is about 312 searches (4 web groups × 3 attempts × 26). A runtime per-run cap is planned for milestone 10.
+- A requeued group that finishes after the merge has started stores its sources, but they never reach the suggestions (the merge has already read the finished groups). Re-running research picks them up.
 - Accepted risks: R17 (two concurrent 100 MB uploads) and R19 (a decompression-bomb PDF can restart the core); both in `docs/operations.md`, "Documents". Revisit before uploads open to customers.
 - Not proven on a live model: the research prompts and the 14 evaluation cases have not run against the provider (no key on the development server); the owner's evaluation gate is a production step. Also unproven: whether the API accepts a continuation with a spent web tool removed (R13) and web tools with an output schema (R24).
-- Deferred to M10 or the final review (minor):
-  - R34 treats shared-hosting suffixes (`github.io`, `blogspot.com`, `wixsite.com`, `netlify.app`, `vercel.app`, `pages.dev`) as one domain, so another tenant could count as the brand's site: fix before customers.
+- Closed by the final review's fix wave (2026-11-21, R40):
+  - I1: when every group dies, the overview shows the merge as failed (it said waiting, so the dashboard waited for ever); the dashboard also treats an ended run as settled, so polling stops and Start research is enabled again, and the progress screen says "Research could not finish. Check the agents' releases, then start research again."
+  - I2: after a re-run, the draft profile shows the open suggestion for a key the owner already decided (it showed the oldest item per key), and "Accept all found items" counts it.
+  - I3: a model request is bounded from start to end by the worker's own timer and abort signal. The provider library's timeout covers only the wait for the response headers (checked in `@anthropic-ai/sdk` 0.124.0: its timer is cleared once `fetch` resolves), so a stream that stalled after its headers had no bound. A cut request is reported as the library's timeout error, so the call stays started and the job retries, as before.
+  - I4 (R42): `max_content_tokens` on `web_fetch`, and the runner's guard against a checkpoint over 8 MB.
+  - I5 (R41): the worker's guard for images over 5,242,880 base64 characters.
+  - M1: the runbook's evaluation command no longer passes `--brand aztek` (there is no `eval/aztek/`, so that run could not stand for the release).
+  - M3: a document cannot be deleted while the brand's research run is going (409 `research_running`); this reuses the start guard's check.
+  - M5: an owner statement is listed exactly as stated, with no 500-character cut and never read as flagged.
+  - R34's shared-hosting suffixes: `github.io`, `gitlab.io`, `blogspot.com`, `wordpress.com`, `wixsite.com`, `weebly.com`, `netlify.app`, `vercel.app`, `pages.dev`, `web.app`, `firebaseapp.com`, `herokuapp.com`, `myshopify.com` and `square.site` keep one more label, so `aztek.github.io` and `other.github.io` are different domains.
+  - The brand switcher's select has its own accessible name ("Brand") at 640 px and below.
+  - Docs: the 150-search cap and late group results (above), and the production checklist (rows checked before 0025, the stream-timeout check, the image probe, `max_content_tokens` as a precondition of the Aztek run).
+- Deferred to milestone 10, before customers:
+  - I6: R33 trusts the address the model writes for a source; cross-check source addresses against the URLs actually fetched or searched, so a planted page cannot pose as the brand's own site.
+  - M2: a runtime per-run search cap (above).
+  - M4: a PDF's parts count toward the brand's storage limit.
+  - M6: the circular import between `suggestions.ts` and `research-results.ts`.
+  - M7: the "Cost so far" wording on the progress screen once research has ended.
+  - M8: check `maxTokens` (16,000) against real replies in the live evaluation.
+  - M9: prompt caching for continuation turns.
+- Also deferred (minor):
   - Merge creation under a full job backlog can lose a finished group's paid result (the Phase 1 backpressure pattern).
   - An unsplit PDF is counted as 100 pages in batching (needs a page count column); the research module is large and could split batching and join into their own file.
-  - Dashboard: the brand switcher has no accessible name at 640 px and below; the edit box has no length limit and sends untrimmed text; a failed reload after a decision replaces the screen; the page range is parsed from the address text; the 401 polling-stop path is untested.
+  - Dashboard: the edit box has no length limit and sends untrimmed text; a failed reload after a decision replaces the screen; the page range is parsed from the address text; the 401 polling-stop path is untested. The progress screen shows a too-large image's source as "Error" without its extract (the extract, with what to do, is stored on the source).
   - Smaller: `JobsDeps.settled` and the `site` label trust (R33) are covered by tests but worth a second look; pdf-lib warnings bypass the logger; the split deadline is checked only between parts; document type and name are parsed twice in a route.
   - Milestone 10: questionnaire, facts and rules, agent questions. Milestone 11: strategy and gate 1.
 
