@@ -136,19 +136,24 @@ test('the platform owner runs research and decides the draft profile', async ({ 
 
   // 10. Confirm one fact, edit one, drop one, and add your own rule.
   await card(FACT_CONFIRMED).getByRole('button', { name: 'Confirm' }).click()
+  const confirmedFacts = page.getByRole('region', { name: 'Confirmed facts' })
+  await expect(confirmedFacts.locator('p.dp-value', { hasText: FACT_CONFIRMED })).toBeVisible()
   await card(FACT_EDITED).getByRole('button', { name: 'Edit' }).click()
   await card(FACT_EDITED).getByLabel('Your wording').fill(EDITED_WORDING)
   await card(FACT_EDITED).getByRole('button', { name: 'Save edit' }).click()
+  await expect(confirmedFacts.locator('p.dp-value', { hasText: EDITED_WORDING })).toBeVisible()
+  await expect(card(FACT_EDITED)).toHaveCount(0)
   await card(FACT_DROPPED).getByRole('button', { name: 'Drop' }).click()
   await card(FACT_DROPPED).getByRole('button', { name: 'Yes, drop' }).click()
+  await expect(card(FACT_DROPPED)).toHaveCount(0)
   await page.getByRole('button', { name: 'Add your own rule' }).click()
   await page.getByLabel('The rule, in your words').fill(OWN_RULE)
   await page.getByLabel('Why', { exact: true }).fill('The owner asked for it.')
   await page.getByRole('button', { name: 'Add rule' }).click()
+  await expect(page.getByRole('region', { name: 'Confirmed rules' }).getByText(OWN_RULE)).toBeVisible()
 
   // 11. Reload: the decisions hold, and nothing is used before it was decided.
   await page.reload()
-  const confirmedFacts = page.getByRole('region', { name: 'Confirmed facts' })
   await expect(confirmedFacts.locator('p.dp-value', { hasText: FACT_CONFIRMED })).toBeVisible()
   await expect(confirmedFacts.locator('p.dp-value', { hasText: EDITED_WORDING })).toBeVisible()
   await expect(page.getByText(FACT_DROPPED)).toHaveCount(0)

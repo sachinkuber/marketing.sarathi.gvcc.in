@@ -259,6 +259,11 @@ export async function startStack(env: Record<string, string | undefined> = proce
       error ? reject(error) : resolve(listening),
     )
   })
+  // The dashboard's proxy reuses its connections to the core. Node closes an idle one after 5 s, and a request
+  // sent on a connection as it closes fails with "socket hang up" (a 500 on a screen load). Keep them open longer
+  // than any pause between two screen loads in a spec.
+  coreServer.keepAliveTimeout = 120_000
+  coreServer.headersTimeout = 125_000
 
   const worker = await startWorker({
     core: httpCoreClient(coreUrl, config.workerSecret),

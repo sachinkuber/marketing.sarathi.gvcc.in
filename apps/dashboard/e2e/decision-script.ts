@@ -93,7 +93,11 @@ function sourceIds(step: string, kind: string): string[] {
 }
 
 function factsRules(step: string): FactsRulesResult {
-  if (!step.includes("The owner's answers to your earlier questions"))
+  // The answer the spec chooses (Premium) must be in the request, so the test proves it reached the agent.
+  if (
+    !step.includes("The owner's answers to your earlier questions") ||
+    !step.includes(`"answer":"${ASK_OPTIONS[1]}"`)
+  )
     return {
       facts: [],
       rules: [],
