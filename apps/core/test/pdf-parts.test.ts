@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { describe, expect, it } from 'vitest'
+import { spawn, type ChildProcess, type ForkOptions } from 'node:child_process'
+import { describe, expect, it, vi } from 'vitest'
 import { splitPdf, splitPdfOneAtATime, type SplitChildOptions } from '../src/onboarding/pdf-parts.ts'
 import { ENCRYPTED_PDF, pageCountOf, pdfOf } from './pdf-fixtures.ts'
 
@@ -118,15 +118,18 @@ const scripted =
   }
 const unreadableMessage =
   'This PDF could not be opened (it may be password-protected or damaged). Export it again without a password.'
+const unpreparedMessage =
+  'This PDF could not be prepared. It may be damaged, or too large to prepare at once. Export it again, or as smaller files.'
 const exited = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null
 
 describe('splitPdfOneAtATime (child process)', () => {
   it('a split runs outside the core process', async () => {
     const { fork } = await import('node:child_process')
-    const { fileURLToPath } = await import('node:url')
     const pids: (number | undefined)[] = []
+    const calls: { path: string; options: ForkOptions }[] = []
     const real: NonNullable<SplitChildOptions['fork']> = (path, args, options) => {
       const child = fork(path, args, options)
+      calls.push({ path, options })
       pids.push(child.pid)
       return child
     }
@@ -142,7 +145,11 @@ describe('splitPdfOneAtATime (child process)', () => {
     expect(pids).toHaveLength(1)
     expect(pids[0]).toBeTypeOf('number')
     expect(pids[0]).not.toBe(process.pid)
-    expect(fileURLToPath(new URL('../src/onboarding/pdf-split-child.ts', import.meta.url))).toMatch(/\.ts$/)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.path).toMatch(/pdf-split-child\.ts$/)
+    expect(calls[0]!.options.execArgv).toEqual(['--max-old-space-size=512'])
+    expect(calls[0]!.options.serialization).toBe('advanced')
+    expect(calls[0]!.options.env).toEqual({ NODE_ENV: process.env.NODE_ENV })
   }, 60_000)
 
   it('the real child gives the same refusals as the split', async () => {
@@ -166,7 +173,7 @@ describe('splitPdfOneAtATime (child process)', () => {
       splitPdfOneAtATime(source, limits, {
         fork: scripted('process.on("message",()=>process.exit(137))', seen),
       }),
-    ).rejects.toMatchObject({ status: 422, code: 'pdf_unreadable', message: unreadableMessage })
+    ).rejects.toMatchObject({ status: 422, code: 'pdf_unreadable', message: unpreparedMessage })
     expect(exited(seen[0]!)).toBe(true)
     expect(seen[0]!.listenerCount('message')).toBe(0)
     expect((await splitPdfOneAtATime(source, limits)).length).toBeGreaterThan(1)
@@ -203,6 +210,40 @@ describe('splitPdfOneAtATime (child process)', () => {
     await new Promise((resolve) => setTimeout(resolve, 200))
     expect(exited(seen[0]!)).toBe(true)
     // The queue carries on.
+    expect(await splitPdfOneAtATime(await pdfOf([0, 0, 0]), limits)).toEqual([])
+  }, 60_000)
+
+  it('a child that is killed by a signal gives pdf_unreadable', async () => {
+    const seen: ChildProcess[] = []
+    await expect(
+      splitPdfOneAtATime(Buffer.from('x'), limits, {
+        fork: scripted('process.on("message",()=>process.kill(process.pid,"SIGKILL"))', seen),
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'pdf_unreadable', message: unpreparedMessage })
+    expect(seen[0]!.signalCode).toBe('SIGKILL')
+  })
+
+  it('a child that ends without an answer is logged once with how it ended', async () => {
+    const logger = { warn: vi.fn() }
+    await expect(
+      splitPdfOneAtATime(Buffer.from('x'), limits, {
+        logger,
+        fork: scripted('process.on("message",()=>process.exit(137))'),
+      }),
+    ).rejects.toMatchObject({ code: 'pdf_unreadable' })
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+    expect(logger.warn.mock.calls[0]![0]).toEqual({ exitCode: 137, signalCode: null })
+  })
+
+  it('a fork that throws gives 503 pdf_split_unavailable and the queue carries on', async () => {
+    const throwing: NonNullable<SplitChildOptions['fork']> = () => {
+      throw new Error('spawn EAGAIN')
+    }
+    await expect(splitPdfOneAtATime(Buffer.from('x'), limits, { fork: throwing })).rejects.toMatchObject({
+      status: 503,
+      code: 'pdf_split_unavailable',
+      message: 'The server could not start reading this PDF. Try again in a minute.',
+    })
     expect(await splitPdfOneAtATime(await pdfOf([0, 0, 0]), limits)).toEqual([])
   }, 60_000)
 })

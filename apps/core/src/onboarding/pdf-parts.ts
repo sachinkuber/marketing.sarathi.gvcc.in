@@ -1,7 +1,8 @@
 import { fork as forkProcess, type ChildProcess, type ForkOptions } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import type { Logger } from 'pino'
 import { PDFDocument, PDFName } from 'pdf-lib'
-import { AppError } from '../errors.ts'
+import { AppError } from '../app-error.ts'
 
 // The AI reads one PDF part at a time, so a large PDF is cut into runs of whole pages that each fit its limits.
 export interface PdfLimits {
@@ -19,7 +20,7 @@ const MB = 1_048_576
 // pages into every part, so a PDF whose pages share a large image would otherwise grow without bound.
 const MIN_PARTS_TOTAL = 32 * MB
 const SPLIT_DEADLINE_MS = 120_000
-const unreadable = () =>
+export const unreadable = () =>
   new AppError(
     422,
     'pdf_unreadable',
@@ -39,6 +40,17 @@ export interface SplitOptions {
 }
 
 const tooComplex = (message: string) => new AppError(422, 'pdf_too_complex', message)
+const tookTooLong = () =>
+  tooComplex(
+    'This PDF took too long to prepare for the AI. Export it again with fewer or smaller images, or as smaller files.',
+  )
+// A child that ended without an answer: killed (often out of memory), crashed, or sent nonsense.
+const unprepared = () =>
+  new AppError(
+    422,
+    'pdf_unreadable',
+    'This PDF could not be prepared. It may be damaged, or too large to prepare at once. Export it again, or as smaller files.',
+  )
 
 async function load(bytes: Buffer): Promise<PDFDocument> {
   try {
@@ -98,9 +110,7 @@ async function split(bytes: Buffer, limits: PdfLimits, options: SplitOptions): P
   let from = 0
   while (from < total) {
     if (now() - started > deadline) {
-      throw tooComplex(
-        'This PDF took too long to prepare for the AI. Export it again with fewer or smaller images, or as smaller files.',
-      )
+      throw tookTooLong()
     }
     const cap = Math.min(limits.maxPages, total - from)
     // The longest run of pages from `from` that saves within maxBytes: `fits` is the largest length known to
@@ -147,6 +157,8 @@ export interface SplitChildOptions {
   deadlineMs?: number
   killGraceMs?: number
   fork?: (modulePath: string, args: string[], options: ForkOptions) => ChildProcess
+  // Where a child that ends without an answer is reported (its own output goes to the container log).
+  logger?: Pick<Logger, 'warn'>
 }
 
 const KILL_GRACE_MS = 5_000
@@ -193,11 +205,25 @@ function splitInChild(bytes: Buffer, limits: PdfLimits, options: SplitChildOptio
   const deadlineMs = options.deadlineMs ?? SPLIT_DEADLINE_MS
   const start = options.fork ?? forkProcess
   return new Promise<PdfPart[]>((resolve, reject) => {
-    const child = start(CHILD_PATH, [], {
-      execArgv: CHILD_ARGS,
-      serialization: 'advanced',
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-    })
+    let child: ChildProcess
+    try {
+      child = start(CHILD_PATH, [], {
+        execArgv: CHILD_ARGS,
+        serialization: 'advanced',
+        // Only what the split needs: no secrets and no NODE_OPTIONS from the core's environment.
+        env: process.env.NODE_ENV === undefined ? {} : { NODE_ENV: process.env.NODE_ENV },
+        stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      })
+    } catch {
+      reject(
+        new AppError(
+          503,
+          'pdf_split_unavailable',
+          'The server could not start reading this PDF. Try again in a minute.',
+        ),
+      )
+      return
+    }
     let done = false
     const finish = (settle: () => void): void => {
       if (done) return
@@ -211,42 +237,40 @@ function splitInChild(bytes: Buffer, limits: PdfLimits, options: SplitChildOptio
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
       settle()
     }
-    const died = (): void => finish(() => reject(unreadable()))
+    const died = (how: Record<string, unknown>): void =>
+      finish(() => {
+        options.logger?.warn(how, 'the PDF split child ended without an answer')
+        reject(unprepared())
+      })
+    const ended = (): Record<string, unknown> => ({ exitCode: child.exitCode, signalCode: child.signalCode })
     function onMessage(value: unknown): void {
       const answer = asAnswer(value)
-      if (answer === null) return died()
+      if (answer === null) return died({ malformed: true })
       finish(() => {
         if ('parts' in answer) resolve(answer.parts)
         else reject(new AppError(answer.error.status, answer.error.code, answer.error.message))
       })
     }
     function onExit(): void {
-      died()
+      died(ended())
     }
-    function onError(): void {
-      died()
+    function onError(error: Error): void {
+      died({ error: error.message })
     }
     child.on('message', onMessage)
     child.on('exit', onExit)
     child.on('error', onError)
     const timer = setTimeout(
-      () =>
-        finish(() =>
-          reject(
-            tooComplex(
-              'This PDF took too long to prepare for the AI. Export it again with fewer or smaller images, or as smaller files.',
-            ),
-          ),
-        ),
+      () => finish(() => reject(tookTooLong())),
       deadlineMs + (options.killGraceMs ?? KILL_GRACE_MS),
     )
     // A child that is already gone makes send fail through the error event or the callback.
     try {
       child.send({ bytes, limits, deadlineMs }, (error) => {
-        if (error) died()
+        if (error) died({ error: error.message })
       })
-    } catch {
-      died()
+    } catch (error) {
+      died({ error: error instanceof Error ? error.message : 'send failed' })
     }
   })
 }

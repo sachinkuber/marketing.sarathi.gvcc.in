@@ -90,6 +90,8 @@ services:
     deploy:
       resources:
         limits: { cpus: '0.5', memory: 1G }
+    # No core dumps: a dump of a process that held a PDF would be written as large as its memory.
+    ulimits: { core: 0 }
     logging: *logging
 
   worker:
