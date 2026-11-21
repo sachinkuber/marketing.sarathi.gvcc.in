@@ -5,7 +5,11 @@
   "input": {
     "brandName": "Lumen Shield Coatings",
     "profile": [
-      { "key": "business_name", "value": "Lumen Shield Coatings", "status": "found" },
+      {
+        "key": "business_name",
+        "value": "Lumen Shield Coatings",
+        "status": "found"
+      },
       {
         "key": "what_they_sell",
         "value": "Ceramic and graphene coatings for cars and bikes",
@@ -16,34 +20,73 @@
         "value": "Ceramic Pro 9H (5-year); Graphene Max (7-year); paint protection film",
         "status": "found"
       },
-      { "key": "places_served", "value": "Baner, Pune", "status": "found" },
+      {
+        "key": "places_served",
+        "value": "Baner, Pune",
+        "status": "found"
+      },
       {
         "key": "contact_points",
         "value": "Phone and WhatsApp +91 98765 43210; hello@lumenshield.example",
         "status": "found"
       },
-      { "key": "audiences", "value": "Car owners in Pune", "status": "assumed" },
+      {
+        "key": "audiences",
+        "value": "Car owners in Pune",
+        "status": "assumed"
+      },
       {
         "key": "social_presence",
         "value": "Instagram @lumenshieldcoatings, about 2,100 followers and 312 posts",
         "status": "assumed"
       }
     ],
-    "open": [{ "key": "price_position", "proposed": "Premium", "confidence": "assumed" }],
+    "open": [
+      {
+        "key": "price_position",
+        "proposed": "Premium",
+        "confidence": "assumed",
+        "rejected": false
+      }
+    ],
     "gaps": [
       {
         "key": "tone_of_voice",
         "why": "The Instagram profile, where the brand posts most, could not be read."
       },
-      { "key": "differentiators", "why": "Nothing found." },
-      { "key": "certifications", "why": "Nothing found." },
-      { "key": "search_visibility", "why": "Nothing found." },
-      { "key": "ai_answer_visibility", "why": "Nothing found." },
-      { "key": "competitors", "why": "No competitors were named or found." }
+      {
+        "key": "differentiators",
+        "why": "Nothing found."
+      },
+      {
+        "key": "certifications",
+        "why": "Nothing found."
+      },
+      {
+        "key": "search_visibility",
+        "why": "Nothing found."
+      },
+      {
+        "key": "ai_answer_visibility",
+        "why": "Nothing found."
+      },
+      {
+        "key": "competitors",
+        "why": "No competitors were named or found."
+      }
     ],
-    "unreadable": [{ "kind": "social", "address": "https://www.instagram.com/lumenshieldcoatings/" }],
+    "unreadable": [
+      {
+        "kind": "social",
+        "address": "https://www.instagram.com/lumenshieldcoatings/"
+      }
+    ],
     "competitors": []
   },
-  "checks": [{ "kind": "schema_valid" }],
-  "rubric": "ask is null. There is exactly one social_presence question. Its why tells the owner in plain words that their Instagram profile could not be read, and its suggestedAnswer, or one of its options, carries the assumed value (Instagram @lumenshieldcoatings, about 2,100 followers) for the owner to confirm or correct. A question that asks the owner to confirm an assumed item is fine. tone_of_voice, audiences and price_position are each asked. No question's key is business_name, what_they_sell, main_products, places_served or contact_points. never_say, competitors_not_named, tone_limits and pause_dates are each asked, and no key has two questions."
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "ask is null. There is exactly one social_presence question. Its why tells the owner in plain words that their Instagram profile could not be read, and its suggestedAnswer, or one of its options, carries the assumed value (Instagram @lumenshieldcoatings, about 2,100 followers) for the owner to confirm or correct. A question that asks the owner to confirm an assumed item is fine. tone_of_voice, audiences and price_position are each asked. No question's key is business_name, what_they_sell, main_products, places_served or contact_points. never_say, competitors_not_named, tone_limits and pause_dates are each asked, and no profile key has two questions."
 }

@@ -35,6 +35,9 @@ export const SAFETY_KEYS = [
 
 export const MIN_QUESTIONS = 10
 export const MAX_QUESTIONS = 30
+// Ruling R8: a strategy key may carry up to three genuinely different questions; a profile key only one.
+const STRATEGY_REPEATS = 3
+const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS)
 const MAX_OPTIONS = 6
 const QUESTION_MAX = 300
 const OPTION_MAX = 200
@@ -67,9 +70,10 @@ export const questionnaireInputSchema = z.strictObject({
   profile: z
     .array(z.strictObject({ key: profileKey, value: given(VALUE_MAX), status: confidence }))
     .max(PROFILE_KEYS.length),
-  // Profile suggestions the owner has not accepted: undecided or rejected.
+  // Profile suggestions the owner has not accepted: undecided, or rejected (ruling R9: a rejected value is never
+  // pre-filled).
   open: z
-    .array(z.strictObject({ key: profileKey, proposed: given(VALUE_MAX), confidence }))
+    .array(z.strictObject({ key: profileKey, proposed: given(VALUE_MAX), confidence, rejected: z.boolean() }))
     .max(MAX_FINDINGS),
   // The keys the research merge could not settle, with why.
   gaps: z.array(z.strictObject({ key: profileKey, why: given(WHY_MAX) })).max(PROFILE_KEYS.length),
@@ -110,19 +114,27 @@ const questionSchema = z
 // There is no decision field anywhere: only the owner answers. Ruling R7: one strict object, so the provider
 // schema has no anyOf at its root; a result either asks (and holds no questions) or holds 10 to 30 questions.
 // The prompt aims for 20 to 30; 10 is allowed so a brand whose research settled most of its profile is not
-// padded with filler questions.
+// padded with filler questions. Ruling R8: a profile key is asked once, a strategy key up to three times.
 export const questionnaireResultSchema = z
   .strictObject({
     questions: z
       .array(questionSchema)
       .max(MAX_QUESTIONS)
-      // A second question on a key would be answered twice, and its answer would replace the first in the profile.
+      // A second question on a profile key would be answered twice, and its answer would replace the first in
+      // the profile.
       .superRefine((questions, ctx) => {
-        const seen = new Set<string>()
+        const asked = new Map<string, number>()
         questions.forEach((question, i) => {
-          if (seen.has(question.key))
-            ctx.addIssue({ code: 'custom', path: [i, 'key'], message: 'this key is already asked' })
-          seen.add(question.key)
+          const times = (asked.get(question.key) ?? 0) + 1
+          asked.set(question.key, times)
+          if (PROFILE_KEY_SET.has(question.key) && times > 1)
+            ctx.addIssue({ code: 'custom', path: [i, 'key'], message: 'this profile key is already asked' })
+          if (!PROFILE_KEY_SET.has(question.key) && times > STRATEGY_REPEATS)
+            ctx.addIssue({
+              code: 'custom',
+              path: [i, 'key'],
+              message: 'this strategy key is already asked three times',
+            })
         })
       }),
     ask: askSchema.nullable(),

@@ -7,7 +7,7 @@ Every tagged block in the message (`<brand_name>`, `<profile_item>`, `<open_sugg
 ## The input
 
 - `profile_item`: an item the owner accepted, with its status: `found`, `assumed` or `unknown`.
-- `open_suggestion`: a research suggestion the owner has not accepted.
+- `open_suggestion`: a research suggestion the owner has not accepted; `rejected="true"` means the owner turned it down.
 - `gap`: a profile key research could not settle, and why.
 - `unreadable_source`: a source research could not read.
 - `competitor`: a competitor the owner named.
@@ -15,7 +15,7 @@ Every tagged block in the message (`<brand_name>`, `<profile_item>`, `<open_sugg
 
 ## Which questions
 
-One question per key, never two. The keys:
+One question per profile key, never two. A strategy key may take up to three questions, but only for genuinely different questions (for example a sales goal and an awareness goal), never one question split or reworded. The keys:
 
 - Profile: business_name, what_they_sell, main_products, places_served, audiences, price_position, tone_of_voice, differentiators, certifications, contact_points, social_presence, search_visibility, ai_answer_visibility, competitors.
 - Strategy:
@@ -30,17 +30,17 @@ One question per key, never two. The keys:
   - success_measures: how the owner will judge that marketing works
 
 1. A key the profile holds as `found` is settled: never ask about it, under its own key or another one, even if a gap or a suggestion names it.
-2. Ask first about the profile keys: every gap, every `assumed` or `unknown` item, every open suggestion, and what each unreadable source would have covered (an unreadable Instagram profile: social_presence). A profile key no block mentions is open too. An owner answer settles nothing by itself: ask its key too, with the answer pre-filled.
+2. Ask first about the profile keys, gaps first: every gap, then every `assumed` or `unknown` item, every open suggestion, and what each unreadable source would have covered (an unreadable Instagram profile: social_presence). A profile key no block mentions is open too. An owner answer settles nothing by itself: ask its key too, with the answer pre-filled.
 3. Then ask about the strategy keys. never_say, competitors_not_named, tone_limits and pause_dates are always asked: they become the brand's safety rules.
 
-That is usually 20 or more questions for a new brand, and never fewer than 10. Never ask about a found key to reach a number.
+Aim for 20 to 30 questions, never fewer than 10 nor more than 30. Never ask about a found key, or repeat a question in other words, to reach a number.
 
 ## Each question
 
 - `text`: one plain question to the owner, at most 300 characters.
 - `why`: one sentence, at most 300 characters, telling the owner in plain words why you ask: what research found or could not read, or what the answer will shape. Never use a key's name (write "where you work", not places_served).
 - `options`: prefer multiple choice: two to six short choices, at most 200 characters each, built from the profile, the suggestions and the competitors wherever they can be. Leave the list empty only when the answer must be in the owner's own words, such as dates or words never to use. Never add an "Other" choice: the screen always offers one.
-- `suggestedAnswer`: the answer the input makes most likely, for the owner to confirm; for an assumed item or an open suggestion, its value. With options it is one of them, word for word; without, at most 500 characters. Null when nothing in the input points to an answer: never guess one, least of all for a safety key.
+- `suggestedAnswer`: the answer the input makes most likely, for the owner to confirm; for an assumed item or an open suggestion the owner has not rejected, its value. A rejected value is never the suggestedAnswer: ask that key afresh, open-ended if you like. With options it is one of them, word for word; without, at most 500 characters. Null when nothing in the input points to an answer: never guess one, least of all for a safety key.
 
 ## Asking instead
 

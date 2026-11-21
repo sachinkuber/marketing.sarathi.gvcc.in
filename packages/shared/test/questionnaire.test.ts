@@ -46,7 +46,10 @@ const ask = (over: Record<string, unknown> = {}) => ({
 const input = {
   brandName: 'Lumen Shield Coatings',
   profile: [{ key: 'business_name', value: 'Lumen Shield Coatings', status: 'found' }],
-  open: [{ key: 'audiences', proposed: 'Car owners in Pune', confidence: 'assumed' }],
+  open: [
+    { key: 'audiences', proposed: 'Car owners in Pune', confidence: 'assumed', rejected: false },
+    { key: 'price_position', proposed: 'Premium', confidence: 'assumed', rejected: true },
+  ],
   gaps: [{ key: 'certifications', why: 'Nothing found.' }],
   unreadable: [
     { kind: 'social', address: 'https://www.instagram.com/lumenshield/' },
@@ -81,7 +84,7 @@ describe('questionnaire schemas', () => {
     expect(ok(questionnaireResultSchema, result({ questions: mixed }))).toBe(true)
   })
 
-  it('refuses decision, an unknown key, a repeated key and a suggested answer outside its options', () => {
+  it('refuses decision, an unknown key, a repeated profile key and a suggested answer outside its options', () => {
     // decision: only the owner answers, so a result carrying one anywhere is refused.
     expect(ok(questionnaireResultSchema, result({ decision: 'accepted' }))).toBe(false)
     const decided = questions(10)
@@ -92,31 +95,56 @@ describe('questionnaire schemas', () => {
     unknown[0] = question('favourite_colour')
     expect(ok(questionnaireResultSchema, result({ questions: unknown }))).toBe(false)
 
-    // A second question on a key would make the owner answer it twice, and the second answer would replace
-    // the first in the profile.
+    // A second question on a profile key would make the owner answer it twice, and the second answer would
+    // replace the first in the profile (ruling R8).
     const repeated = questions(11)
     repeated[10] = question(repeated[0]!.key)
+    expect(PROFILE_KEYS).toContain(repeated[0]!.key)
     expect(ok(questionnaireResultSchema, result({ questions: repeated }))).toBe(false)
+    expect(issuesOf(result({ questions: repeated }))).toEqual([
+      expect.objectContaining({
+        path: ['questions', 10, 'key'],
+        message: 'this profile key is already asked',
+      }),
+    ])
 
     const outside = questions(10)
     outside[0] = question(outside[0]!.key, { suggestedAnswer: 'Mumbai only' })
     expect(ok(questionnaireResultSchema, result({ questions: outside }))).toBe(false)
   })
 
-  it('holds 10 to 30 questions: 9 and 31 are refused for their count', () => {
+  it('holds 10 to 30 questions: 30 are possible, 9 and 31 are refused for their count', () => {
     expect(ok(questionnaireResultSchema, result({ questions: questions(9) }))).toBe(false)
     expect(issuesOf(result({ questions: questions(9) }))).toEqual([
       expect.objectContaining({ path: ['questions'], message: 'at least 10 questions, or ask the owner' }),
     ])
-    // There are 23 keys, so 31 questions must repeat some; the count is refused on its own all the same.
-    const many = Array.from({ length: 31 }, (_, i) => question(QUESTION_KEYS[i % QUESTION_KEYS.length]!))
-    expect(ok(questionnaireResultSchema, result({ questions: many }))).toBe(false)
-    expect(issuesOf(result({ questions: many }))).toContainEqual(
+    // Every profile key once, every strategy key once, and a second question on some strategy keys (R8).
+    const thirty = [...QUESTION_KEYS, ...STRATEGY_KEYS.slice(0, 7)].map((key) => question(key))
+    expect(thirty).toHaveLength(30)
+    expect(ok(questionnaireResultSchema, result({ questions: thirty }))).toBe(true)
+    // 31 with no key past its limit: only the count refuses it.
+    const many = [...thirty, question(STRATEGY_KEYS[7]!)]
+    expect(issuesOf(result({ questions: many }))).toEqual([
       expect.objectContaining({ code: 'too_big', path: ['questions'] }),
-    )
-    expect(issuesOf(result({ questions: many.slice(0, 30) }))).not.toContainEqual(
-      expect.objectContaining({ code: 'too_big' }),
-    )
+    ])
+  })
+
+  it('a strategy key may be asked up to three times, a profile key once (ruling R8)', () => {
+    const times = (key: string, n: number) => [
+      ...questions(10),
+      ...Array.from({ length: n }, () => question(key)),
+    ]
+    for (const key of STRATEGY_KEYS) {
+      expect(ok(questionnaireResultSchema, result({ questions: times(key, 3) })), key).toBe(true)
+      expect(issuesOf(result({ questions: times(key, 4) })), key).toEqual([
+        expect.objectContaining({
+          path: ['questions', 13, 'key'],
+          message: 'this strategy key is already asked three times',
+        }),
+      ])
+    }
+    for (const key of PROFILE_KEYS.slice(10))
+      expect(ok(questionnaireResultSchema, result({ questions: times(key, 2) })), key).toBe(false)
   })
 
   it('options are none or two to six, and the texts hold their limits', () => {
@@ -163,6 +191,13 @@ describe('questionnaire schemas', () => {
       false,
     )
     expect(ok(questionnaireResultSchema, { questions: [], ask: ask({ text: zeroWidth }) })).toBe(false)
+  })
+
+  it('an open suggestion says whether the owner rejected it (ruling R9)', () => {
+    const open = (over: Record<string, unknown>) => ({ ...input, open: [{ ...input.open[0], ...over }] })
+    expect(ok(questionnaireInputSchema, open({ rejected: true }))).toBe(true)
+    expect(ok(questionnaireInputSchema, open({ rejected: undefined }))).toBe(false)
+    expect(ok(questionnaireInputSchema, open({ rejected: 'yes' }))).toBe(false)
   })
 
   it('the input refuses an unknown key, an unknown status, an unknown source kind and an extra field', () => {

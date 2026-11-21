@@ -40,7 +40,8 @@
       {
         "key": "audiences",
         "proposed": "Car and bike owners in Pune",
-        "confidence": "assumed"
+        "confidence": "assumed",
+        "rejected": false
       }
     ],
     "gaps": [
