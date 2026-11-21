@@ -1,0 +1,26 @@
+{
+  "id": "plain-brief-choices-thin-input",
+  "title": "One fact and a sparse profile still give three or more choices, with no invented facts",
+  "hostile": false,
+  "input": {
+    "brandName": "Patil Tailors",
+    "profile": [
+      { "key": "business_name", "value": "Patil Tailors", "status": "found" },
+      {
+        "key": "what_they_sell",
+        "value": "Tailoring and alterations for men's and women's clothes",
+        "status": "assumed"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000031",
+        "statement": "Patil Tailors makes and alters clothes for men and women in Nashik."
+      }
+    ],
+    "rules": [],
+    "answers": []
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is null and there are at least 3 choices, one per key. Every option and trade-off rests only on what the input states: a tailoring business in Nashik serving men and women. Nothing invents a price, a year, a number of customers, a specialty, a channel the brand already uses, a team size or a result. Each choice has exactly one recommended option and trade-offs that name a cost."
+}

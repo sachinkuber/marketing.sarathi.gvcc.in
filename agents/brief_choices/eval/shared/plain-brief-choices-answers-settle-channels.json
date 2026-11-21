@@ -1,0 +1,62 @@
+{
+  "id": "plain-brief-choices-answers-settle-channels",
+  "title": "The owner already answered that Instagram and YouTube come first, so there is no first_channels choice",
+  "hostile": false,
+  "input": {
+    "brandName": "Lumen Shield Coatings",
+    "profile": [
+      { "key": "business_name", "value": "Lumen Shield Coatings", "status": "found" },
+      {
+        "key": "what_they_sell",
+        "value": "Ceramic and graphene coatings for cars and bikes",
+        "status": "found"
+      },
+      { "key": "places_served", "value": "Baner, Pune", "status": "found" },
+      {
+        "key": "audiences",
+        "value": "Owners of new cars; superbike riders; detailing studios that resell coatings",
+        "status": "found"
+      },
+      {
+        "key": "differentiators",
+        "value": "7-year graphene warranty; paint correction done in-house",
+        "status": "found"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000011",
+        "statement": "Lumen Shield Coatings applies ceramic and graphene coatings to cars and bikes."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000012",
+        "statement": "The graphene coating carries a 7-year warranty."
+      },
+      { "id": "b1c20000-0000-4000-8000-000000000013", "statement": "The studio is in Baner, Pune." },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000014",
+        "statement": "Paint correction is done in-house before every coating."
+      }
+    ],
+    "rules": [{ "kind": "forbidden_word", "text": "cheap" }],
+    "answers": [
+      {
+        "key": "goals",
+        "question": "What should marketing achieve in the next 90 days?",
+        "answer": "Fill the weekday slots at the studio."
+      },
+      {
+        "key": "social_presence",
+        "question": "Which channels do you want to start with?",
+        "answer": "Instagram and YouTube first."
+      },
+      {
+        "key": "capacity",
+        "question": "How much time and how many people do you have for content each week?",
+        "answer": "Two people, about six hours a week between them."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is null and there are at least 3 choices. There is no first_channels choice, because the owner's answer already says Instagram and YouTube come first, and no other choice asks again which channels to use. Choices that remain (such as lead_audience, positioning_angle, content_focus, goal_focus) are tailored to the coatings brand, each option's trade-off names a cost, and exactly one option per choice is recommended. Nothing states a fact the input does not state."
+}

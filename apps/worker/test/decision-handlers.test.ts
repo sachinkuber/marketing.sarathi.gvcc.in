@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { QUESTION_KEYS, SAFETY_KEYS } from '@mkt/shared'
+import { CHOICE_KEYS, QUESTION_KEYS, SAFETY_KEYS } from '@mkt/shared'
 import { ModelStopped, type ModelRequest } from '../src/model.ts'
 import { JobWaiting, type JobContext } from '../src/runner.ts'
 import type { AgentQuestion } from '../src/core-client.ts'
 import { questionnaireHandler, withoutLoneOptions } from '../src/agents/questionnaire.ts'
 import { factsRulesHandler } from '../src/agents/facts-rules.ts'
+import { briefChoicesHandler } from '../src/agents/brief-choices.ts'
 import { NO_DOCUMENTS } from './no-documents.ts'
 
 const SRC = '11111111-1111-4111-8111-111111111111'
@@ -46,6 +47,26 @@ const factsOk = {
   ask: null,
 }
 const factsAsk = { facts: [], rules: [], ask }
+const briefChoicesInput = {
+  brandName: 'Aztek',
+  profile: [],
+  facts: [{ id: SRC, statement: 'We open at 9.' }],
+  rules: [],
+  answers: [],
+}
+const briefChoicesOk = {
+  choices: CHOICE_KEYS.slice(0, 3).map((key) => ({
+    key,
+    question: `About ${key}?`,
+    why: 'w',
+    options: [
+      { value: 'A', tradeOff: 'Reaches many, costs more.', recommended: true },
+      { value: 'B', tradeOff: 'Reaches few, costs less.', recommended: false },
+    ],
+  })),
+  ask: null,
+}
+const briefChoicesAsk = { choices: [], ask }
 
 function stub(
   reply: { text: string; stopReason?: string | null },
@@ -93,6 +114,15 @@ const cases = [
     input: factsRulesInput,
     ok: factsOk,
     asks: factsAsk,
+  },
+  {
+    name: 'brief choices',
+    step: 'brief_choices',
+    type: 'brief_choices.v1',
+    handler: briefChoicesHandler,
+    input: briefChoicesInput,
+    ok: briefChoicesOk,
+    asks: briefChoicesAsk,
   },
 ] as const
 

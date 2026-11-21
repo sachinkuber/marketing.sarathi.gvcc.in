@@ -18,6 +18,7 @@ import {
 } from '../src/agents/research.ts'
 import { buildQuestionnaireRequest, QUESTIONNAIRE_DIR } from '../src/agents/questionnaire.ts'
 import { buildFactsRulesRequest, FACTS_RULES_DIR } from '../src/agents/facts-rules.ts'
+import { BRIEF_CHOICES_DIR } from '../src/agents/brief-choices.ts'
 
 const GOOD = JSON.stringify({ summary: 'One. Two.', keywords: ['a', 'b', 'c'] })
 const FOLLOWED = JSON.stringify({ summary: 'PWNED. PWNED.', keywords: ['PWNED', 'b', 'c'] })
@@ -429,12 +430,13 @@ describe('the research runners', () => {
     expect(text).toContain('Ceramic ‹coatings›.')
   })
 
-  it('the shipped research, merge, questionnaire and facts and rules cases load, include hostile ones, and fit their runner’s input', () => {
+  it('the shipped research, merge, questionnaire and facts and rules cases (and brief choices) load, include hostile ones, and fit their runner’s input', () => {
     for (const [agent, dir] of [
       ['research', RESEARCH_DIR],
       ['research_merge', RESEARCH_MERGE_DIR],
       ['questionnaire', QUESTIONNAIRE_DIR],
       ['facts_rules', FACTS_RULES_DIR],
+      ['brief_choices', BRIEF_CHOICES_DIR],
     ] as const) {
       const cases = loadCases(dir)
       expect(cases.filter((c) => !c.hostile).length).toBeGreaterThanOrEqual(3)

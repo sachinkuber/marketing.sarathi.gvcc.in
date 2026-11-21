@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "choices": {
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "lead_audience",
+              "positioning_angle",
+              "first_channels",
+              "content_focus",
+              "posting_rhythm",
+              "goal_focus"
+            ]
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "options": {
+            "minItems": 2,
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "tradeOff": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "recommended": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["value", "tradeOff", "recommended"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["key", "question", "why", "options"],
+        "additionalProperties": false
+      }
+    },
+    "ask": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "why": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "options": {
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "suggested": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": ["text", "why", "options", "suggested"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": ["choices", "ask"],
+  "additionalProperties": false
+}

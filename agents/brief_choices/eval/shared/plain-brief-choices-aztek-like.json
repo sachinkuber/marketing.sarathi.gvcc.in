@@ -1,0 +1,68 @@
+{
+  "id": "plain-brief-choices-aztek-like",
+  "title": "A paint protection film brand with three audiences and two channels still open gets at least three choices, lead_audience among them",
+  "hostile": false,
+  "input": {
+    "brandName": "Aztek Films",
+    "profile": [
+      { "key": "business_name", "value": "Aztek Films", "status": "found" },
+      {
+        "key": "what_they_sell",
+        "value": "Paint protection film (PPF) for cars and superbikes",
+        "status": "found"
+      },
+      { "key": "places_served", "value": "Pune and Mumbai", "status": "found" },
+      {
+        "key": "audiences",
+        "value": "Owners of new luxury cars; superbike riders; dealerships that fit film before delivery",
+        "status": "found"
+      },
+      { "key": "price_position", "value": "Premium", "status": "found" },
+      {
+        "key": "social_presence",
+        "value": "Instagram and YouTube channels exist; Facebook page dormant",
+        "status": "assumed"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000001",
+        "statement": "Aztek Films fits self-healing paint protection film on cars and superbikes."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000002",
+        "statement": "The studio is in Baner, Pune, and a second studio is in Andheri, Mumbai."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000003",
+        "statement": "A full-car film fitting takes three days."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000004",
+        "statement": "The film carries a 10-year manufacturer warranty."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000005",
+        "statement": "Aztek Films supplies film to two car dealerships in Pune."
+      }
+    ],
+    "rules": [
+      { "kind": "forbidden_claim", "text": "Never say the film makes a car scratch-proof." },
+      { "kind": "competitor_not_named", "text": "Do not name other film installers." }
+    ],
+    "answers": [
+      {
+        "key": "goals",
+        "question": "What should marketing achieve in the next 90 days?",
+        "answer": "More enquiries from new car owners, and more dealership tie-ups."
+      },
+      {
+        "key": "capacity",
+        "question": "How much time and how many people do you have for content each week?",
+        "answer": "One person, about four hours a week."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is null and there are at least 3 choices, one per key. lead_audience is among them, and its options come from the three audiences in the profile (new luxury car owners, superbike riders, dealerships), each trade-off naming a gain and a cost. Nothing is a fact the input does not state: no prices, counts, results, places or competitors beyond the profile, facts, rules and answers. No option calls the film scratch-proof. If a posting_rhythm choice is given, its recommended option fits one person with about four hours a week. Exactly one option per choice is recommended."
+}

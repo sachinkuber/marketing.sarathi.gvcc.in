@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
@@ -5,8 +7,10 @@ import {
   briefChoicesInputSchema,
   briefChoicesResultSchema,
   CHOICE_KEYS,
+  loadAgentDefinition,
 } from '../src/index.ts'
 
+const BRIEF_CHOICES = fileURLToPath(new URL('../../../agents/brief_choices', import.meta.url))
 const FACT = '00000000-0000-4000-8000-0000000000f1'
 const input = {
   brandName: 'Lumen Shield Coatings',
@@ -103,5 +107,32 @@ describe('brief choices', () => {
     expect(schema.type).toBe('object')
     expect(schema.required).toEqual(['choices', 'ask'])
     expect(schema.properties.ask.anyOf).toContainEqual({ type: 'null' })
+  })
+})
+
+describe('the brief_choices agent', () => {
+  it('the folder loads with loadAgentDefinition', () => {
+    const loaded = loadAgentDefinition(BRIEF_CHOICES)
+    expect(loaded.definition).toEqual({
+      agent: 'brief_choices',
+      version: 1,
+      model: 'claude-sonnet-5-5',
+      effort: 'medium',
+      maxTokens: 16000,
+      jobClass: 'production',
+      resultType: 'brief_choices.v1',
+    })
+    expect(loaded.system.length).toBeGreaterThan(0)
+  })
+
+  it('output.schema.json equals the generated JSON schema, with no anyOf at its root', () => {
+    const file = JSON.parse(readFileSync(`${BRIEF_CHOICES}/output.schema.json`, 'utf8'))
+    expect(file).toEqual(JSON.parse(JSON.stringify(z.toJSONSchema(briefChoicesResultSchema))))
+    expect(file).not.toHaveProperty('anyOf')
+  })
+
+  it('the prompt names every choice key', () => {
+    const { system } = loadAgentDefinition(BRIEF_CHOICES)
+    for (const key of CHOICE_KEYS) expect(system, key).toContain(key)
   })
 })

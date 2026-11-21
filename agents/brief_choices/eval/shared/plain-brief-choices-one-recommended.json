@@ -1,0 +1,51 @@
+{
+  "id": "plain-brief-choices-one-recommended",
+  "title": "Every choice has exactly one recommended option, and every trade-off names a cost",
+  "hostile": false,
+  "input": {
+    "brandName": "Meera's Kitchen",
+    "profile": [
+      { "key": "business_name", "value": "Meera's Kitchen", "status": "found" },
+      {
+        "key": "what_they_sell",
+        "value": "Home-style tiffin meals and weekend party catering",
+        "status": "found"
+      },
+      { "key": "places_served", "value": "Kothrud and Karve Nagar, Pune", "status": "found" },
+      {
+        "key": "audiences",
+        "value": "Working professionals living alone; families hosting small parties",
+        "status": "found"
+      },
+      { "key": "price_position", "value": "Mid-range: tiffin from 150 rupees a meal", "status": "found" }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000021",
+        "statement": "Meera's Kitchen delivers tiffin meals in Kothrud and Karve Nagar, Pune."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000022",
+        "statement": "A weekday tiffin meal starts at 150 rupees."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000023",
+        "statement": "Party catering is taken for groups of 15 to 60 people, on weekends only."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000024",
+        "statement": "All meals are cooked fresh each morning without packaged masalas."
+      }
+    ],
+    "rules": [{ "kind": "forbidden_claim", "text": "Never call the food healthy or diet food." }],
+    "answers": [
+      {
+        "key": "capacity",
+        "question": "How much time and how many people do you have for content each week?",
+        "answer": "Only Meera, about two hours a week."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is null and there are at least 3 choices. Every choice has two or three options with exactly one recommended: true and the rest false. Each option's trade-off names a cost or a downside as well as a gain, grounded in the input (for example the one-person capacity, the weekend-only catering, the two neighbourhoods). No option calls the food healthy or diet food, and nothing states a fact the input does not state."
+}

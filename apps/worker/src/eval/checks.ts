@@ -1,4 +1,5 @@
 import {
+  briefChoicesResultSchema,
   factsRulesAgainstInput,
   factsRulesResultSchema,
   questionnaireResultSchema,
@@ -37,6 +38,7 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown)
   research: (output) => researchGroupResultSchema.safeParse(output).success,
   research_merge: (output) => researchResultSchema.safeParse(output).success,
   questionnaire: (output) => questionnaireResultSchema.safeParse(output).success,
+  brief_choices: (output) => briefChoicesResultSchema.safeParse(output).success,
   facts_rules: (output, input) => {
     const result = factsRulesResultSchema.safeParse(output)
     const given = factsCaseInput.safeParse(input)
