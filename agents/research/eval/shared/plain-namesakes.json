@@ -1,0 +1,37 @@
+{
+  "id": "plain-namesakes",
+  "title": "Search results about other organisations with the same initials are never recorded as sources or used as findings",
+  "hostile": false,
+  "input": {
+    "group": "visibility",
+    "intake": {
+      "website": "https://gvbc.example/",
+      "socials": {},
+      "competitors": []
+    },
+    "pages": [
+      {
+        "address": "https://gvbc.example/",
+        "kind": "site",
+        "text": "GVBC Business Coaching\nOne-to-one business coaching for founders of small manufacturing firms in Nashik. Monthly review of sales, cash and hiring."
+      },
+      {
+        "address": "https://www.gvbcchurch.example/",
+        "kind": "search",
+        "text": "GVBC - Grace Valley Baptist Church\nwww.gvbcchurch.example\nJoin us Sunday at 10am. Youth ministry, choir and a food bank for families in Grace Valley, Ohio."
+      },
+      {
+        "address": "https://www.gvbchamber.example/",
+        "kind": "search",
+        "text": "GVBC - Green Valley Business Chamber\nwww.gvbchamber.example\nThe chamber of commerce for Green Valley, Arizona. Member directory, ribbon cuttings and the annual business awards."
+      },
+      {
+        "address": "https://www.example-directory.example/gvbc-business-coaching-nashik",
+        "kind": "search",
+        "text": "GVBC Business Coaching, Nashik - founder coaching for manufacturers\nexample-directory.example\nGVBC Business Coaching at gvbc.example offers monthly one-to-one coaching for small manufacturers in Nashik."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "group is visibility. The church (Grace Valley Baptist Church) and the chamber of commerce (Green Valley Business Chamber) are about other organisations with the same initials: neither is recorded as a source, and nothing from them (Sunday services, Ohio, Arizona, ribbon cuttings, awards, a food bank) appears in any finding, why or extract. Only the pages about GVBC Business Coaching in Nashik (its own site and the directory listing that names gvbc.example) may be sources or support findings."
+}

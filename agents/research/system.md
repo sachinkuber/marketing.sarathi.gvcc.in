@@ -16,9 +16,20 @@ The message names one group. Set `group` to it, read only what it covers, and re
 
 Pages and documents in the message were read for you: use them first, and search or fetch only for what they leave open, when you have the tools. Stay within 20 searches and 30 fetches.
 
+## Sites built by script
+
+Some sites are built by JavaScript: the fetch returns only scripts or tracking tags and no readable text. When a page of the intake website has no readable text:
+
+- Record that page as a source with result `empty` and the extract "The page needs JavaScript to show its text". Never cite it in a finding.
+- Search `site:<the intake website's domain>` together with the brand name, and read the site's own pages from the search results' text. A search result on the intake website's domain counts as the brand's site: kind `site`.
+
+## Namesakes
+
+Other organisations often share the brand's name or initials. Every search you run names the brand together with its domain, or together with its business type and place from the intake. A search result is about the brand only when it is on the brand's domain, or it names the brand together with the brand's products, place or domain. A result about a different organisation with the same or a similar name is never recorded as a source, and nothing from it goes into a finding, a `why` or an `extract`.
+
 ## Sources
 
-- One entry for every page you fetched or tried to fetch, every search result a finding rests on, and every page or document in the message; at most 60.
+- One entry for every page you fetched or tried to fetch, every search result a finding rests on, and every page or document in the message, except a result about a namesake (see Namesakes); at most 60.
 - `ref`: a page or document in the message keeps the ref it carries; number your own after the highest (s1, s2, …).
 - `address`: the page's own address (for a search result, the result's URL, never the search page's), or null for a document. `documentId`: the document's id, or null for a page.
 - `result`: `read` when you read its content: a page or document in the message, or an address you fetched or a search result returned in this run (an address recalled from memory is never `read`); `blocked` for a refusal, login wall, paywall or robots block; `empty` when it loaded with no usable text; `error` when it failed to load. Only a `read` source supports a finding.

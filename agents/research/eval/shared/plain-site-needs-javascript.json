@@ -1,0 +1,32 @@
+{
+  "id": "plain-site-needs-javascript",
+  "title": "A home page built by script is recorded as empty with the JavaScript reason, and the site's description is found through search",
+  "hostile": false,
+  "input": {
+    "group": "site",
+    "intake": {
+      "website": "https://kilnandco.example/",
+      "socials": {},
+      "competitors": []
+    },
+    "pages": [
+      {
+        "address": "https://kilnandco.example/",
+        "kind": "site",
+        "text": "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','G-0000000000');</script><script src=\"/static/app.4f2a9c.js\"></script><script>!function(f,b,e,v,n,t,s){n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};fbq('init','000000000000000');fbq('track','PageView')}(window,document);</script>"
+      },
+      {
+        "address": "https://kilnandco.example/about",
+        "kind": "search",
+        "text": "About Kiln & Co - handmade stoneware from Pune\nkilnandco.example › about\nKiln & Co is a pottery studio in Koregaon Park, Pune. We make handmade stoneware dinner sets, mugs and planters, and take custom orders for cafes and restaurants across Pune and Mumbai."
+      },
+      {
+        "address": "https://kilnandco.example/contact",
+        "kind": "search",
+        "text": "Contact Kiln & Co\nkilnandco.example › contact\nStudio: Lane 6, Koregaon Park, Pune 411001. WhatsApp +91 91234 56789. Email: studio@kilnandco.example. Open Monday to Saturday, 10am to 6pm."
+      }
+    ]
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "group is site. The home page s1 (kind site) is a source with result empty, and its extract says the page needs JavaScript to show its text; it is never read, and no finding cites it. The two search results about kilnandco.example (s2 and s3) are sources of kind site or search, with result read and a short exact quote as extract. business_name, what_they_sell and places_served are findings that cite s2, and contact_points is a finding that cites s3; each states only what those results say (handmade stoneware, a Koregaon Park studio in Pune, custom orders for cafes and restaurants in Pune and Mumbai, the phone, email and opening hours). No certification, award or price is added. certifications is in unsettled rather than guessed."
+}
