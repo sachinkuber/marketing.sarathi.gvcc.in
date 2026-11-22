@@ -21,10 +21,7 @@
                   "maxLength": 1200
                 }
               },
-              "required": [
-                "statement",
-                "paragraph"
-              ],
+              "required": ["statement", "paragraph"],
               "additionalProperties": false
             },
             "audiences": {
@@ -55,12 +52,7 @@
                     "maxLength": 300
                   }
                 },
-                "required": [
-                  "name",
-                  "needs",
-                  "message",
-                  "where"
-                ],
+                "required": ["name", "needs", "message", "where"],
                 "additionalProperties": false
               }
             },
@@ -92,11 +84,7 @@
                     }
                   }
                 },
-                "required": [
-                  "name",
-                  "why",
-                  "topics"
-                ],
+                "required": ["name", "why", "topics"],
                 "additionalProperties": false
               }
             },
@@ -128,11 +116,7 @@
                     "maxLength": 300
                   }
                 },
-                "required": [
-                  "channel",
-                  "audiences",
-                  "why"
-                ],
+                "required": ["channel", "audiences", "why"],
                 "additionalProperties": false
               }
             },
@@ -154,10 +138,7 @@
                     "maximum": 21
                   }
                 },
-                "required": [
-                  "channel",
-                  "postsPerWeek"
-                ],
+                "required": ["channel", "postsPerWeek"],
                 "additionalProperties": false
               }
             },
@@ -184,11 +165,7 @@
                     "maxLength": 80
                   }
                 },
-                "required": [
-                  "metric",
-                  "from",
-                  "to"
-                ],
+                "required": ["metric", "from", "to"],
                 "additionalProperties": false
               }
             },
@@ -224,11 +201,7 @@
                     }
                   }
                 },
-                "required": [
-                  "key",
-                  "picked",
-                  "notTaken"
-                ],
+                "required": ["key", "picked", "notTaken"],
                 "additionalProperties": false
               }
             },
@@ -297,12 +270,7 @@
               ]
             }
           },
-          "required": [
-            "text",
-            "why",
-            "options",
-            "suggested"
-          ],
+          "required": ["text", "why", "options", "suggested"],
           "additionalProperties": false
         },
         {
@@ -311,9 +279,6 @@
       ]
     }
   },
-  "required": [
-    "brief",
-    "ask"
-  ],
+  "required": ["brief", "ask"],
   "additionalProperties": false
 }
