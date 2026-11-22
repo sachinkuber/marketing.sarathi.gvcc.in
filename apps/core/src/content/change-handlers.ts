@@ -17,8 +17,11 @@ export interface ChangeContext {
   actor: Actor & { userId: string }
 }
 
-// The run it started, or null when it started nothing.
-export type ChangeHandler = (client: PoolClient, ctx: ChangeContext) => Promise<{ runId: string } | null>
+// What the request started: its run; or, when it started nothing, why ('revision_limit', or the code of the refusal
+// of the start, such as queue_busy or agent_unavailable). null: the kind starts nothing from a comment.
+export type ChangeOutcome = { runId: string } | { notStarted: string }
+
+export type ChangeHandler = (client: PoolClient, ctx: ChangeContext) => Promise<ChangeOutcome | null>
 
 export type ChangeHandlers = Map<string, ChangeHandler>
 

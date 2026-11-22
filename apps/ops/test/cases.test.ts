@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { requireDatabase } from '@mkt/test-support'
+import { withBrand } from '@mkt/db'
 import { createTestDatabase, type TestDatabase } from '@mkt/db/testing'
 
 const MAIN = fileURLToPath(new URL('../src/main.ts', import.meta.url))
@@ -35,13 +36,16 @@ afterAll(async () => db?.drop())
 
 describe('ops cases', () => {
   it('lists candidates as JSON lines, oldest first, and writes nothing', async () => {
+    // In the brand's own transaction, as the app adds a case (the function refuses any other brand).
     const add = (agent: string, brand: string, body: object) =>
-      db.admin.query(`select app.add_evaluation_case($1, $2, $3::jsonb, $4)`, [
-        agent,
-        brand,
-        JSON.stringify(body),
-        owner,
-      ])
+      withBrand(db.admin, brand, (client) =>
+        client.query(`select app.add_evaluation_case($1, $2, $3::jsonb, $4)`, [
+          agent,
+          brand,
+          JSON.stringify(body),
+          owner,
+        ]),
+      )
     const brandB = (await db.admin.query<{ id: string }>(`select id from app.brand where slug = 'brand-b'`))
       .rows[0]!.id
     await add('research_merge', brandA, { n: 1 })

@@ -482,9 +482,11 @@ describe('the strategy brief', () => {
     const input = await inputOf(asked.jobId)
     expect(() => strategistInputSchema.parse(input)).not.toThrow()
     expect(input.changeRequest?.comment).toBe('Lead with fleets.')
-    // The previous brief as plain text: its headings, paragraphs and items, one per line.
+    // The previous brief as plain text, one per line: the positioning statement the owner approved with it (the
+    // payload's summary), then its headings, paragraphs and items.
     const lines = input.changeRequest!.previous.split('\n')
-    expect(lines.slice(0, 4)).toEqual([
+    expect(lines.slice(0, 5)).toEqual([
+      'Positioning statement: The coating people of Pune.',
       'Positioning',
       'Ceramic coatings that keep a new car new.',
       'Audiences',

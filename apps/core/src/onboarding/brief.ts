@@ -81,15 +81,16 @@ async function picksOf(client: PoolClient, brandId: string): Promise<StrategistI
     .sort((a, b) => CHOICE_KEYS.indexOf(a.key) - CHOICE_KEYS.indexOf(b.key))
 }
 
-// A brief's body as plain text: its headings, paragraphs and list items, one per line.
-export function briefText(body: readonly BodyBlock[]): string {
-  return body
-    .flatMap((block) => {
-      if (block.type === 'list') return block.items
-      if (block.type === 'image') return []
-      return [block.text]
-    })
-    .join('\n')
+// A brief as plain text, one line each: first its one-line positioning statement (the payload's summary, approved
+// with the rest of the version), then its body's headings, paragraphs and list items.
+export function briefText(payload: { summary?: string; body?: readonly BodyBlock[] }): string {
+  const statement = payload.summary ? [`Positioning statement: ${payload.summary}`] : []
+  const lines = (payload.body ?? []).flatMap((block) => {
+    if (block.type === 'list') return block.items
+    if (block.type === 'image') return []
+    return [block.text]
+  })
+  return [...statement, ...lines].join('\n')
 }
 
 // The revision of a new brief version, derived rather than stored (plan, Task 6): 0 for a brief started on its
@@ -134,8 +135,8 @@ async function changeRequestOf(
       "This is not the brief's latest version. Ask for changes on the latest one.",
     )
   }
-  const payload = JSON.parse(row.payload_canonical) as { body?: BodyBlock[] }
-  const previous = clip(briefText(payload.body ?? []), PREVIOUS_MAX)
+  const payload = JSON.parse(row.payload_canonical) as { summary?: string; body?: BodyBlock[] }
+  const previous = clip(briefText(payload), PREVIOUS_MAX)
   const comment = clip(request.comment.trim(), COMMENT_MAX)
   if (comment === null) throw new AppError(400, 'comment_needed', 'Say what should change in the brief.')
   if (previous === null) throw notFound()
@@ -257,18 +258,22 @@ export async function startStrategistWithin(
 
 // ---- Ask for changes (Task 7, app flow 5.6) ----
 
+// Why no revision started when the closed version was already at the revision limit.
+export const REVISION_LIMIT_REACHED = 'revision_limit'
+
 // Below the revision limit, asking for changes on a brief starts the strategist again with the owner's comment and
 // the closed version's text, in the decision's transaction; the new version's revision is one more than the closed
 // one's. At the limit nothing starts, and the overview says the brief needs the owner's decision. A refusal of the
 // start (no live release, the queue full, a brief already being written, a choice open, no fact in force...) rolls
 // back only the start, in its savepoint: the decision stands, nothing starts, and the refusal is audited by its code.
+// When nothing starts, the answer says why (the limit, or the refusal's code), so the screen can say what to do.
 export function briefChangeHandler(deps: StrategistDeps): ChangeHandler {
   return async (client, ctx) => {
     const found = await client.query<{ revision: number | null }>(
       `select (provenance->>'revision')::int as revision from app.content_version where brand_id = $1 and id = $2`,
       [ctx.brandId, ctx.versionId],
     )
-    if ((found.rows[0]?.revision ?? 0) >= BRIEF_REVISION_LIMIT) return null
+    if ((found.rows[0]?.revision ?? 0) >= BRIEF_REVISION_LIMIT) return { notStarted: REVISION_LIMIT_REACHED }
     const outcome = await refusalInSavepoint(client, () =>
       startStrategistWithin(client, deps, {
         brandId: ctx.brandId,
@@ -288,7 +293,7 @@ export function briefChangeHandler(deps: StrategistDeps): ChangeHandler {
       },
       client,
     )
-    return null
+    return { notStarted: outcome.refused.code }
   }
 }
 

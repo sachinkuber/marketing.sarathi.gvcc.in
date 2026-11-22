@@ -8,11 +8,16 @@ import { approvalRecipientsOf, brandAdminsOf, platformOwnersOf } from '../notify
 //      tick take it FOR SHARE)
 //   2. job_input   3. run   4. the onboarding row (lockOnboarding)   5. content rows (item, version, state)
 //   6. approval_request   7. the audit chain
-// A path takes the locks it needs in that order and never goes back. The tick below takes the brand row first,
-// then locks request rows, then writes audit entries and notifications (a notification's brand reference
-// would otherwise ask for the brand row after the audit chain is held, against a release that holds the
-// brand row and asks for the chain). A result handler that moves a version to awaiting_approval reaches
-// approval_request (6) after job_input and run; a kill-switch release writes its own entry (7) last.
+// A path takes the locks it needs in that order and never goes back to lock an existing row of an earlier step.
+// Inserting new rows later is allowed, even after the audit entry: no other path can hold a row that does not exist
+// yet, and the rows it references are already held (the brand row first), so the insert waits on nobody. Ask for
+// changes on a brief does this: after its audit entry it creates the strategist's run and job (and writes their audit
+// entry), with the brand and onboarding rows already held (taking them again there waits on nobody).
+// The tick below takes the brand row first, then locks request rows, then writes audit entries and notifications
+// (a notification's brand reference would otherwise ask for the brand row after the audit chain is held, against a
+// release that holds the brand row and asks for the chain). A result handler that moves a version to
+// awaiting_approval reaches approval_request (6) after job_input and run; a kill-switch release writes its own entry
+// (7) last.
 //
 // openRequest and closeRequest are idempotent and run inside the caller's withBrand transaction.
 

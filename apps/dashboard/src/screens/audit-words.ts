@@ -13,7 +13,7 @@ export const ACTIONS: Record<string, string> = {
   'approval.invalidated': 'Withdrew an approval because a fact changed',
   'onboarding.brief_choices_started': 'Started finding the open strategic choices',
   'onboarding.brief_started': 'Started writing the strategy brief',
-  'onboarding.brief_revision_not_started': 'Did not start another brief revision (the limit was reached)',
+  'onboarding.brief_revision_not_started': 'Could not start the next brief revision',
   'onboarding.gate_passed': 'Passed gate 1: the strategy brief is approved',
   'evaluation.case_added': 'Added an evaluation case',
   'auth.invite_lookup': 'Looked up an invite',

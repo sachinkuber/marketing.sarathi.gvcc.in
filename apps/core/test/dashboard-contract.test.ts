@@ -68,6 +68,7 @@ import {
 import { fileURLToPath } from 'node:url'
 import { agentFilesHash, withBrand } from '@mkt/db'
 import { createVersion, moveState } from '../src/content/versions.ts'
+import { registerBriefChangeHandler } from '../src/onboarding/brief.ts'
 import { pdfOf } from './pdf-fixtures.ts'
 import { addBrand, addUser, enrolledClient, totp, type Stack, type TestClient } from './support.ts'
 
@@ -750,7 +751,7 @@ describe('the dashboard schemas accept the core’s replies', () => {
       ).toThrow()
       expect(() => onboardingReply.shape.briefJob.parse({ state: 'writing' })).toThrow()
 
-      // Ask for changes on a later version: the version closes; this stack starts no rewrite.
+      // Ask for changes on a later version: the version closes.
       const later = await withBrand(stack.appPool, brand, async (client) => {
         const actor = { kind: 'agent' as const, runId: started.json.runId as string }
         const deps = { audit: stack.jobs!.audit }
@@ -769,13 +770,20 @@ describe('the dashboard schemas accept the core’s replies', () => {
         await moveState(client, deps, v.versionId, 'awaiting_approval', actor)
         return v
       })
-      const changes = await owner.request(
-        'POST',
-        api(brand, `/content/${briefItem}/versions/${later.versionId}/changes`),
-        { body: { comment: 'Lead with fleets.' } },
-      )
+      // With the brief's own change handler: the strategist job started above still runs, so no rewrite starts
+      // and the answer says why.
+      registerBriefChangeHandler(stack.changeHandlers, stack.jobs!)
+      const changes = await owner
+        .request('POST', api(brand, `/content/${briefItem}/versions/${later.versionId}/changes`), {
+          body: { comment: 'Lead with fleets.' },
+        })
+        .finally(() => stack.changeHandlers.delete('strategy_brief'))
       expect(changes.status, JSON.stringify(changes.json)).toBe(201)
-      expect(changesRequestedReply.parse(changes.json).runId).toBeNull()
+      expect(changesRequestedReply.parse(changes.json)).toEqual({
+        approvalId: expect.any(String),
+        runId: null,
+        notStarted: 'brief_running',
+      })
       expect(await overview()).toMatchObject({
         brief: { versionId: later.versionId, state: 'rejected', needsDecision: false },
         gate1: false,

@@ -65,7 +65,9 @@ afterAll(async () => stack?.close())
 
 describe('add as a case', () => {
   it('an edited or rejected suggestion can be added as a case, once', async () => {
-    const edited = await suggestion('profile', 'research_merge', 'edited')
+    // A profile suggestion carries its research run, as research-results.ts writes it (agent research); the merge
+    // wrote it, so the case is the merge's.
+    const edited = await suggestion('profile', 'research', 'edited')
     const added = await owner.request('POST', `${base()}/suggestions/${edited}/case`, {
       body: { note: 'the tone is wrong' },
     })
@@ -98,26 +100,42 @@ describe('add as a case', () => {
     expect(second.status).toBe(200)
     expect((await cases()).find((c) => c.id === second.json.caseId)).toMatchObject({ agent: 'facts_rules' })
 
-    // A suggestion with no run falls back to the agent of its step.
+    // The step decides the agent, with or without a run.
     const orphan = await suggestion('choice', null, 'edited')
     const third = await owner.request('POST', `${base()}/suggestions/${orphan}/case`, { body: {} })
     expect(third.status).toBe(200)
     expect((await cases()).find((c) => c.id === third.json.caseId)).toMatchObject({ agent: 'brief_choices' })
+    const question = await suggestion('question', 'questionnaire', 'rejected')
+    const fourth = await owner.request('POST', `${base()}/suggestions/${question}/case`, { body: {} })
+    expect(fourth.status).toBe(200)
+    expect((await cases()).find((c) => c.id === fourth.json.caseId)).toMatchObject({ agent: 'questionnaire' })
+    const rule = await suggestion('rule', 'facts_rules', 'edited')
+    const fifth = await owner.request('POST', `${base()}/suggestions/${rule}/case`, { body: {} })
+    expect(fifth.status).toBe(200)
+    expect((await cases()).find((c) => c.id === fifth.json.caseId)).toMatchObject({ agent: 'facts_rules' })
+  })
+
+  it("the step decides the agent, whatever the run's agent", async () => {
+    // A choice whose run is recorded under another agent is still the brief choices agent's.
+    const misfiled = await suggestion('choice', 'research', 'edited')
+    const added = await owner.request('POST', `${base()}/suggestions/${misfiled}/case`, { body: {} })
+    expect(added.status).toBe(200)
+    expect((await cases()).find((c) => c.id === added.json.caseId)).toMatchObject({ agent: 'brief_choices' })
   })
 
   it('an accepted suggestion cannot', async () => {
-    const accepted = await suggestion('profile', 'research_merge', 'accepted')
+    const accepted = await suggestion('profile', 'research', 'accepted')
     const before = (await cases()).length
     const refused = await owner.request('POST', `${base()}/suggestions/${accepted}/case`, { body: {} })
     expect(refused.status).toBe(409)
     expect(refused.json.error.code).toBe('not_a_correction')
-    const open = await suggestion('profile', 'research_merge', null)
+    const open = await suggestion('profile', 'research', null)
     expect((await owner.request('POST', `${base()}/suggestions/${open}/case`, { body: {} })).status).toBe(409)
     expect((await cases()).length).toBe(before)
   })
 
   it('refuses a note over 1000 characters and a suggestion that does not exist', async () => {
-    const edited = await suggestion('profile', 'research_merge', 'edited')
+    const edited = await suggestion('profile', 'research', 'edited')
     const long = await owner.request('POST', `${base()}/suggestions/${edited}/case`, {
       body: { note: 'x'.repeat(1001) },
     })
@@ -160,7 +178,7 @@ describe('add as a case', () => {
   })
 
   it('a brand admin gets 403', async () => {
-    const edited = await suggestion('profile', 'research_merge', 'edited')
+    const edited = await suggestion('profile', 'research', 'edited')
     const before = (await cases()).length
     expect((await admin.request('POST', `${base()}/suggestions/${edited}/case`, { body: {} })).status).toBe(
       403,

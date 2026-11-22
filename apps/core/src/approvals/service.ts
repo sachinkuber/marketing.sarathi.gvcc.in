@@ -253,13 +253,14 @@ export async function reject(
 // Ask for changes (app flow 5.6): the comment is recorded as an approval of decision changes_requested on the version's
 // own hash, and the version is closed (rejected, cause changes_requested), which closes its request. Then the item's
 // kind may start new work from the comment in the same transaction (a strategy brief's next revision): its run, or
-// null when nothing started. The comment is kept in the approval row only; the audit carries ids and the version's
+// null when nothing started, with `notStarted` saying why when the kind would have started something (the revision
+// limit, or the refusal's code). The comment is kept in the approval row only; the audit carries ids and the version's
 // revision (null for a version that has none).
 export async function askForChanges(
   pool: Pool,
   deps: ApprovalDeps,
   input: DecisionTarget & { comment: string },
-): Promise<{ approvalId: string; runId: string | null }> {
+): Promise<{ approvalId: string; runId: string | null; notStarted?: string }> {
   try {
     return await withBrand(pool, input.brandId, async (client) => {
       const locked = await lockForDecision(client, input)
@@ -297,7 +298,9 @@ export async function askForChanges(
             actor: input.actor,
           })
         : null
-      return { approvalId, runId: started?.runId ?? null }
+      if (started === null) return { approvalId, runId: null }
+      if ('runId' in started) return { approvalId, runId: started.runId }
+      return { approvalId, runId: null, notStarted: started.notStarted }
     })
   } catch (error) {
     await auditRefusal(deps, 'approval.changes_requested', input, error)

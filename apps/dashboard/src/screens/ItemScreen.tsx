@@ -16,6 +16,7 @@ import {
   reloadAfterWrite,
   RELOAD_HINT,
   saveEdit,
+  type ChangesReply,
   type ContentItem,
   type Outcome,
 } from './item-actions'
@@ -63,7 +64,7 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
       | Outcome<'commented'>
       | Awaited<ReturnType<typeof askForChanges>>
     >,
-    done: string | ((runId: string | null) => string),
+    done: string | ((reply: ChangesReply) => string),
   ) => {
     setBusy(true)
     setError(null)
@@ -77,7 +78,10 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
         if (outcome.kind !== 'commented') void reloadOverdue()
         if (outcome.kind === 'reloaded') show(outcome.item, outcome.notice)
         else {
-          const said = typeof done === 'function' ? done('runId' in outcome ? outcome.runId : null) : done
+          const said =
+            typeof done === 'function'
+              ? done('runId' in outcome ? outcome : { runId: null, notStarted: null })
+              : done
           show(await reloadAfterWrite(brandId, itemId), said)
         }
       }
@@ -123,7 +127,7 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
           onAskChanges={(shown, text) =>
             void finish(
               () => askForChanges(brandId, itemId, shown, text),
-              (runId) => changesNotice(item.kind, runId),
+              (reply) => changesNotice(item.kind, reply),
             )
           }
           onEdit={(shown, values) => {

@@ -9,7 +9,9 @@ interface Deps {
   audit: AuditSink
 }
 
-// The agent that made a suggestion with no run recorded.
+// The agent a correction is filed under, by the suggestion's step: the agent that wrote what the owner corrected.
+// Never the agent of the suggestion's run: a profile suggestion carries the research run's id (agent research), but
+// the merge (research_merge) wrote it.
 const AGENT_OF_STEP: Record<string, string> = {
   profile: 'research_merge',
   question: 'questionnaire',
@@ -71,7 +73,6 @@ interface SuggestionCaseRow {
   decision: string | null
   decided_value: unknown
   decided_reason: string | null
-  agent: string | null
 }
 
 export async function addCorrectionCase(
@@ -81,8 +82,8 @@ export async function addCorrectionCase(
 ): Promise<{ caseId: string }> {
   return withBrand(pool, input.brandId, async (client) => {
     const found = await client.query<SuggestionCaseRow>(
-      `select s.id, s.run_id, s.step, s.key, s.proposed, s.decision, s.decided_value, s.decided_reason, r.agent
-         from app.suggestion s left join app.run r on r.id = s.run_id and r.brand_id = s.brand_id
+      `select s.id, s.run_id, s.step, s.key, s.proposed, s.decision, s.decided_value, s.decided_reason
+         from app.suggestion s
         where s.brand_id = $1 and s.id = $2`,
       [input.brandId, input.suggestionId],
     )
@@ -94,7 +95,7 @@ export async function addCorrectionCase(
         'not_a_correction',
         'Only a suggestion you edited or rejected can be added as a case. Decide it first.',
       )
-    const agent = row.agent ?? AGENT_OF_STEP[row.step]
+    const agent = AGENT_OF_STEP[row.step]
     if (!agent) throw new AppError(409, 'not_a_correction', 'This suggestion has no agent to add a case for.')
     return addCase(client, deps, {
       brandId: input.brandId,

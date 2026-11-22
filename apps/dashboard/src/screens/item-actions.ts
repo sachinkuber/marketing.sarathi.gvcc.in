@@ -28,12 +28,33 @@ const CONFLICTS: Record<string, string> = {
 export const BRIEF_KIND = 'strategy_brief'
 export const BRIEF_OWNER_ONLY = 'Only the platform owner decides on the strategy brief.'
 
-// What the screen says after an ask for changes succeeded.
-export function changesNotice(kind: string, runId: string | null): string {
+// Why a brief's next version did not start: the revision limit, or the core's refusal code in plain words.
+export const REVISION_LIMIT = 'revision_limit'
+const NOT_STARTED: Record<string, string> = {
+  queue_busy: 'too much work is waiting',
+  agent_unavailable: 'the strategist has no live release',
+  brief_running: 'a brief is already being written',
+  choices_open: 'a brief choice is still open',
+  choices_needed: 'no brief choice is settled',
+  brief_choices_needed: 'the brief choices are not settled',
+  facts_needed: 'no fact is confirmed',
+}
+
+export interface ChangesReply {
+  runId: string | null
+  // Set when a brief's next version did not start: 'revision_limit', or the code of the refusal.
+  notStarted: string | null
+}
+
+// What the screen says after an ask for changes succeeded. The version is closed either way; for a brief, a new
+// version comes only from a rewrite that started.
+export function changesNotice(kind: string, reply: ChangesReply): string {
   if (kind !== BRIEF_KIND) return 'Comment saved.'
-  return runId
-    ? 'Your comment was sent. A new version will come back to your inbox.'
-    : 'Comment saved. The brief was revised three times; approve it, reject it, or write it again from onboarding.'
+  if (reply.runId) return 'Your comment was sent. A new version will come back to your inbox.'
+  if (reply.notStarted === REVISION_LIMIT)
+    return 'Comment saved. The brief was revised three times. Write it again from onboarding.'
+  const why = reply.notStarted ? NOT_STARTED[reply.notStarted] : undefined
+  return `Comment saved. The next version could not be started${why ? ` (${why})` : ''}. Write it again from onboarding.`
 }
 
 // Who may decide on an item: the owner, brand admins and approvers; on the strategy brief, the platform owner alone.
@@ -134,13 +155,13 @@ export async function commentOn(
 }
 
 // Ask for changes: the version is closed with the comment. For a strategy brief the core starts a rewrite
-// (`runId`), or none once the revision limit is reached (`runId` null).
+// (`runId`), or none (`runId` null), saying why in `notStarted`: the revision limit, or the refusal's code.
 export async function askForChanges(
   brandId: string,
   itemId: string,
   shown: Pick<Version, 'id'>,
   comment: string,
-): Promise<Outcome<never> | { kind: 'changes_requested'; runId: string | null }> {
+): Promise<Outcome<never> | ({ kind: 'changes_requested' } & ChangesReply)> {
   const problem = textProblem(comment, 'Write what should change first.')
   if (problem) return { kind: 'invalid', message: problem }
   try {
@@ -152,7 +173,7 @@ export async function askForChanges(
         comment: comment.trim(),
       },
     )
-    return { kind: 'changes_requested', runId: reply.runId }
+    return { kind: 'changes_requested', runId: reply.runId, notStarted: reply.notStarted ?? null }
   } catch (error) {
     return onConflict(error, brandId, itemId)
   }

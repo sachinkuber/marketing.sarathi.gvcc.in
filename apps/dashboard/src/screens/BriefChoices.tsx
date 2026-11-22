@@ -17,7 +17,16 @@ import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
 import { AddAsCase } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
-import { BRIEF_FAILED, OWNER_ONLY, isForbidden, refusalWords } from './onboarding-words'
+import {
+  BRIEF_CLOSED,
+  BRIEF_FAILED,
+  BRIEF_REVISED_THRICE,
+  OWNER_ONLY,
+  canWriteAgain,
+  isForbidden,
+  isOpenJob,
+  refusalWords,
+} from './onboarding-words'
 
 type Reply = z.infer<typeof briefChoicesReply>
 type Overview = z.infer<typeof onboardingReply>
@@ -29,9 +38,6 @@ export const POLL_MS = 5000
 
 const OTHER = '__other__'
 const MAX_OWN = 300
-
-const isOpenJob = (state: string | undefined) =>
-  state === 'waiting' || state === 'running' || state === 'waiting_for_answer'
 
 const CHOICES_WORDS: Record<string, string> = {
   waiting: 'The open choices are queued. They start soon.',
@@ -380,6 +386,9 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
               {!briefOpen && brief?.state === 'invalidated' ? (
                 <p className="sub">The brief needs re-approval: a fact it cites changed.</p>
               ) : null}
+              {!briefOpen && !failed && brief?.state === 'rejected' ? (
+                <p className="sub">{brief.needsDecision ? BRIEF_REVISED_THRICE : BRIEF_CLOSED}</p>
+              ) : null}
               {!briefOpen && briefJob?.state === 'failed' ? (
                 <p className="callout warn" role="alert">
                   {BRIEF_FAILED}
@@ -392,7 +401,7 @@ export function BriefChoicesScreen({ brandId }: { brandId: string }) {
                   </Link>
                 </div>
               ) : null}
-              {!briefOpen && (!brief || failed || brief.state === 'invalidated' || brief.needsDecision) ? (
+              {!briefOpen && (!brief || failed || canWriteAgain(brief, briefJob)) ? (
                 <div>
                   <button
                     className="btn primary onb-touch"

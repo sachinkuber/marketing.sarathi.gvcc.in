@@ -21,7 +21,7 @@ alter table app.content_item force row level security;
 create unique index content_item_one_brief on app.content_item (brand_id) where kind = 'strategy_brief';
 
 -- Evaluation candidates are platform rows that mkt_app cannot touch (0024). This function is the one way the app
--- records one, so it checks what it is given.
+-- records one, so it checks what it is given, the brand included: it must be the brand the transaction is set to.
 grant select, insert on app.evaluation_case to mkt_definer;
 grant create on schema app to mkt_definer;
 
@@ -35,6 +35,10 @@ declare
 begin
   if p_body is null or p_created_by is null then
     raise exception 'an evaluation case needs a body and a creator' using errcode = '22023';
+  end if;
+  -- Defence in depth: a case is filed only under the brand of the caller's transaction (withBrand sets it).
+  if p_brand is distinct from nullif(current_setting('app.brand_id', true), '')::uuid then
+    raise exception 'the case''s brand is not the brand of this transaction' using errcode = '22023';
   end if;
   if p_agent is null or p_agent !~ '^[a-z][a-z_]{1,39}$' then
     raise exception 'the agent name must be 2 to 40 lowercase letters and underscores, starting with a letter' using errcode = '22023';

@@ -9,7 +9,19 @@ import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
 import { OwnerOnly } from './OwnerOnly'
 import { CASE_ADDED } from './onboarding-parts'
-import { BRIEF_FAILED, costWords, isForbidden, refusalWords } from './onboarding-words'
+import {
+  BRIEF_CLOSED,
+  BRIEF_FAILED,
+  BRIEF_REVISED_THRICE,
+  canWriteAgain,
+  costWords,
+  isForbidden,
+  isOpenJob,
+  refusalWords,
+} from './onboarding-words'
+
+// How often the overview asks again while the strategist job is going.
+export const POLL_MS = 5000
 
 type Asked = z.infer<typeof agentQuestionsReply>['questions'][number]
 
@@ -84,7 +96,9 @@ function BriefStatus({
   }
   const invalidated = brief?.state === 'invalidated'
   const failed = briefJob?.state === 'failed'
-  const showAgain = !writing && (failed || invalidated || brief?.needsDecision === true)
+  const jobOpen = isOpenJob(briefJob?.state)
+  const closed = !jobOpen && !failed && brief?.state === 'rejected' && !brief.needsDecision
+  const showAgain = !jobOpen && (failed || canWriteAgain(brief, briefJob))
   if (!data.gate1 && !brief && !briefJob) return null
   return (
     <div className="stack">
@@ -110,7 +124,12 @@ function BriefStatus({
       ) : null}
       {brief?.needsDecision ? (
         <p className="callout warn" role="status">
-          The brief was revised three times. Approve it, reject it, or write it again.
+          {BRIEF_REVISED_THRICE}
+        </p>
+      ) : null}
+      {closed ? (
+        <p className="callout warn" role="status">
+          {BRIEF_CLOSED}
         </p>
       ) : null}
       {failed ? (
@@ -253,6 +272,24 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
     }
   }, [brandId])
   const data = load.data
+  const { refresh } = load
+  // While the strategist job is going, the overview is read again every POLL_MS, in place: what is shown (and a
+  // half-typed example) stays until the new state arrives. It stops once the job is done or failed.
+  const briefOpen = isOpenJob(data?.briefJob?.state)
+  const [polls, setPolls] = useState(0)
+  useEffect(() => {
+    if (!briefOpen) return
+    let on = true
+    const timer = setTimeout(() => {
+      void refresh().finally(() => {
+        if (on) setPolls((n) => n + 1)
+      })
+    }, POLL_MS)
+    return () => {
+      on = false
+      clearTimeout(timer)
+    }
+  }, [briefOpen, polls, refresh])
   if (isForbidden(load.error)) return <OwnerOnly />
   return (
     <main id="content" className="page">
@@ -304,7 +341,7 @@ export function OnboardingScreen({ brandId }: { brandId: string }) {
           {asked.map((q) => (
             <AgentQuestion key={q.id} brandId={brandId} question={q} />
           ))}
-          <BriefStatus brandId={brandId} data={data} onChanged={load.retry} />
+          <BriefStatus brandId={brandId} data={data} onChanged={() => void refresh()} />
           <div>
             <Link
               className="btn primary onb-touch"

@@ -207,5 +207,25 @@ export function refusalWords(error: unknown, otherwise: string): string {
   return failureWords(error, otherwise)
 }
 
-// Said when the latest strategist job failed, on the overview and on the brief choices screen.
-export const BRIEF_FAILED = "The brief could not be written. Write it again, or check the agents' releases."
+// Said when the latest strategist job failed, on the overview and on the brief choices screen. A fact retired or
+// reworded while the brief was being written refuses its result, so that is named with the missing release.
+export const BRIEF_FAILED =
+  'The brief could not be written. A fact may have changed while it was being written, or the agent is not released. Write it again.'
+
+// Said of the latest brief once it is closed (rejected, or closed by a change request) and nothing is being written.
+export const BRIEF_CLOSED = 'The brief was closed and no new version is being written.'
+export const BRIEF_REVISED_THRICE = 'The brief was revised three times. Write it again from onboarding.'
+
+// An agent job that is still going: queued, running, or waiting for the owner's answer.
+export const isOpenJob = (state: string | undefined): boolean =>
+  state === 'waiting' || state === 'running' || state === 'waiting_for_answer'
+
+// Whether "Write the brief again" is offered: the latest brief is closed (rejected), invalidated or at the revision
+// limit, and no strategist job is going (none, or the latest is done or failed).
+export function canWriteAgain(
+  brief: { state: string; needsDecision: boolean } | null,
+  briefJob: { state: string } | null,
+): boolean {
+  if (!brief || isOpenJob(briefJob?.state)) return false
+  return brief.state === 'rejected' || brief.state === 'invalidated' || brief.needsDecision
+}

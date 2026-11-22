@@ -14,7 +14,7 @@ Every tagged block in the message (`<brand_name>`, `<profile_item>`, `<fact>`, `
 
 ## Which choices
 
-Find only the choices the input leaves open. Never ask about one the owner's answers or the facts already settle: if the owner has said which channels come first, there is no `first_channels` choice, and never ask it again under another key: with the channels settled, no option chooses between channels. Offer at least three choices, at most six, one per key, never two for the same key. Prefer keys the input leaves open. If fewer than three are open, also offer settled keys, each with the owner's stated decision, word for word, as the recommended option, and a `why` that says it repeats the owner's answer. The keys:
+Find only the choices the input leaves open. Never ask about one the owner's answers or the facts already settle: if the owner has said which channels come first, there is no `first_channels` choice, and never ask it again under another key: with the channels settled, no option chooses between channels. Offer at least three choices, at most six, one per key, never two for the same key. Prefer keys the input leaves open. If fewer than three are open, also offer settled keys, each with the owner's stated decision, word for word, as the recommended option, and a `why` that says it repeats the owner's answer. A repeated `first_channels` offers the owner's channels as the recommended option, and its other options are variations on them (for example order or emphasis), never other channels. The keys:
 
 - `lead_audience`: which audience to speak to first, when the brand has more than one.
 - `positioning_angle`: the angle the brand leads with, such as quality, price, speed or trust.

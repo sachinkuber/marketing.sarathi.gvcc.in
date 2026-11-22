@@ -3,7 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BriefChoicesScreen } from '../src/screens/BriefChoices'
 import { FactsRulesScreen } from '../src/screens/FactsRules'
-import { OnboardingScreen } from '../src/screens/Onboarding'
+import { OnboardingScreen, POLL_MS as OVERVIEW_POLL_MS } from '../src/screens/Onboarding'
 import { Dom, brandId, sessionAs } from './dom-support'
 
 vi.mock('next/navigation', () => ({
@@ -13,6 +13,9 @@ vi.mock('next/navigation', () => ({
 
 const base = `/api/v1/brands/${brandId}/onboarding`
 const T = '2026-11-22T10:00:00.000Z'
+// Said when the strategist job failed: a fact may have changed mid-run (422 unknown_fact), or no release.
+const BRIEF_FAILED_WORDS =
+  'The brief could not be written. A fact may have changed while it was being written, or the agent is not released. Write it again.'
 const itemId = 'b1111111-1111-4111-8111-111111111111'
 
 const choice = (id: string, over: Record<string, unknown> = {}) => ({
@@ -175,9 +178,7 @@ describe('the brief choices screen, driven', () => {
     await open(choices([choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]), {
       briefJob: { state: 'failed' },
     })
-    expect(dom.text()).toContain(
-      "The brief could not be written. Write it again, or check the agents' releases.",
-    )
+    expect(dom.text()).toContain(BRIEF_FAILED_WORDS)
     dom.replies.push(
       { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
       { status: 200, body: choices([choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]) },
@@ -187,18 +188,52 @@ describe('the brief choices screen, driven', () => {
     expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
   })
 
-  it('Write the brief again shows only for an invalidated brief or one that needs a decision', async () => {
+  it('Write the brief again shows for a rejected, invalidated or revision-limit brief while nothing is being written', async () => {
     const decided = [choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]
-    await open(choices(decided), { brief: brief({ state: 'rejected', needsDecision: false }) })
-    expect(dom.text()).not.toContain('Write the brief again')
-    dom.stop()
-    dom.start()
-    await open(choices(decided), { brief: brief({ state: 'invalidated' }) })
-    expect(dom.text()).toContain('Write the brief again')
-    dom.stop()
-    dom.start()
-    await open(choices(decided), { brief: brief({ state: 'rejected', needsDecision: true }) })
-    expect(dom.text()).toContain('Write the brief again')
+    const shows = async (over: Record<string, unknown>) => {
+      dom.stop()
+      dom.start()
+      await open(choices(decided), over)
+      return dom.buttons('Write the brief again').length === 1
+    }
+    // Rejected by the owner, or closed by a change request whose rewrite could not start: no job going.
+    expect(await shows({ brief: brief({ state: 'rejected' }) })).toBe(true)
+    expect(dom.text()).toContain('The brief was closed and no new version is being written.')
+    expect(await shows({ brief: brief({ state: 'rejected' }), briefJob: { state: 'done' } })).toBe(true)
+    // A rewrite is queued, running or waiting on a question: nothing to offer.
+    for (const state of ['waiting', 'running', 'waiting_for_answer'])
+      expect(await shows({ brief: brief({ state: 'rejected' }), briefJob: { state } }), state).toBe(false)
+    expect(await shows({ brief: brief({ state: 'invalidated' }) })).toBe(true)
+    expect(await shows({ brief: brief({ state: 'invalidated' }), briefJob: { state: 'running' } })).toBe(
+      false,
+    )
+    expect(await shows({ brief: brief({ state: 'rejected', revision: 3, needsDecision: true }) })).toBe(true)
+    expect(dom.text()).toContain('The brief was revised three times. Write it again from onboarding.')
+    // Waiting for approval or approved: nothing to write again.
+    expect(await shows({ brief: brief() })).toBe(false)
+    expect(await shows({ brief: brief({ state: 'approved' }) })).toBe(false)
+  })
+
+  it('Write the brief again on a rejected brief starts the strategist', async () => {
+    const decided = [choice('c1', { decision: 'accepted', picked: 'Alpha c1' })]
+    await open(choices(decided), { step: 'brief', brief: brief({ state: 'rejected' }) })
+    dom.replies.push(
+      { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
+      { status: 200, body: choices(decided) },
+      {
+        status: 200,
+        body: overview({
+          step: 'brief',
+          brief: brief({ state: 'rejected' }),
+          briefJob: { state: 'waiting' },
+        }),
+      },
+    )
+    await dom.click('Write the brief again')
+    expect(dom.writes()).toHaveLength(1)
+    expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
+    expect(dom.text()).toContain('Writing the brief…')
+    expect(dom.buttons('Write the brief again')).toHaveLength(0)
   })
 
   it('links to the brief while it waits for approval', async () => {
@@ -306,9 +341,8 @@ describe('the overview, brief and examples', () => {
 
   it('a failed strategist job on the overview says so and offers Write the strategy brief', async () => {
     await show({ step: 'brief', briefJob: { state: 'failed' } })
-    expect(dom.text()).toContain(
-      "The brief could not be written. Write it again, or check the agents' releases.",
-    )
+    expect(dom.text()).toContain(BRIEF_FAILED_WORDS)
+    expect(dom.text()).not.toContain("check the agents' releases")
     dom.replies.push(
       { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
       { status: 200, body: overview({ briefJob: { state: 'running' } }) },
@@ -319,15 +353,48 @@ describe('the overview, brief and examples', () => {
   })
 
   it('a rejected brief that is being revised offers no Write the brief again on the overview', async () => {
-    await show({ step: 'brief', brief: brief({ state: 'rejected', needsDecision: false }) })
-    expect(dom.text()).not.toContain('Write the brief again')
+    for (const state of ['waiting', 'running', 'waiting_for_answer']) {
+      dom.stop()
+      dom.start()
+      await show({ step: 'brief', brief: brief({ state: 'rejected' }), briefJob: { state } })
+      expect(dom.buttons('Write the brief again'), state).toHaveLength(0)
+      expect(dom.text()).not.toContain('The brief was closed')
+    }
   })
 
-  it('shows the revision limit, and Continue leads to the brief in the inbox', async () => {
-    await show({ step: 'brief', brief: brief({ state: 'rejected', revision: 3, needsDecision: true }) })
-    expect(dom.text()).toContain(
-      'The brief was revised three times. Approve it, reject it, or write it again.',
+  it('a rejected brief with nothing being written offers Write the brief again on the overview', async () => {
+    // The owner rejected it, or a change request closed it and its rewrite could not start.
+    for (const briefJob of [null, { state: 'done' }]) {
+      dom.stop()
+      dom.start()
+      await show({ step: 'brief', brief: brief({ state: 'rejected' }), briefJob })
+      expect(dom.text()).toContain('The brief was closed and no new version is being written.')
+      expect(dom.buttons('Write the brief again')).toHaveLength(1)
+    }
+    dom.replies.push(
+      { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
+      {
+        status: 200,
+        body: overview({
+          step: 'brief',
+          brief: brief({ state: 'rejected' }),
+          briefJob: { state: 'waiting' },
+        }),
+      },
     )
+    await dom.click('Write the brief again')
+    expect(dom.writes()).toHaveLength(1)
+    expect(dom.writes()[0]).toMatchObject({ url: `${base}/brief`, method: 'POST' })
+    expect(dom.text()).toContain('Writing the brief…')
+    expect(dom.buttons('Write the brief again')).toHaveLength(0)
+  })
+
+  it('shows the revision limit, offers Write the brief again, and Continue leads to the brief in the inbox', async () => {
+    await show({ step: 'brief', brief: brief({ state: 'rejected', revision: 3, needsDecision: true }) })
+    expect(dom.text()).toContain('The brief was revised three times. Write it again from onboarding.')
+    expect(dom.text()).not.toContain('Approve it, reject it')
+    expect(dom.text()).not.toContain('The brief was closed')
+    expect(dom.buttons('Write the brief again')).toHaveLength(1)
     const cont = [...dom.host.querySelectorAll('a')].find((a) => a.textContent === 'Continue')
     expect(cont?.getAttribute('href')).toBe(`/b/${brandId}/inbox/${itemId}`)
   })
@@ -355,5 +422,102 @@ describe('the overview, brief and examples', () => {
       },
     ])
     expect(dom.text()).toContain('Added as a candidate case.')
+  })
+
+  describe('polling while the brief is being written', () => {
+    const flush = async () => {
+      for (let i = 0; i < 10; i += 1) await act(async () => void (await vi.advanceTimersByTimeAsync(0)))
+    }
+    const tick = async (ms: number) => {
+      await act(async () => void (await vi.advanceTimersByTimeAsync(ms)))
+      await flush()
+    }
+    const overviewReads = () => dom.calls.filter((c) => c.method === 'GET' && c.url === base).length
+    const typed = () => (dom.field('example-text') as HTMLTextAreaElement).value
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      dom.settle = flush
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it('reads the overview every 5 seconds in place, keeps a half-typed example, and stops once the job ends', async () => {
+      expect(OVERVIEW_POLL_MS).toBe(5000)
+      dom.replies.push(
+        { status: 200, body: overview({ step: 'brief', briefJob: { state: 'running' } }) },
+        { status: 200, body: { questions: [] } },
+        { status: 200, body: overview({ step: 'brief', briefJob: { state: 'running' } }) },
+        { status: 200, body: overview({ step: 'brief', brief: brief(), briefJob: { state: 'done' } }) },
+      )
+      await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+      expect(dom.text()).toContain('Writing the brief…')
+      dom.type('example-text', 'Half typed')
+      await tick(4999)
+      expect(overviewReads()).toBe(1)
+      await tick(1)
+      expect(overviewReads()).toBe(2)
+      expect(dom.text()).not.toContain('Loading…')
+      await tick(5000)
+      expect(overviewReads()).toBe(3)
+      expect(dom.text()).not.toContain('Writing the brief…')
+      expect(dom.text()).toContain('The brief is waiting for your approval.')
+      // The examples form was never remounted.
+      expect(typed()).toBe('Half typed')
+      await tick(20_000)
+      expect(overviewReads()).toBe(3)
+    })
+
+    it('starts after Write the brief again, without a reload, and stops when the job fails', async () => {
+      dom.replies.push(
+        { status: 200, body: overview({ step: 'brief', brief: brief({ state: 'rejected' }) }) },
+        { status: 200, body: { questions: [] } },
+      )
+      await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+      dom.type('example-text', 'Half typed')
+      dom.replies.push(
+        { status: 202, body: { runId: 'r', jobId: 'j', revision: 0 } },
+        {
+          status: 200,
+          body: overview({
+            step: 'brief',
+            brief: brief({ state: 'rejected' }),
+            briefJob: { state: 'waiting' },
+          }),
+        },
+        {
+          status: 200,
+          body: overview({
+            step: 'brief',
+            brief: brief({ state: 'rejected' }),
+            briefJob: { state: 'failed' },
+          }),
+        },
+      )
+      await dom.click('Write the brief again')
+      expect(overviewReads()).toBe(2)
+      expect(dom.text()).toContain('Writing the brief…')
+      expect(typed()).toBe('Half typed')
+      await tick(5000)
+      expect(overviewReads()).toBe(3)
+      expect(dom.text()).toContain(BRIEF_FAILED_WORDS)
+      await tick(20_000)
+      expect(overviewReads()).toBe(3)
+      expect(typed()).toBe('Half typed')
+    })
+
+    it('stops when the overview is left', async () => {
+      dom.replies.push(
+        { status: 200, body: overview({ step: 'brief', briefJob: { state: 'running' } }) },
+        { status: 200, body: { questions: [] } },
+      )
+      await dom.mount(<OnboardingScreen brandId={brandId} />, sessionAs('owner'))
+      dom.stop()
+      // dom.stop removes the recording fetch; any read after leaving would reach this one.
+      const after = vi.fn(async () => new Response('{}', { status: 500 }))
+      vi.stubGlobal('fetch', after)
+      await tick(20_000)
+      expect(after).not.toHaveBeenCalled()
+      expect(overviewReads()).toBe(1)
+    })
   })
 })

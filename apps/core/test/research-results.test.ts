@@ -8,6 +8,7 @@ import {
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { registerResearchHandlers } from '../src/agents/register.ts'
+import { addCorrectionCase } from '../src/evaluation/cases.ts'
 import { markDead, requeueJob } from '../src/jobs/dead.ts'
 import { postResult, startAttempt, type JobsDeps } from '../src/jobs/service.ts'
 import { verifyAttemptToken, type AttemptClaims } from '../src/jobs/token.ts'
@@ -1027,6 +1028,38 @@ describe('deciding research suggestions', () => {
     const c = (await decide(brandId, third.byKey.contact_points, 'accepted')).createdId
     expect(await items(brandId, 'contact_points')).toEqual([
       { id: c, value: 'The contact points', superseded_by: null },
+    ])
+  })
+
+  it("an edited profile suggestion from a research run is added as the merge's case", async () => {
+    const brandId = await newBrand()
+    const run = await fullRun(brandId)
+    // The suggestion carries the research run, whose agent is research; the merge wrote it.
+    const suggestionId = run.byKey.business_name!
+    expect(
+      await q('select r.agent from app.suggestion s join app.run r on r.id = s.run_id where s.id = $1', [
+        suggestionId,
+      ]),
+    ).toEqual([{ agent: 'research' }])
+    await decide(brandId, suggestionId, 'edited', 'Aztek Coatings')
+    const { caseId } = await addCorrectionCase(
+      stack.appPool,
+      { audit: jobs.audit },
+      { brandId, suggestionId, actor: { userId: ownerId } },
+    )
+    expect(
+      await q('select agent, subject_brand_id, body from app.evaluation_case where id = $1', [caseId]),
+    ).toEqual([
+      {
+        agent: 'research_merge',
+        subject_brand_id: brandId,
+        body: expect.objectContaining({
+          suggestionId,
+          runId: run.runId,
+          step: 'profile',
+          decision: 'edited',
+        }),
+      },
     ])
   })
 

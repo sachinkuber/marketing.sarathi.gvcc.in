@@ -1247,4 +1247,29 @@ describe('the strategist runner', () => {
     expect(text).toContain('<previous_brief>')
     expect(text).not.toContain('<this>')
   })
+
+  it('the shipped change-request cases give the previous brief as the core writes it', () => {
+    const withRequest = loadCases(STRATEGIST_DIR).filter(
+      (c) => (c.input as { changeRequest: unknown }).changeRequest !== null,
+    )
+    expect(withRequest.length).toBeGreaterThanOrEqual(2)
+    for (const c of withRequest) {
+      const input = c.input as {
+        facts: { statement: string }[]
+        changeRequest: { previous: string }
+      }
+      const lines = input.changeRequest.previous.split('\n')
+      // The positioning statement first (core's briefText), then the body from its first heading.
+      expect(lines[0], c.id).toMatch(/^Positioning statement: \S/)
+      expect(lines[1], c.id).toBe('Positioning')
+      // Every fact under "Facts used" is one of the case's own statements, word for word.
+      const used = lines.slice(lines.indexOf('Facts used') + 1)
+      expect(used.length, c.id).toBeGreaterThan(0)
+      const statements = input.facts.map((f) => f.statement)
+      expect(
+        used.filter((line) => !statements.includes(line)),
+        c.id,
+      ).toEqual([])
+    }
+  })
 })

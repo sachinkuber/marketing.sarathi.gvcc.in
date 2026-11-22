@@ -204,6 +204,8 @@ export function ItemReview(props: {
             </h2>
             <article className="panel pad preview">
               {payload.title ? <h3 className="preview-title">{payload.title}</h3> : null}
+              {/* A brief's one-line positioning statement: part of what the owner approves, so always shown. */}
+              {isBrief && payload.summary ? <p className="strong">{payload.summary}</p> : null}
               {isBrief ? <BriefBody body={payload.body ?? []} /> : null}
               {!isBrief && payload.summary ? <p>{payload.summary}</p> : null}
               {!isBrief && keywords.length > 0 ? (

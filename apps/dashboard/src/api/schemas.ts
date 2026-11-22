@@ -331,8 +331,13 @@ export const contentItemReply = z.strictObject({
 })
 
 export const decisionReply = z.strictObject({ approvalId: z.string() })
-// Ask for changes: the version is closed; runId is the rewrite it started (a strategy brief's), or null.
-export const changesRequestedReply = z.strictObject({ approvalId: z.string(), runId: z.string().nullable() })
+// Ask for changes: the version is closed; runId is the rewrite it started (a strategy brief's), or null. When a brief's
+// rewrite did not start, notStarted says why: 'revision_limit', or the code of the refusal (such as queue_busy).
+export const changesRequestedReply = z.strictObject({
+  approvalId: z.string(),
+  runId: z.string().nullable(),
+  notStarted: z.string().optional(),
+})
 export const commentReply = z.strictObject({ ok: z.literal(true) })
 export const versionCreatedReply = z.strictObject({
   versionId: z.uuid(),

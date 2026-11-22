@@ -38,7 +38,7 @@ describe('ask for changes', () => {
     const reply = await ask(w.owner, made.brandId, made.itemId, made.versionId, '  Lead with fleets.  ')
     expect(reply.status, JSON.stringify(reply.json)).toBe(201)
     const { approvalId, runId } = reply.json as { approvalId: string; runId: string | null }
-    expect(runId).toEqual(expect.any(String))
+    expect(reply.json).toEqual({ approvalId: expect.any(String), runId: expect.any(String) })
 
     // The decision: the comment on the hash that was shown, the version closed, its request closed.
     expect(
@@ -145,7 +145,8 @@ describe('ask for changes', () => {
     // The fourth ask records the comment and closes the version, and starts nothing.
     const fourth = await ask(w.owner, made.brandId, made.itemId, current, 'Once more.')
     expect(fourth.status, JSON.stringify(fourth.json)).toBe(201)
-    expect(fourth.json).toEqual({ approvalId: expect.any(String), runId: null })
+    // The answer says why nothing started, so the screen can say what to do.
+    expect(fourth.json).toEqual({ approvalId: expect.any(String), runId: null, notStarted: 'revision_limit' })
     expect(await strategistRuns(made.brandId)).toBe(4)
     expect(await w.stateOf(current)).toBe('rejected')
     expect(
@@ -175,7 +176,8 @@ describe('ask for changes', () => {
       },
     )
     expect(reply.status, JSON.stringify(reply.json)).toBe(201)
-    expect(reply.json).toEqual({ approvalId: expect.any(String), runId: null })
+    // The answer names the refusal, so the screen can say why no new version comes.
+    expect(reply.json).toEqual({ approvalId: expect.any(String), runId: null, notStarted: 'queue_busy' })
     expect(await w.stateOf(busy.versionId)).toBe('rejected')
     expect(
       await w.q('select decision from app.approval where content_version_id = $1', [busy.versionId]),
@@ -198,7 +200,11 @@ describe('ask for changes', () => {
       'Lead with fleets.',
     ).finally(() => w.q(`update app.agent_definition_version set live = true where agent = 'strategist'`))
     expect(unreleased.status).toBe(201)
-    expect(unreleased.json.runId).toBeNull()
+    expect(unreleased.json).toEqual({
+      approvalId: expect.any(String),
+      runId: null,
+      notStarted: 'agent_unavailable',
+    })
     expect(await w.stateOf(down.versionId)).toBe('rejected')
     expect(
       (await audits(down.brandId, 'onboarding.brief_revision_not_started')).map((r) => r.detail),
@@ -241,6 +247,7 @@ describe('ask for changes', () => {
     }
     const reply = await ask(w.approver, brandId, item, version.versionId, 'Shorter, please.')
     expect(reply.status, JSON.stringify(reply.json)).toBe(201)
+    // Nothing would have started for this kind, so there is nothing to explain.
     expect(reply.json).toEqual({ approvalId: expect.any(String), runId: null })
     expect(
       await w.q(

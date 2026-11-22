@@ -2,6 +2,7 @@ import pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { requireDatabase } from '@mkt/test-support'
 import { createTestDatabase, seedBrand, type TestDatabase } from '../src/testing.ts'
+import { withBrand } from '../src/with-brand.ts'
 
 const A = '11111111-1111-4111-8111-111111111111'
 let db: TestDatabase
@@ -89,13 +90,16 @@ describe('add_evaluation_case', () => {
     await app?.end()
   })
 
-  const call = (agent: string, body: unknown, creator: string | null = userA) =>
-    app.query('select app.add_evaluation_case($1, $2, $3::jsonb, $4) as id', [
-      agent,
-      A,
-      body === null ? null : JSON.stringify(body),
-      creator,
-    ])
+  // As the app calls it: inside the brand's transaction (withBrand), naming that brand unless `brand` says otherwise.
+  const call = (agent: string, body: unknown, creator: string | null = userA, brand: string = A) =>
+    withBrand(app, A, (c) =>
+      c.query('select app.add_evaluation_case($1, $2, $3::jsonb, $4) as id', [
+        agent,
+        brand,
+        body === null ? null : JSON.stringify(body),
+        creator,
+      ]),
+    )
 
   it('add_evaluation_case stores a candidate', async () => {
     const r = await call('research', { suggestionId: 'stores-1', note: 'n' })
@@ -119,6 +123,27 @@ describe('add_evaluation_case', () => {
     expect(await code(() => call('research', { text: 'x'.repeat(16400) }))).toBe('22023')
     expect(await code(() => call('research', null))).toBe('22023')
     expect(await code(() => call('research', { a: 1 }, null))).toBe('22023')
+  })
+
+  it('add_evaluation_case refuses a brand other than the brand of the transaction', async () => {
+    const before = await db.admin.query('select count(*)::int as n from app.evaluation_case')
+    // Another brand than the one the transaction is set to.
+    expect(await code(() => call('research', { a: 1 }, userA, '22222222-2222-4222-8222-222222222222'))).toBe(
+      '22023',
+    )
+    // No brand set at all.
+    expect(
+      await code(() =>
+        app.query('select app.add_evaluation_case($1, $2, $3::jsonb, $4) as id', [
+          'research',
+          A,
+          JSON.stringify({ a: 1 }),
+          userA,
+        ]),
+      ),
+    ).toBe('22023')
+    const after = await db.admin.query('select count(*)::int as n from app.evaluation_case')
+    expect(after.rows[0].n).toBe(before.rows[0].n)
   })
 
   it('add_evaluation_case refuses the same suggestion twice', async () => {

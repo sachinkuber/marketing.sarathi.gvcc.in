@@ -133,6 +133,8 @@ describe('audit words', () => {
     ]) {
       expect(ACTIONS[action], action).toBeTruthy()
     }
+    // Written when the next revision could not start below the limit (a refusal), never at the limit.
+    expect(ACTIONS['onboarding.brief_revision_not_started']).toBe('Could not start the next brief revision')
   })
 })
 
@@ -271,6 +273,8 @@ const briefItem = (): ContentItem => {
         payload: {
           kind: 'strategy_brief',
           title: 'Strategy brief',
+          // The positioning statement (strategyBriefPayload's summary): part of the approved hash.
+          summary: 'Coatings that schools trust.',
           body: [
             // The levels strategyBriefPayload (packages/shared) writes: 2 for sections, 3 for audience
             // and theme names.
@@ -289,6 +293,11 @@ const briefItem = (): ContentItem => {
 describe('a strategy brief', () => {
   it('a strategy brief shows its headings, paragraphs and lists', () => {
     const html = review('awaiting_approval', { item: briefItem() })
+    // The one-line positioning statement is shown as the lead line, under the title and before the sections.
+    const lead = '<p class="strong">Coatings that schools trust.</p>'
+    expect(html).toContain(lead)
+    expect(html.indexOf('Strategy brief</h3>')).toBeLessThan(html.indexOf(lead))
+    expect(html.indexOf(lead)).toBeLessThan(html.indexOf('<h3>Positioning</h3>'))
     expect(html).toContain('<h3>Positioning</h3>')
     expect(html).toContain('<h4>Priorities</h4>')
     expect(html).toContain('<p>We sell coatings to schools.</p>')
@@ -333,14 +342,30 @@ describe('a strategy brief', () => {
 
 describe('asking for changes', () => {
   it('says the right thing after an ask succeeded', () => {
-    expect(changesNotice('strategy_brief', 'r1')).toBe(
-      'Your comment was sent. A new version will come back to your inbox.',
+    const brief = (runId: string | null, notStarted: string | null) =>
+      changesNotice('strategy_brief', { runId, notStarted })
+    expect(brief('r1', null)).toBe('Your comment was sent. A new version will come back to your inbox.')
+    // At the revision limit: nothing starts, and the owner writes it again.
+    expect(brief(null, 'revision_limit')).toBe(
+      'Comment saved. The brief was revised three times. Write it again from onboarding.',
     )
-    expect(changesNotice('strategy_brief', null)).toBe(
-      'Comment saved. The brief was revised three times; approve it, reject it, or write it again from onboarding.',
+    // Below the limit, the start was refused: say why in plain words, never "revised three times".
+    expect(brief(null, 'queue_busy')).toBe(
+      'Comment saved. The next version could not be started (too much work is waiting). Write it again from onboarding.',
     )
-    expect(changesNotice('summary', null)).toBe('Comment saved.')
-    expect(changesNotice('summary', 'r1')).toBe('Comment saved.')
+    expect(brief(null, 'agent_unavailable')).toBe(
+      'Comment saved. The next version could not be started (the strategist has no live release). Write it again from onboarding.',
+    )
+    expect(brief(null, 'choices_open')).toBe(
+      'Comment saved. The next version could not be started (a brief choice is still open). Write it again from onboarding.',
+    )
+    expect(brief(null, 'a_new_code')).toBe(
+      'Comment saved. The next version could not be started. Write it again from onboarding.',
+    )
+    for (const code of ['queue_busy', 'agent_unavailable', 'brief_running', 'facts_needed', 'a_new_code'])
+      expect(brief(null, code)).not.toContain('three times')
+    expect(changesNotice('summary', { runId: null, notStarted: null })).toBe('Comment saved.')
+    expect(changesNotice('summary', { runId: 'r1', notStarted: null })).toBe('Comment saved.')
   })
 
   it('the Ask for changes button is disabled unless the version awaits approval', () => {
@@ -364,13 +389,18 @@ describe('asking for changes', () => {
     expect(await askForChanges(brandId, itemId, shown, ' Shorter, please ')).toEqual({
       kind: 'changes_requested',
       runId: 'r1',
+      notStarted: null,
     })
     expect(calls[0]?.url).toBe(`/api/v1/brands/${brandId}/content/${itemId}/versions/${v1}/changes`)
     expect(calls[0]?.body).toEqual({ comment: 'Shorter, please' })
-    replies.push({ status: 201, body: { approvalId: 'd0000000-0000-4000-8000-000000000004', runId: null } })
+    replies.push({
+      status: 201,
+      body: { approvalId: 'd0000000-0000-4000-8000-000000000004', runId: null, notStarted: 'revision_limit' },
+    })
     expect(await askForChanges(brandId, itemId, shown, 'Again')).toEqual({
       kind: 'changes_requested',
       runId: null,
+      notStarted: 'revision_limit',
     })
   })
 
