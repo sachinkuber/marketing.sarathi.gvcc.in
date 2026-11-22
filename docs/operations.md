@@ -688,7 +688,7 @@ Milestone 11 adds two agents: `brief_choices` (finds the open strategic choices 
 - **Re-release `research`.** Milestone 11 changed the `research` prompt (sites built by script, and namesakes), so its files hash changed, and its `version` is 3 (version 2 names the milestone 10 files on production). Run `npm run eval -- --agent research` again, then `release --agent research --by <owner email>`. A job created before the release is pinned to the old files and can only be cancelled (see "Jobs").
 - `research_merge`, `questionnaire` and `facts_rules` need no re-release. The `facts_rules` evaluation cases now carry the intake website (its input accepts an optional `website`), so its evaluation set changed. Its agent files did not, and v1 stays live. A future `facts_rules` release needs a new evaluation run first.
 - Core and worker deploy together.
-- **Not yet graded live in full:** the strategist's files at 346bb29 and `research` v3 (the API credit ran out on 2026-11-22 at 02:30 IST). If an evaluation fails a plain case, expect a fix round, as in milestone 10.
+- **Not yet graded live in full:** the strategist's final files, `research` v3 and `brief_choices` (the API credit ran out on 2026-11-22 at 02:30 IST; `brief_choices` gained a prompt sentence after its last live grading). Grade each live, unrecorded, before its recorded evaluation. If an evaluation fails a plain case, expect a fix round, as in milestone 10.
 
 ### Add as a case
 
@@ -715,7 +715,7 @@ For the owner to approve. The owner pre-approved this milestone's deploy ("build
   - `select count(*) from (select 1 from app.content_item where kind = 'strategy_brief' group by brand_id having count(*) > 1) d`
 - [ ] **Deploy** the milestone's release to production (the usual "First deployment" update path). It applies migration 0031 and ships core, worker, dashboard and ops together. Research cannot run between this deploy and the `research` v3 release below: the deployed `research` files no longer match the live release, so a job started in between ends with `agent_files_mismatch` after its attempts (no model calls are made) and can only be cancelled. Start no research until the release, and keep the gap short.
   - **Deploy core and worker together, and check no `facts_rules` job is open first.** Core now sends `website` in the `facts_rules` job input, and an older worker's strict input schema would refuse it. Before the deploy, confirm no `facts_rules` job is open (the dashboard's Jobs list, or the queue as in "Jobs").
-- [ ] **Top up the Anthropic API credit first, if it is still out** (the owner). Then evaluate and release `brief_choices`, `strategist` and `research` v3 (above), in that order, with the owner's own sign-in email as `<owner email>`. `research_merge`, `questionnaire` and `facts_rules` need no re-release.
+- [ ] **Top up the Anthropic API credit before the evaluations, if it is still out** (the owner). Then evaluate and release `brief_choices`, `strategist` and `research` v3 (above), in that order, with the owner's own sign-in email as `<owner email>`. `research_merge`, `questionnaire` and `facts_rules` need no re-release.
 - [ ] **Gate 1 for Aztek (test 54), the owner's steps, in order:**
   1. Finish the profile review.
   2. Answer the questionnaire.

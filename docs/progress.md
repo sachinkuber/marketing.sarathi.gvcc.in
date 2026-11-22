@@ -776,7 +776,7 @@ Where an M9 line above is out of date, this section says what changed.
 
 Built 2026-11-22 (about 01:15 to 05:00 IST) on branch `m11-strategy`. Plan: `docs/plans/2026-11-22-m11-strategy.md`; spec: `docs/specs/2026-11-20-phase-2-onboarding-strategy.md` (packages 28 and 30 as far as they go before the owner's steps, tests 42, 46, 49 and 53, and "add as a case" from section 11). This milestone adds the two strategy agents, the brief as a content item the owner approves, the screens from the choices to gate 1, and the button that turns a correction or an example into an evaluation case. The owner pre-approved the build, the tests and the deploy ("build, test and deploy"). **It is not deployed.** Nothing in "Production steps at the end of milestone 11" in `docs/operations.md` has been run. It adds one migration, 0031.
 
-**A fix wave from the final whole-branch review is in progress** (another implementer, code only). The counts and commits below are from the tree before it; its results are added later.
+The final whole-branch review and its fix wave (4a21dc9) are described below.
 
 The Anthropic API key ran out of credit at 02:30 IST on 2026-11-22: every model call answered "credit balance is too low". The owner was told. Everything that needs the live model waits for credits (see "Live checks" below).
 
@@ -796,12 +796,12 @@ The Anthropic API key ran out of credit at 02:30 IST on 2026-11-22: every model 
 | 53 | Onboarding screens work at 390 x 844 with touch | Proven here, now to the brief and its approval | `apps/dashboard/e2e/phone.spec.ts` (33c3c14), the same three runs |
 | 54 | On production: Aztek's profile, verified facts with rules and brief approved by the owner (gate 1) | Pending | The owner's steps in `docs/operations.md` |
 
-Full run on the development server, after the final-review fix wave:
+Full run on the development server, 2026-11-22, at 4a21dc9 (after the final-review fix wave):
 
-- `npm ci && npm run verify`: to be recorded after the final-review fix wave.
-- `npm run e2e` in the browser image: to be recorded after the final-review fix wave. Before the wave, Task 13's runs on 33c3c14 were 8 passed, three times (3.7, 4.0 and 3.7 minutes).
+- `npm ci && npm run verify`: exit 0. Vitest: 2096 passed, 4 skipped (2100) in 192 files, plus 2 files skipped. Lint, format check, typecheck, dependency pins and gitleaks are clean.
+- `npm run e2e` in the browser image: 8 passed (4.0 minutes). Earlier, at 33c3c14, e2e passed 8 of 8 three times (3.7, 4.0 and 3.7 minutes).
 
-A run of `npm run verify` on 33c3c14 found two real failures, fixed in their own commit (formatting of `agents/strategist/output.schema.json`, and `apps/core/test/server.test.ts` expecting the old list of result types); it then passed 2085 tests of 2090 with only the server test failing (1145 s), but that run overlapped other work on the server and is not the record.
+An earlier verify run found two real failures, fixed in their own commit (bea7003): the formatting of `agents/strategist/output.schema.json`, and `apps/core/test/server.test.ts` expecting the old list of result types.
 
 Live checks (production key, nothing recorded, no database writes; times IST, 2026-11-22):
 
@@ -810,7 +810,12 @@ Live checks (production key, nothing recorded, no database writes; times IST, 20
 | `brief_choices` | 7 of 7, twice, on af4ab17's files | First check (326d582) 5 of 7: the model named a service the input never gave ("care after fitting", "custom fitting"), and read "existing customers" as an asserted fact. Prompt and rubrics were tightened in two rounds (R2 to R6) |
 | `strategist` | 6 of 7, then 5 of 7, on 35c5bdc and 4accf75; fixed after that (R7, R9) | The model elaborated a fact ("self-healing" became "light marks that fade with warmth"), counted a persuasive inference as a fact, and let a cadence run to 5 where the input allowed 4. The fix is in 346bb29 (prompt lists every limit; rubrics grade only clear inventions; the capacity is derivable from the input) |
 
-**Not graded live: the strategist's files at 346bb29 and `research` v3.** The credit ran out at 02:30, after the strategist fixes and before their re-grade. The recorded evaluations and the releases of `brief_choices`, `strategist` and `research` v3 wait for credits (see the production steps). Expect a fix round if the strategist's re-grade fails a plain case.
+**Not yet graded live in full: the strategist's final files, `research` v3 and `brief_choices`.**
+
+- The credit ran out at 02:30, after the strategist fixes and before their re-grade.
+- `brief_choices` gained one prompt sentence in the fix wave (the settled-channels wording), so its two 7 of 7 runs predate its final files.
+- Once the credit is topped up, grade all three live without recording, then run the recorded evaluations and the releases (see the production steps).
+- Expect a fix round if a plain case fails.
 
 Rulings in milestone 11 (each cheap to change; the build ledger has the full wording):
 
@@ -830,13 +835,28 @@ Rulings in milestone 11 (each cheap to change; the build ledger has the full wor
 | R12 | Approval reminders and escalations for a brief go to platform owners; the strategist restart inside "ask for changes" runs in a savepoint, so a refusal (agent unavailable, queue busy, brief running) never undoes the recorded request for changes | None |
 | R13 | Task 7 also takes the brand row `for share` at the top of a decision (and the lock order says so); gate 1 is audited only when the step really moved; a change request must be on the item's current version; a rejected brief leaves the step at `brief` (tested); the overview carries the strategist's job state | Small |
 | R14 | An overdue brief is marked overdue with no extra notification, because the escalation would reach the same owner | None |
-| R15 | The brief screen says "Your pick" for a pick from the listed options and "Your own words" only for typed text; a failed job says so with what to do; "Write the brief again" shows only when the latest brief is invalidated or needs a decision | Small |
+| R15 | The brief screen says "Your pick" for a pick from the listed options and "Your own words" only for typed text; a failed job says so with what to do; "Write the brief again" shows only when the latest brief is invalidated or needs a decision. The fix wave widened it: a rejected brief also offers it when no strategist job is open | Small |
 | R16 | Task 11 (research v3) ran alongside Task 10's review, to save time | A Task 10 fix round could have waited for the dev server |
 | R17 | Two missing audit labels and a wider search for audit actions in the label test went into Task 12 | None |
 | R18 | The research naming rule applies to searches for the brand itself (name, site, social profiles), not to visibility or competitor searches; every result must still be about the brand | None (the plan's wording was wrong) |
 | R19 | `facts_rules`' input gets an optional, nullable `website` that core fills from the intake; the agent's files and its request builder are untouched, so v1 stays valid. The evaluation cases with site sources now carry a website | The facts_rules evaluation set's hash changed: a future facts_rules release needs a new evaluation run. No re-release is needed now (v1 stays live) |
+| R20 | The final whole-branch review started before the docs task ended | The docs got only a scoped re-review |
+| R21 | One fix wave for all the final review's findings, including a one-sentence change to the `brief_choices` prompt before its first release | `brief_choices`' live 7 of 7 predates that sentence, so it needs a live re-grade |
+| R22 | This docs task committed with placeholder counts; the fix wave ran the final verify and e2e, and those are the recorded counts | The docs commit landed before the counts; this pass fills them in |
+| R23 | The two verify fixes (the strategist schema's formatting and the server test's handler list) went in their own commit | None (the strategist is unreleased, so its files hash changing costs nothing) |
+| R24 | One docs reconciliation pass after the fix wave: rulings R20 to R24, the final review, the counts, the pending live re-grade and the pruned parked list | None |
 
 Migration 0031: a transition from `awaiting_approval` to `invalidated`; a unique index, one `strategy_brief` item per brand (a pre-flight guard stops the migration if a brand already has two); the definer function `app.add_evaluation_case` (the lock on the suggestion id, so a second add of the same suggestion is refused). Its down migration drops the function, the index, the grant and the transition row, and deletes none of the owner's rows. The production steps check for the two things the migration would refuse.
+
+Final review and fix wave. The final whole-branch review gave "ready to merge with fixes". Its five Important findings, in plain words:
+
+- A rejected or closed brief left the owner no way forward: no "Write the brief again".
+- The wording was wrong at the revision limit and when a restart was refused (it said nothing about the saved comment or the cause).
+- The positioning statement was not shown in the review, and was missing from the previous brief given to the strategist.
+- Admins and approvers saw overdue briefs they cannot decide.
+- Profile corrections were filed under `research` instead of `research_merge`.
+
+The small ones folded into the same wave: the overview polls after "Write the brief again", the settled-channels wording in the `brief_choices` prompt, the previous-brief fact statements in the strategist's change-request cases, a brand check in `add_evaluation_case` (migration 0031 was edited in place; it was never deployed), the failed-brief copy and a lock-order comment. All were fixed in 4a21dc9 with tests. The review's deploy-order point is in the production steps.
 
 What the reviews found, worth remembering:
 
@@ -848,11 +868,11 @@ What the reviews found, worth remembering:
 Parked for later (every "minor, deferred" line of the build; none blocks the deploy):
 
 - Migration and data: the 0031 pre-flight guard and its down migration are unasserted; a second add of one suggestion is blocked by a lock plus a check, which fails open at REPEATABLE READ (a partial unique index would fail closed; nothing uses that level today); one test turns the transition trigger off instead of walking draft, checks and awaiting; no tests at the 16384-byte and 40 or 41 character limits.
-- Schemas and tests: the determinism test could also assert that a changed brief changes the hash; refusal tests assert only `success=false`; the unknown-fact message carries the id (internal only); two cases' previous briefs should be checked to match their fact statements.
-- Brief choices prompt and cases: a channel answer is filed under `social_presence`; the word "cheap" is never graded; "existing channel" is no longer in the list of things never presented as true (matches R6); a repeated settled `first_channels` may offer other channels, so tighten it to "the owner's channels recommended, others as variations".
+- Schemas and tests: the determinism test could also assert that a changed brief changes the hash; refusal tests assert only `success=false`; the unknown-fact message carries the id (internal only).
+- Brief choices prompt and cases: a channel answer is filed under `social_presence`; the word "cheap" is never graded; "existing channel" is no longer in the list of things never presented as true (matches R6).
 - Choices in core: the choice order is by `created_at`, then position in the key list, then id, not strictly the agent's order; no test accepts a found choice; inputs past their maximum are cut silently; no concurrent double-start test; a re-run notifies again.
 - Brief in core: the citation scan has no kind filter (a prefilter bounds the parsing only); `invalidateFactCitations` returns 0 for an unknown fact id, which cannot happen; Task 7 broke the no-local-tools rule once (an empty local script and a `sed -i`), with no effect.
-- Add as a case: with no run, the fallback agent is chosen by step (unrequested; it could mislabel a case); a 22023 error message blames length and has no test; a trailing savepoint is not released; the red-first order was not followed.
-- Screens: the overview does not poll after "Write the brief again", and a retry remounts the examples form; the "Other" box lacks `aria-describedby`, a counter and focus handling; "Continue to brief choices" shows even when no fact is confirmed; missing tests (the poll stop, an agent question on this screen, a mid-save failure, add as a case on the draft profile); the failed state offers "Write the strategy brief" even when a brief exists (R15 allows it).
+- Add as a case: a 22023 error message blames length and has no test; a trailing savepoint is not released; the red-first order was not followed.
+- Screens: the "Other" box lacks `aria-describedby`, a counter and focus handling; "Continue to brief choices" shows even when no fact is confirmed; missing tests (the poll stop, an agent question on this screen, a mid-save failure, add as a case on the draft profile); the failed state offers "Write the strategy brief" even when a brief exists.
 - Task 12 leftovers: `registrableDomain` is copied by hand into the dashboard with no drift test; the facts screen's diff has re-indent noise; the screen fails open when its overview read fails; the domain is computed twice.
 - From milestone 10 and still open: see "For milestone 11" above; items not listed in this milestone's table (a `pagehide` flush for a typed answer, the lock deadlock between a job start and a kill-switch release, a live `pause_turn` check) remain open.
