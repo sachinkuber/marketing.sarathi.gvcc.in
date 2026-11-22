@@ -354,6 +354,25 @@ describe('the overview', () => {
   })
 })
 
+describe('the onboarding cost', () => {
+  it('the onboarding cost includes the decision agents', async () => {
+    const fresh = await addBrand(stack, 'research-start-decision-cost')
+    await owner.request('PUT', `${base(fresh)}/intake`, { body: INTAKE })
+    const { json } = await start(fresh)
+    const site = await jobOf(json.runId, 'site')
+    await claimedCall(site.job_id, { searches: 0, fetches: 0 })
+    // The same priced call, counted under each onboarding agent in turn (spec 14).
+    for (const agent of ['questionnaire', 'facts_rules', 'brief_choices', 'strategist']) {
+      await q(`update app.run set agent = $2 where id = $1`, [json.runId, agent])
+      const got = (await owner.request('GET', base(fresh))).json
+      expect(BigInt(got.cost.usdMicros ?? '0'), agent).toBeGreaterThan(0n)
+    }
+    await q(`update app.run set agent = 'summary' where id = $1`, [json.runId])
+    // Not an onboarding agent: nothing counts.
+    expect(BigInt((await owner.request('GET', base(fresh))).json.cost.usdMicros ?? '0'), 'summary').toBe(0n)
+  })
+})
+
 describe('cost that cannot be known', () => {
   it('is null for a group and for the total when a call has searches but no search price', async () => {
     const fresh = await addBrand(stack, 'research-start-cost')

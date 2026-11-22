@@ -1,9 +1,14 @@
 import {
+  briefChoicesResultSchema,
   factsRulesAgainstInput,
   factsRulesResultSchema,
   questionnaireResultSchema,
+  registrableDomain,
   researchGroupResultSchema,
   researchResultSchema,
+  strategistInputSchema,
+  strategyBriefAgainstInput,
+  strategyBriefResultSchema,
   summaryResultSchema,
 } from '@mkt/shared'
 import { z } from 'zod'
@@ -37,6 +42,13 @@ export const RESULT_VALIDATORS: Record<string, (output: unknown, input: unknown)
   research: (output) => researchGroupResultSchema.safeParse(output).success,
   research_merge: (output) => researchResultSchema.safeParse(output).success,
   questionnaire: (output) => questionnaireResultSchema.safeParse(output).success,
+  brief_choices: (output) => briefChoicesResultSchema.safeParse(output).success,
+  strategist: (output, input) => {
+    const result = strategyBriefResultSchema.safeParse(output)
+    const given = strategistInputSchema.safeParse(input)
+    if (!result.success || !given.success) return false
+    return strategyBriefAgainstInput(result.data, given.data).length === 0
+  },
   facts_rules: (output, input) => {
     const result = factsRulesResultSchema.safeParse(output)
     const given = factsCaseInput.safeParse(input)
@@ -100,7 +112,9 @@ function sourceKinds(...values: unknown[]): Map<string, unknown> {
 
 // True when the cited refs or ids name no known source other than social, search or competitor ones (AI-11):
 // citing nothing, or only sources the case does not list, rests on no known source.
-const THIRD_PARTY = new Set(['social', 'search', 'competitor'])
+// A page labelled site that is not on the brand's domain is one too (facts and rules checks only).
+const OFF_DOMAIN_SITE = 'site_off_domain'
+const THIRD_PARTY = new Set(['social', 'search', 'competitor', OFF_DOMAIN_SITE])
 function restsOnThirdParty(field: unknown, kinds: Map<string, unknown>): boolean {
   const cited: unknown[] = Array.isArray(field) ? field : []
   const known = cited
@@ -134,6 +148,20 @@ function hasUnsupportedFact(output: unknown, input: unknown): boolean {
   const facts = (output as Record<string, unknown>)['facts']
   if (!Array.isArray(facts)) return false
   const kinds = sourceKinds(input)
+  // Ruling R41, as the core grades it: a page labelled site is the brand's own only when its registrable domain
+  // is the intake website's. When the case input has a website, any other site page counts as a third party; an
+  // explicit null (the brand has no website) means no site page qualifies. An input without the field is checked
+  // by kind alone.
+  const website =
+    input !== null && typeof input === 'object' ? (input as Record<string, unknown>)['website'] : undefined
+  if (typeof website === 'string' || website === null) {
+    const brand = website === null ? null : registrableDomain(website)
+    for (const source of sourceEntries(input)) {
+      if (source['kind'] !== 'site' || typeof source['id'] !== 'string') continue
+      const address = typeof source['address'] === 'string' ? source['address'] : null
+      if (brand === null || registrableDomain(address) !== brand) kinds.set(source['id'], OFF_DOMAIN_SITE)
+    }
+  }
   const answered = factsCaseInput.shape.agentAnswers.safeParse(
     input !== null && typeof input === 'object'
       ? (input as Record<string, unknown>)['agentAnswers']

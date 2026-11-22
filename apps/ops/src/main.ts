@@ -1,4 +1,5 @@
 import { alertFromEnv } from './alert.ts'
+import { casesFromEnv } from './cases.ts'
 import { failureLine, prepareFromEnv } from './prepare.ts'
 import { releaseFromEnv } from './release.ts'
 
@@ -12,10 +13,12 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
 const name = process.argv[2] ?? ''
 // `release` maps its outcome to an exit code itself: 0 released, 2 refused, 3 unexpected.
 if (name === 'release') process.exit(await releaseFromEnv(process.env, process.argv.slice(3)))
+// `cases` lists candidate evaluation cases; it maps its outcome to an exit code the same way.
+if (name === 'cases') process.exit(await casesFromEnv(process.env, process.argv.slice(3)))
 const command = commands[name]
 if (!command) {
   process.stderr.write(
-    `Unknown command "${name}". Commands: ${[...Object.keys(commands), 'release'].join(', ')}.\n`,
+    `Unknown command "${name}". Commands: ${[...Object.keys(commands), 'release', 'cases'].join(', ')}.\n`,
   )
   process.exit(2)
 }

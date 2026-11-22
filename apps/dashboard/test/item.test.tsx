@@ -2,8 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { setCsrfToken } from '../src/api/client'
 import { ItemReview, hashPrefix, shownVersion } from '../src/screens/ItemReview'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { ACTIONS } from '../src/screens/audit-words'
 import {
   approveShown,
+  askForChanges,
+  canDecideOn,
+  changesNotice,
   editValues,
   editedPayload,
   rejectShown,
@@ -76,12 +83,60 @@ const review = (state: State, extra: Partial<Parameters<typeof ItemReview>[0]> =
       onApprove={noop}
       onReject={noop}
       onComment={noop}
+      onAskChanges={noop}
       onEdit={noop}
       {...extra}
     />,
   )
 
 const approveButton = (html: string) => html.match(/<button[^>]*>Approve<\/button>/)?.[0] ?? ''
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return sourceFiles(path)
+    return /\.tsx?$/.test(entry.name) ? [path] : []
+  })
+}
+
+describe('audit words', () => {
+  it('every action the core can record has a label', () => {
+    const core = join(dirname(fileURLToPath(import.meta.url)), '../../core/src')
+    const found = new Set<string>()
+    // An action is written as `action: 'x.y'` (any whitespace after the colon, either quote), as the first
+    // argument of `audit('x.y', ...)`, or after the dependencies in `auditRefusal(deps, 'x.y', ...)`.
+    const written = [
+      /\baction:\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+      /\baudit\(\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+      /\bauditRefusal\([^'"]*?,\s*(['"])([a-z_]+\.[a-z_]+)\1/g,
+    ]
+    for (const file of sourceFiles(core)) {
+      const text = readFileSync(file, 'utf8')
+      for (const pattern of written) for (const m of text.matchAll(pattern)) found.add(m[2]!)
+    }
+    expect(found.has('approval.overdue')).toBe(true)
+    expect(found.has('approval.escalated')).toBe(true)
+    expect(found.has('approval.approved')).toBe(true)
+    expect(found.size).toBeGreaterThan(40)
+    expect([...found].filter((action) => !ACTIONS[action])).toEqual([])
+  })
+
+  it('every new audit action has a label', () => {
+    for (const action of [
+      'onboarding.brief_choices_started',
+      'onboarding.brief_started',
+      'onboarding.gate_passed',
+      'onboarding.brief_revision_not_started',
+      'approval.changes_requested',
+      'approval.invalidated',
+      'evaluation.case_added',
+    ]) {
+      expect(ACTIONS[action], action).toBeTruthy()
+    }
+    // Written when the next revision could not start below the limit (a refusal), never at the limit.
+    expect(ACTIONS['onboarding.brief_revision_not_started']).toBe('Could not start the next brief revision')
+  })
+})
 
 describe('the item review screen', () => {
   it('renders the version as it will appear, with the first 12 characters of its hash', () => {
@@ -203,6 +258,159 @@ describe('approving and rejecting', () => {
     expect(done.kind).toBe('rejected')
     expect(calls[0]?.url).toBe(`/api/v1/brands/${brandId}/content/${itemId}/versions/${v1}/reject`)
     expect(calls[0]?.body).toEqual({ reason: 'Off brand' })
+  })
+})
+
+const briefItem = (): ContentItem => {
+  const base = item('awaiting_approval')
+  const v = base.versions[0]!
+  return {
+    ...base,
+    kind: 'strategy_brief',
+    versions: [
+      {
+        ...v,
+        payload: {
+          kind: 'strategy_brief',
+          title: 'Strategy brief',
+          // The positioning statement (strategyBriefPayload's summary): part of the approved hash.
+          summary: 'Coatings that schools trust.',
+          body: [
+            // The levels strategyBriefPayload (packages/shared) writes: 2 for sections, 3 for audience
+            // and theme names.
+            { type: 'heading', level: 2, text: 'Positioning' },
+            { type: 'paragraph', text: 'We sell coatings to schools.' },
+            { type: 'heading', level: 3, text: 'Priorities' },
+            { type: 'list', ordered: true, items: ['Win the district', 'Keep the care plan'] },
+            { type: 'list', ordered: false, items: ['Films', 'Coatings'] },
+          ],
+        },
+      },
+    ],
+  }
+}
+
+describe('a strategy brief', () => {
+  it('a strategy brief shows its headings, paragraphs and lists', () => {
+    const html = review('awaiting_approval', { item: briefItem() })
+    // The one-line positioning statement is shown as the lead line, under the title and before the sections.
+    const lead = '<p class="strong">Coatings that schools trust.</p>'
+    expect(html).toContain(lead)
+    expect(html.indexOf('Strategy brief</h3>')).toBeLessThan(html.indexOf(lead))
+    expect(html.indexOf(lead)).toBeLessThan(html.indexOf('<h3>Positioning</h3>'))
+    expect(html).toContain('<h3>Positioning</h3>')
+    expect(html).toContain('<h4>Priorities</h4>')
+    expect(html).toContain('<p>We sell coatings to schools.</p>')
+    expect(html).toContain('<ol><li>Win the district</li><li>Keep the care plan</li></ol>')
+    expect(html).toContain('<ul><li>Films</li><li>Coatings</li></ul>')
+    // Other kinds keep today's preview: the first list as Keywords.
+    expect(review('awaiting_approval')).toContain('Keywords')
+    expect(review('awaiting_approval')).not.toContain('<ol>')
+  })
+
+  it('a brief has no Edit and only the owner can decide', () => {
+    const owner = review('awaiting_approval', { item: briefItem() })
+    expect(owner).not.toContain('>Edit<')
+    expect(owner).toContain('>Approve<')
+    expect(owner).toContain('>Ask for changes<')
+    expect(review('awaiting_approval')).toContain('>Edit<')
+    const admin = review('awaiting_approval', { item: briefItem(), canDecide: false })
+    expect(admin).toContain('Only the platform owner decides on the strategy brief.')
+    expect(admin).not.toContain('>Approve<')
+    expect(admin).not.toContain('>Ask for changes<')
+    expect(review('awaiting_approval', { canDecide: false })).not.toContain('Only the platform owner')
+    expect(canDecideOn('strategy_brief', 'owner')).toBe(true)
+    for (const role of ['brand_admin', 'approver', 'viewer', null]) {
+      expect(canDecideOn('strategy_brief', role)).toBe(false)
+    }
+    expect(canDecideOn('summary', 'approver')).toBe(true)
+  })
+
+  it('approving a brief whose fact changed reloads it and says so', async () => {
+    const shown = shownVersion(briefItem())!
+    replies.push(
+      { status: 409, body: { error: { code: 'fact_changed', message: 'x' } } },
+      { status: 200, body: briefItem() },
+    )
+    const outcome = await approveShown(brandId, itemId, shown)
+    expect(outcome).toMatchObject({
+      kind: 'reloaded',
+      notice: 'A fact this brief cites changed. Write the brief again from onboarding.',
+    })
+  })
+})
+
+describe('asking for changes', () => {
+  it('says the right thing after an ask succeeded', () => {
+    const brief = (runId: string | null, notStarted: string | null) =>
+      changesNotice('strategy_brief', { runId, notStarted })
+    expect(brief('r1', null)).toBe('Your comment was sent. A new version will come back to your inbox.')
+    // At the revision limit: nothing starts, and the owner writes it again.
+    expect(brief(null, 'revision_limit')).toBe(
+      'Comment saved. The brief was revised three times. Write it again from onboarding.',
+    )
+    // Below the limit, the start was refused: say why in plain words, never "revised three times".
+    expect(brief(null, 'queue_busy')).toBe(
+      'Comment saved. The next version could not be started (too much work is waiting). Write it again from onboarding.',
+    )
+    expect(brief(null, 'agent_unavailable')).toBe(
+      'Comment saved. The next version could not be started (the strategist has no live release). Write it again from onboarding.',
+    )
+    expect(brief(null, 'choices_open')).toBe(
+      'Comment saved. The next version could not be started (a brief choice is still open). Write it again from onboarding.',
+    )
+    expect(brief(null, 'a_new_code')).toBe(
+      'Comment saved. The next version could not be started. Write it again from onboarding.',
+    )
+    for (const code of ['queue_busy', 'agent_unavailable', 'brief_running', 'facts_needed', 'a_new_code'])
+      expect(brief(null, code)).not.toContain('three times')
+    expect(changesNotice('summary', { runId: null, notStarted: null })).toBe('Comment saved.')
+    expect(changesNotice('summary', { runId: 'r1', notStarted: null })).toBe('Comment saved.')
+  })
+
+  it('the Ask for changes button is disabled unless the version awaits approval', () => {
+    const button = (html: string) => html.match(/<button[^>]*>Ask for changes<\/button>/)?.[0] ?? ''
+    expect(button(review('awaiting_approval'))).not.toMatch(/disabled/)
+    expect(button(review('rejected'))).toMatch(/disabled/)
+    expect(button(review('check_failed'))).toMatch(/disabled/)
+    expect(button(review('awaiting_approval', { canDecide: false }))).toBe('')
+    expect(button(review('awaiting_approval', { busy: true }))).toMatch(/disabled/)
+  })
+
+  it('ask for changes needs a comment and posts it', async () => {
+    const shown = shownVersion(item('awaiting_approval'))!
+    expect(await askForChanges(brandId, itemId, shown, '   ')).toEqual({
+      kind: 'invalid',
+      message: 'Write what should change first.',
+    })
+    expect(await askForChanges(brandId, itemId, shown, 'x'.repeat(2001))).toMatchObject({ kind: 'invalid' })
+    expect(calls).toHaveLength(0)
+    replies.push({ status: 201, body: { approvalId: 'd0000000-0000-4000-8000-000000000003', runId: 'r1' } })
+    expect(await askForChanges(brandId, itemId, shown, ' Shorter, please ')).toEqual({
+      kind: 'changes_requested',
+      runId: 'r1',
+      notStarted: null,
+    })
+    expect(calls[0]?.url).toBe(`/api/v1/brands/${brandId}/content/${itemId}/versions/${v1}/changes`)
+    expect(calls[0]?.body).toEqual({ comment: 'Shorter, please' })
+    replies.push({
+      status: 201,
+      body: { approvalId: 'd0000000-0000-4000-8000-000000000004', runId: null, notStarted: 'revision_limit' },
+    })
+    expect(await askForChanges(brandId, itemId, shown, 'Again')).toEqual({
+      kind: 'changes_requested',
+      runId: null,
+      notStarted: 'revision_limit',
+    })
+  })
+
+  it('a refused ask reloads the item', async () => {
+    const shown = shownVersion(item('awaiting_approval'))!
+    replies.push(
+      { status: 409, body: { error: { code: 'already_decided', message: 'x' } } },
+      { status: 200, body: item('awaiting_approval') },
+    )
+    expect((await askForChanges(brandId, itemId, shown, 'Fix it')).kind).toBe('reloaded')
   })
 })
 

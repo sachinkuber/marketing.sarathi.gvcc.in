@@ -5,11 +5,14 @@ import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { registerSummaryHandlers } from '../src/agents/register.ts'
 import { tick } from '../src/approvals/requests.ts'
+import { approve } from '../src/approvals/service.ts'
 import { ManualClock } from '../src/notify/doubles.ts'
 import { createVersion, moveState } from '../src/content/versions.ts'
 import { createJob, createRun, postResult, type JobsDeps } from '../src/jobs/service.ts'
 import { releaseHeldJobs } from '../src/killswitch/release.ts'
 import { releaseSwitch, setSwitch } from '../src/killswitch/service.ts'
+import { replaceFact, retireFact } from '../src/onboarding/facts-rules.ts'
+import { factHash } from '../src/onboarding/suggestions.ts'
 import { BRIEF, GOOD_RESULT, claim, startRun } from './summary-support.ts'
 import { addBrand, addUser, createStack, type Stack } from './support.ts'
 
@@ -182,6 +185,148 @@ describe('one lock order across release, the approvals tick and results', () => 
       [versionId],
     )
     expect(state.rows[0].state).toBe('superseded')
+  }, 60_000)
+
+  it('a decision on a brief takes the brand row before the onboarding row: a release that holds the brand row and then applies a held strategist result does not deadlock it', async () => {
+    await stack.db.admin.query(
+      `insert into app.onboarding (brand_id, step) values ($1, 'brief') on conflict (brand_id) do nothing`,
+      [brand],
+    )
+    const item = (
+      await stack.db.admin.query(
+        `insert into app.content_item (brand_id, kind) values ($1, 'strategy_brief') returning id`,
+        [brand],
+      )
+    ).rows[0].id as string
+    const version = await withBrand(stack.appPool, brand, async (client) => {
+      const created = await createVersion(client, jobs, {
+        brandId: brand,
+        contentItemId: item,
+        payload: { kind: 'strategy_brief', language: 'en', body: [{ type: 'paragraph', text: 'Shine.' }] },
+        createdBy: { kind: 'system' },
+      })
+      await moveState(client, jobs, created.versionId, 'in_checks', { kind: 'system' })
+      await moveState(client, jobs, created.versionId, 'awaiting_approval', { kind: 'system' })
+      return created
+    })
+    const holding = await holder()
+    try {
+      // A release holds the brand row; applying the held brief result then takes the onboarding row.
+      await holding.query('select 1 from app.brand where id = $1 for update', [brand])
+      const deciding = approve(stack.appPool, jobs, {
+        brandId: brand,
+        itemId: item,
+        versionId: version.versionId,
+        actor: { kind: 'user', userId: adminId },
+        role: 'platform_owner',
+        hash: version.hash,
+        scheme: 'cv1',
+      }).then(
+        (value) => value,
+        (error: unknown) => error,
+      )
+      await untilSomeoneWaitsOnALock()
+      await holding.query('select 1 from app.onboarding where brand_id = $1 for update', [brand])
+      await holding.query('commit')
+      expect(await deciding).toMatchObject({ approvalId: expect.any(String) })
+    } finally {
+      await holding.query('rollback').catch(() => undefined)
+      holding.release()
+    }
+  }, 60_000)
+
+  // A brand at the brief with one fact in force, and a brief waiting for approval that cites it.
+  async function briefCitingAFact(
+    slug: string,
+  ): Promise<{ brandId: string; factId: string; versionId: string }> {
+    const brandId = await addBrand(stack, slug)
+    await stack.db.admin.query(`insert into app.onboarding (brand_id, step) values ($1, 'brief')`, [brandId])
+    const statement = 'Open since 2019.'
+    const fact = (
+      await stack.db.admin.query(
+        `insert into app.verified_fact (brand_id, statement, fact_hash, source_ids, confirmed_by, review_date)
+         values ($1, $2, $3, '{}', $4, current_date + 90) returning id`,
+        [brandId, statement, factHash(statement), adminId],
+      )
+    ).rows[0].id as string
+    const item = (
+      await stack.db.admin.query(
+        `insert into app.content_item (brand_id, kind) values ($1, 'strategy_brief') returning id`,
+        [brandId],
+      )
+    ).rows[0].id as string
+    const versionId = await withBrand(stack.appPool, brandId, async (client) => {
+      const created = await createVersion(client, jobs, {
+        brandId,
+        contentItemId: item,
+        payload: {
+          kind: 'strategy_brief',
+          language: 'en',
+          body: [{ type: 'paragraph', text: 'Shine.' }],
+          fact_refs: [{ fact_id: fact, text_hash: `sha256:${factHash(statement)}` }],
+        },
+        createdBy: { kind: 'system' },
+      })
+      await moveState(client, jobs, created.versionId, 'in_checks', { kind: 'system' })
+      await moveState(client, jobs, created.versionId, 'awaiting_approval', { kind: 'system' })
+      return created.versionId
+    })
+    return { brandId, factId: fact, versionId }
+  }
+
+  // A release holds the brand row; applying a held result then takes the onboarding row, which a fact change holds
+  // unless it waited for the brand row first.
+  async function againstARelease(brandId: string, change: () => Promise<unknown>): Promise<unknown> {
+    const holding = await holder()
+    try {
+      await holding.query('select 1 from app.brand where id = $1 for update', [brandId])
+      const changing = change().then(
+        (value) => value,
+        (error: unknown) => error,
+      )
+      await untilSomeoneWaitsOnALock()
+      await holding.query('select 1 from app.onboarding where brand_id = $1 for update', [brandId])
+      await holding.query('commit')
+      return await changing
+    } finally {
+      await holding.query('rollback').catch(() => undefined)
+      holding.release()
+    }
+  }
+  const stateOf = async (versionId: string) =>
+    (
+      await stack.db.admin.query(
+        'select state from app.content_version_state where content_version_id = $1',
+        [versionId],
+      )
+    ).rows[0].state as string
+
+  it('a fact change takes the brand row before the onboarding row: replacing a fact does not deadlock a release that applies a held result', async () => {
+    const made = await briefCitingAFact('lock-order-replace')
+    const replaced = await againstARelease(made.brandId, () =>
+      replaceFact(stack.appPool, jobs, {
+        brandId: made.brandId,
+        factId: made.factId,
+        statement: 'Open since 2018.',
+        reviewDate: '2027-06-30',
+        actor: { userId: adminId },
+      }),
+    )
+    expect(replaced).toMatchObject({ factId: expect.any(String) })
+    expect(await stateOf(made.versionId)).toBe('invalidated')
+  }, 60_000)
+
+  it('a fact change takes the brand row before the onboarding row: retiring a fact does not deadlock a release that applies a held result', async () => {
+    const made = await briefCitingAFact('lock-order-retire')
+    const retired = await againstARelease(made.brandId, () =>
+      retireFact(stack.appPool, jobs, {
+        brandId: made.brandId,
+        factId: made.factId,
+        actor: { userId: adminId },
+      }),
+    )
+    expect(retired).toEqual({ factId: made.factId })
+    expect(await stateOf(made.versionId)).toBe('invalidated')
   }, 60_000)
 
   it('a result post takes the brand row before the job row: a holder of the brand row that then wants the job row does not deadlock it', async () => {

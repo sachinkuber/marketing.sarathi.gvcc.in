@@ -33,6 +33,7 @@ const ALLOWED: Array<[string, string]> = [
   ['check_failed', 'superseded'],
   ['awaiting_approval', 'approved'],
   ['awaiting_approval', 'rejected'],
+  ['awaiting_approval', 'invalidated'],
   ['awaiting_approval', 'superseded'],
   ['approved', 'scheduled'],
   ['approved', 'superseded'],
@@ -383,8 +384,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0030, 0029, 0028, 0027, 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all seventeen come off.
-      await runner({ ...base, direction: 'down', count: 17 })
+      // 0031, 0030, 0029, 0028, 0027, 0026, 0025, 0024, 0023, 0022, 0021, 0020, 0019, 0018, 0017, 0016 and 0015 sit on top of 0014: all eighteen come off.
+      await runner({ ...base, direction: 'down', count: 18 })
       const gone = await own.admin.query(
         "select to_regclass('app.notification') as n, to_regclass('app.alert') as a, to_regclass('app.version_state_transition') as t, to_regprocedure('app.hold_brand_jobs(uuid,text,boolean)') as h",
       )
@@ -412,8 +413,8 @@ describe('migration 0014 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0030 down to 0016 come off first, then 0015.
-      await runner({ ...base, direction: 'down', count: 16 })
+      // 0031 down to 0016 come off first, then 0015.
+      await runner({ ...base, direction: 'down', count: 17 })
       const gone = await own.admin.query(
         "select to_regprocedure('app.raise_alert(uuid,smallint,text,jsonb)') as r",
       )

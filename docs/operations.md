@@ -641,7 +641,7 @@ Milestone 10 adds two agents: `questionnaire` (writes the questions the owner an
 | C5 | The answers to the questionnaire | In the dashboard, Onboarding, Questionnaire. Answers save as you type. Each question shows the suggested answer beside it, but nothing is chosen for you: pick the suggested option, or press "Use the suggestion", to make it your answer. A question you leave alone stays blank when you finish |
 | C6 | Sign-off on the facts | In the dashboard, Onboarding, Facts and rules. Confirm, edit or drop each fact. A fact needs your own words, a page on the brand's own site (the intake website's domain) or a document; a competitor, search or other site's page alone cannot support one |
 | C7 | Things never to say | Through the questionnaire's safety questions, and "Add your own rule" on the facts and rules screen |
-| C8 | Examples of good and bad posts | Waits for the "add as a case" button, planned for milestone 11 |
+| C8 | Examples of good and bad posts | The "Examples of good and bad posts" form on the onboarding overview (milestone 11; see "Add as a case") |
 | C1, C4 | Facebook, LinkedIn and YouTube pages; confirming the competitors | Still open from milestone 9 (see "What the owner needs for research on real data") |
 
 An agent may stop and ask a question while it works. The job then shows "Waiting for your answer"; answer it on the same screen and the job continues. An unanswered question is reminded after a while.
@@ -680,3 +680,47 @@ Approved by the owner on 2026-11-21 ("run the M10 production steps"). Results be
 - [ ] **Facts and rules confirmed by the owner.** Start the facts and rules job after the questionnaire is finished. Confirm, edit or drop each one. There is no "accept all" for facts or rules: the screen has no such button, and the API refuses a bulk accept for them. A fact can be confirmed as it stands only when it rests on the owner's words, a page on the brand's own site or a document; otherwise state it in your own words with Edit.
 
 The R13 probe is not a step here. The one-extra-search exception (R29) stays, because `max_uses` 0 is refused. Leaving the tool out could only be tested with a real `pause_turn` continuation, a possible later probe.
+
+## Releasing `brief_choices` and `strategist`
+
+Milestone 11 adds two agents: `brief_choices` (finds the open strategic choices and suggests options) and `strategist` (writes the strategy brief from the owner's picks). Each goes live only through the release step above, after its own evaluation: `npm run eval -- --agent brief_choices`, then `npm run eval -- --agent strategist`, then `release --agent brief_choices --by <owner email>` and `release --agent strategist --by <owner email>`. Both runs make paid model calls; the cases are in `agents/<name>/eval/shared/` (7 for each; 2 hostile for `brief_choices`, 3 for `strategist`). Run them without `--brand`, as for `questionnaire`.
+
+- **Re-release `research`.** Milestone 11 changed the `research` prompt (sites built by script, and namesakes), so its files hash changed, and its `version` is 3 (version 2 names the milestone 10 files on production). Run `npm run eval -- --agent research` again, then `release --agent research --by <owner email>`. A job created before the release is pinned to the old files and can only be cancelled (see "Jobs").
+- `research_merge`, `questionnaire` and `facts_rules` need no re-release. The `facts_rules` evaluation cases now carry the intake website (its input accepts an optional `website`), so its evaluation set changed. Its agent files did not, and v1 stays live. A future `facts_rules` release needs a new evaluation run first.
+- Core and worker deploy together.
+- **Not yet graded live in full:** the strategist's final files, `research` v3 and `brief_choices` (the API credit ran out on 2026-11-22 at 02:30 IST; `brief_choices` gained a prompt sentence after its last live grading). Grade each live, unrecorded, before its recorded evaluation. If an evaluation fails a plain case, expect a fix round, as in milestone 10.
+
+### Add as a case
+
+A correction or an example the owner gives can become an evaluation case, so the next evaluation grades it.
+
+- **The button.** On a suggestion the owner edited or dropped, "Add as a case" records the correction as a candidate case for the agent that made the suggestion. Adding the same suggestion twice is refused ("Already added.").
+- **The examples form.** On the onboarding overview, "Examples of good and bad posts" lets the owner paste a post, mark it good or bad and add a short note (C8). It is stored as a candidate case for the brand.
+- **Reading the candidates.** Run, as root on the host, from the ops image:
+
+```sh
+docker compose --env-file /opt/mkt/compose.env -f infra/prod/compose.yaml --profile ops \
+  run --rm ops cases --agent <name> [--brand <slug>]
+```
+
+It only reads. It prints one JSON line per candidate, oldest first: `id`, `agent`, `brand`, `createdAt` and `body`. Exit 0 is success, 2 is a refusal (bad arguments), 3 is an unexpected error. A developer turns the lines into case files under `agents/<name>/eval/` in a reviewed pull request; the case then counts in the next evaluation, and the agent needs a new evaluation run and release.
+
+## Production steps at the end of milestone 11
+
+For the owner to approve. The owner pre-approved this milestone's deploy ("build, test and deploy", 2026-11-22), but **nothing in this list has been run yet.** Times are IST.
+
+- [ ] **Back up** first, then check the backup set (see "Backups"). This deploy adds only migration 0031.
+- [ ] **Read-only checks before the deploy.** Run each query with `psql` in the postgres container as in "First deployment". They only read, and each must return 0. If one does not, stop and tell the developer: the migration would be refused.
+  - `select count(*) from pgmigrations where name like '0031%'`
+  - `select count(*) from (select 1 from app.content_item where kind = 'strategy_brief' group by brand_id having count(*) > 1) d`
+- [ ] **Deploy** the milestone's release to production (the usual "First deployment" update path). It applies migration 0031 and ships core, worker, dashboard and ops together. Research cannot run between this deploy and the `research` v3 release below: the deployed `research` files no longer match the live release, so a job started in between ends with `agent_files_mismatch` after its attempts (no model calls are made) and can only be cancelled. Start no research until the release, and keep the gap short.
+  - **Deploy core and worker together, and check no `facts_rules` job is open first.** Core now sends `website` in the `facts_rules` job input, and an older worker's strict input schema would refuse it. Before the deploy, confirm no `facts_rules` job is open (the dashboard's Jobs list, or the queue as in "Jobs").
+- [ ] **Top up the Anthropic API credit before the evaluations, if it is still out** (the owner). Then evaluate and release `brief_choices`, `strategist` and `research` v3 (above), in that order, with the owner's own sign-in email as `<owner email>`. `research_merge`, `questionnaire` and `facts_rules` need no re-release.
+- [ ] **Gate 1 for Aztek (test 54), the owner's steps, in order:**
+  1. Finish the profile review.
+  2. Answer the questionnaire.
+  3. Confirm the facts and rules.
+  4. Find the choices and pick.
+  5. Write the brief.
+  6. Review the brief in the inbox and approve it, or ask for changes (up to three automatic revisions; the fourth ask is recorded and starts nothing).
+- [ ] **The 11oils dry run on staging**, when the owner gives its intake.

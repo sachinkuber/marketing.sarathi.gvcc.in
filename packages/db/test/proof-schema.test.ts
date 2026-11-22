@@ -246,8 +246,8 @@ describe('migration 0018 down and up', () => {
         createSchema: false,
         log: () => undefined,
       }
-      // 0030, 0029, 0028, 0027, 0026, 0025, 0024, 0023, 0022, 0021, 0020 and 0019 sit on top of 0018: all thirteen come off.
-      await runner({ ...base, direction: 'down', count: 13 })
+      // 0031, 0030, 0029, 0028, 0027, 0026, 0025, 0024, 0023, 0022, 0021, 0020 and 0019 sit on top of 0018: all fourteen come off.
+      await runner({ ...base, direction: 'down', count: 14 })
       const gone = await own.admin.query(
         "select to_regclass('app.trigger_nonce') as n, to_regclass('app.duty_run') as d, to_regprocedure('audit.search(text,uuid,text,timestamptz,timestamptz,bigint,integer)') as s, (select count(*) from app.agent_definition_version where agent = 'summary') as defs",
       )

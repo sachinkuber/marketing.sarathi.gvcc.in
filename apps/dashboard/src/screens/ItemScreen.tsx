@@ -7,12 +7,16 @@ import { LoadError } from '../frame/LoadError'
 import { useShell } from '../frame/shell-context'
 import {
   approveShown,
+  askForChanges,
+  canDecideOn,
+  changesNotice,
   commentOn,
   loadItem,
   rejectShown,
   reloadAfterWrite,
   RELOAD_HINT,
   saveEdit,
+  type ChangesReply,
   type ContentItem,
   type Outcome,
 } from './item-actions'
@@ -22,6 +26,8 @@ function failure(error: unknown): string {
   if (error instanceof ApiError && error.status === 0) return 'The platform could not be reached. Try again.'
   if (error instanceof ApiError && error.code === 'payload_rejected')
     return 'The edit could not be stored: the content is not valid. Check each field and try again.'
+  if (error instanceof ApiError && error.code === 'ask_for_changes_instead')
+    return 'The strategy brief cannot be edited. Ask for changes instead.'
   if (error instanceof ApiError && error.status === 403) return 'You may not do that for this brand.'
   return 'That did not work. Reload the item and try again.'
 }
@@ -29,7 +35,6 @@ function failure(error: unknown): string {
 export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: string }) {
   const { session, reload: reloadOverdue } = useShell()
   const role = roleIn(session, brandId)
-  const canDecide = role === 'owner' || role === 'brand_admin' || role === 'approver'
   const loaded = useLoad(() => loadItem(brandId, itemId), `${brandId}:${itemId}`)
   // The item as last reloaded after an action; it replaces the first load until the address changes.
   const [fresh, setFresh] = useState<ContentItem | null>(null)
@@ -53,8 +58,13 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
   }
 
   const finish = async (
-    work: () => Promise<Outcome<'approved'> | Outcome<'rejected'> | Outcome<'commented'>>,
-    done: string,
+    work: () => Promise<
+      | Outcome<'approved'>
+      | Outcome<'rejected'>
+      | Outcome<'commented'>
+      | Awaited<ReturnType<typeof askForChanges>>
+    >,
+    done: string | ((reply: ChangesReply) => string),
   ) => {
     setBusy(true)
     setError(null)
@@ -67,7 +77,13 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
         // overdue banner and pop-up are read again now, not at the next minute's poll.
         if (outcome.kind !== 'commented') void reloadOverdue()
         if (outcome.kind === 'reloaded') show(outcome.item, outcome.notice)
-        else show(await reloadAfterWrite(brandId, itemId), done)
+        else {
+          const said =
+            typeof done === 'function'
+              ? done('runId' in outcome ? outcome : { runId: null, notStarted: null })
+              : done
+          show(await reloadAfterWrite(brandId, itemId), said)
+        }
       }
     } catch (e) {
       setError(failure(e))
@@ -77,6 +93,7 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
   }
 
   const item = fresh?.id === itemId ? fresh : loaded.data
+  const canDecide = canDecideOn(item?.kind ?? '', role)
   return (
     <main id="content" className="page">
       {loaded.state === 'loading' && !item ? <p className="muted">Loading…</p> : null}
@@ -106,6 +123,12 @@ export function ItemScreen({ brandId, itemId }: { brandId: string; itemId: strin
           }
           onComment={(shown, text) =>
             void finish(() => commentOn(brandId, itemId, shown, text), 'Comment saved.')
+          }
+          onAskChanges={(shown, text) =>
+            void finish(
+              () => askForChanges(brandId, itemId, shown, text),
+              (reply) => changesNotice(item.kind, reply),
+            )
           }
           onEdit={(shown, values) => {
             setBusy(true)

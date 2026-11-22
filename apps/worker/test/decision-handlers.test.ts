@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { QUESTION_KEYS, SAFETY_KEYS } from '@mkt/shared'
+import { BASELINE_NEEDED, CHOICE_KEYS, QUESTION_KEYS, SAFETY_KEYS } from '@mkt/shared'
 import { ModelStopped, type ModelRequest } from '../src/model.ts'
 import { JobWaiting, type JobContext } from '../src/runner.ts'
 import type { AgentQuestion } from '../src/core-client.ts'
 import { questionnaireHandler, withoutLoneOptions } from '../src/agents/questionnaire.ts'
 import { factsRulesHandler } from '../src/agents/facts-rules.ts'
+import { briefChoicesHandler } from '../src/agents/brief-choices.ts'
+import { strategistHandler } from '../src/agents/strategist.ts'
 import { NO_DOCUMENTS } from './no-documents.ts'
 
 const SRC = '11111111-1111-4111-8111-111111111111'
@@ -46,6 +48,52 @@ const factsOk = {
   ask: null,
 }
 const factsAsk = { facts: [], rules: [], ask }
+const briefChoicesInput = {
+  brandName: 'Aztek',
+  profile: [],
+  facts: [{ id: SRC, statement: 'We open at 9.' }],
+  rules: [],
+  answers: [],
+}
+const briefChoicesOk = {
+  choices: CHOICE_KEYS.slice(0, 3).map((key) => ({
+    key,
+    question: `About ${key}?`,
+    why: 'w',
+    options: [
+      { value: 'A', tradeOff: 'Reaches many, costs more.', recommended: true },
+      { value: 'B', tradeOff: 'Reaches few, costs less.', recommended: false },
+    ],
+  })),
+  ask: null,
+}
+const briefChoicesAsk = { choices: [], ask }
+const strategistInput = {
+  ...briefChoicesInput,
+  today: '2026-11-22',
+  picks: [{ key: 'lead_audience', question: 'Who first?', picked: 'Installers', notTaken: ['Car owners'] }],
+  baseline: null,
+  changeRequest: null,
+}
+const strategistOk = {
+  brief: {
+    positioning: {
+      statement: 'Open at 9, every day.',
+      paragraph: 'We open at 9 and serve installers first.',
+    },
+    audiences: [
+      { name: 'Installers', needs: 'Reliable stock', message: 'We open at 9.', where: 'Instagram' },
+    ],
+    themes: ['A', 'B', 'C', 'D'].map((name) => ({ name, why: 'w', topics: ['t1', 't2'] })),
+    channels: [{ channel: 'Instagram', audiences: ['Installers'], why: 'They look there.' }],
+    cadence: [{ channel: 'Instagram', postsPerWeek: 3 }],
+    goals: [{ metric: 'Enquiries a month', from: BASELINE_NEEDED, to: '20' }],
+    choicesMade: [{ key: 'lead_audience', picked: 'Installers', notTaken: ['Car owners'] }],
+    factIds: [SRC],
+  },
+  ask: null,
+}
+const strategistAsk = { brief: null, ask }
 
 function stub(
   reply: { text: string; stopReason?: string | null },
@@ -93,6 +141,24 @@ const cases = [
     input: factsRulesInput,
     ok: factsOk,
     asks: factsAsk,
+  },
+  {
+    name: 'brief choices',
+    step: 'brief_choices',
+    type: 'brief_choices.v1',
+    handler: briefChoicesHandler,
+    input: briefChoicesInput,
+    ok: briefChoicesOk,
+    asks: briefChoicesAsk,
+  },
+  {
+    name: 'strategist',
+    step: 'strategist',
+    type: 'strategy_brief.v1',
+    handler: strategistHandler,
+    input: strategistInput,
+    ok: strategistOk,
+    asks: strategistAsk,
   },
 ] as const
 
@@ -203,5 +269,64 @@ describe('a question with one option (seen in the milestone 10 production evalua
     bad.questions = bad.questions.slice(0, 3)
     const { ctx } = stub(end(bad), questionnaireInput)
     await expect(questionnaireHandler(ctx)).rejects.toThrow(/not a valid result/)
+  })
+})
+
+describe('the strategist handler against its input', () => {
+  it('a brief citing a fact outside its input fails the attempt', async () => {
+    const bad = {
+      ...strategistOk,
+      brief: { ...strategistOk.brief, factIds: ['33333333-3333-4333-8333-333333333333'] },
+    }
+    const { ctx, asked } = stub(end(bad), strategistInput)
+    await expect(strategistHandler(ctx)).rejects.toThrow(/not a valid result/)
+    expect(asked).toEqual([])
+  })
+
+  it('a goal that starts anywhere but the baseline marker fails while no baseline is given', async () => {
+    const bad = {
+      ...strategistOk,
+      brief: { ...strategistOk.brief, goals: [{ metric: 'Leads', from: '1000 leads', to: '2000' }] },
+    }
+    const { ctx } = stub(end(bad), strategistInput)
+    await expect(strategistHandler(ctx)).rejects.toThrow(/not a valid result/)
+  })
+
+  it('sends the picks, the baseline and a change request as data, in order', async () => {
+    const { ctx, requests } = stub(
+      end(strategistOk),
+      {
+        ...strategistInput,
+        baseline: '12 enquiries a month',
+        changeRequest: { comment: 'More Instagram', previous: 'old brief' },
+      },
+      [answered],
+    )
+    await strategistHandler(ctx)
+    const text = requests[0]!.request.messages[0]!.content as string
+    expect(text.startsWith('Write the strategy brief.\n\nToday is 2026-11-22.\n\n')).toBe(true)
+    expect(text).toContain(`<pick key="lead_audience" question="Who first?">`)
+    expect(text).toContain('"picked":"Installers"')
+    expect(text).not.toContain('No baseline figures are given.')
+    const at = [
+      "The owner's picks:",
+      '<pick ',
+      '<baseline>',
+      '<change_request>',
+      '<previous_brief>',
+      '<owner_answer>',
+    ].map((marker) => text.indexOf(marker))
+    expect(at.every((n) => n > 0)).toBe(true)
+    expect(at).toEqual([...at].sort((a, b) => a - b))
+  })
+
+  it('says so when no baseline is given and sends no change request', async () => {
+    const { ctx, requests } = stub(end(strategistOk), strategistInput)
+    await strategistHandler(ctx)
+    const text = requests[0]!.request.messages[0]!.content as string
+    expect(text).toContain('No baseline figures are given.')
+    expect(text).not.toContain('<baseline>')
+    expect(text).not.toContain('<change_request>')
+    expect(text).not.toContain('<previous_brief>')
   })
 })

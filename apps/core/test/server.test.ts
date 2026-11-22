@@ -112,11 +112,13 @@ describe('startServer', () => {
     try {
       expect(registered).toHaveLength(1)
       expect([...registered[0]!.keys()].sort()).toEqual([
+        'brief_choices.v1',
         'facts_rules.v1',
         'placeholder_check.v1',
         'questionnaire.v1',
         'research.v1',
         'research_group.v1',
+        'strategy_brief.v1',
         'summary.v1',
       ])
       expect(settled).toHaveLength(1)

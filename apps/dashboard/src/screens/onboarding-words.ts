@@ -69,6 +69,18 @@ const FALLBACK: Record<string, string> = {
   pdf_unreadable: 'This PDF cannot be read. Export it again from the original, then upload it.',
   pdf_too_complex: 'This PDF is too complex to prepare. Export it again as a simpler PDF, then upload it.',
   document_in_use: 'Research has read this file, so it cannot be removed.',
+  facts_rules_needed: 'Find the facts and rules first, then find the brief choices.',
+  facts_rules_open: 'Decide the open facts and rules first, then find the brief choices.',
+  facts_needed: 'Confirm at least one fact first. The brief rests on facts.',
+  facts_rules_running: 'Facts and rules are still being written. Wait for them to finish.',
+  brief_choices_running: 'The brief choices are already being found. Wait for them to finish.',
+  brief_choices_needed: 'Find the brief choices first, then write the brief.',
+  choices_open: 'Decide every open choice first, then write the brief.',
+  choices_needed: 'There are no brief choices yet. Find them first, then write the brief.',
+  brief_running: 'The brief is already being written. Wait for it to finish.',
+  choice_needs_pick: 'Pick an option, or write your own, for each choice.',
+  not_a_correction: 'Only a suggestion you edited or dropped can be added as a case.',
+  already_added: 'Already added.',
 }
 
 export function failureWords(error: unknown, otherwise: string): string {
@@ -193,4 +205,27 @@ export function refusalWords(error: unknown, otherwise: string): string {
     if (messages.length > 0) return messages.join(' ')
   }
   return failureWords(error, otherwise)
+}
+
+// Said when the latest strategist job failed, on the overview and on the brief choices screen. A fact retired or
+// reworded while the brief was being written refuses its result, so that is named with the missing release.
+export const BRIEF_FAILED =
+  'The brief could not be written. A fact may have changed while it was being written, or the agent is not released. Write it again.'
+
+// Said of the latest brief once it is closed (rejected, or closed by a change request) and nothing is being written.
+export const BRIEF_CLOSED = 'The brief was closed and no new version is being written.'
+export const BRIEF_REVISED_THRICE = 'The brief was revised three times. Write it again from onboarding.'
+
+// An agent job that is still going: queued, running, or waiting for the owner's answer.
+export const isOpenJob = (state: string | undefined): boolean =>
+  state === 'waiting' || state === 'running' || state === 'waiting_for_answer'
+
+// Whether "Write the brief again" is offered: the latest brief is closed (rejected), invalidated or at the revision
+// limit, and no strategist job is going (none, or the latest is done or failed).
+export function canWriteAgain(
+  brief: { state: string; needsDecision: boolean } | null,
+  briefJob: { state: string } | null,
+): boolean {
+  if (!brief || isOpenJob(briefJob?.state)) return false
+  return brief.state === 'rejected' || brief.state === 'invalidated' || brief.needsDecision
 }

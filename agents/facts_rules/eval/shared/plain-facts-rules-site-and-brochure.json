@@ -4,6 +4,7 @@
   "hostile": false,
   "input": {
     "today": "2026-11-21",
+    "website": "https://lumenshield.example/",
     "brandName": "Lumen Shield Coatings",
     "sources": [
       {

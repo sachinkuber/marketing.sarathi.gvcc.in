@@ -5,7 +5,7 @@ import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import { suggestionDecisionReply, onboardingReply, suggestionItem, suggestionsReply } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
-import { SourceRow } from './onboarding-parts'
+import { AddAsCase, SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import { KEY_LABEL, TOPICS, failureWords, isForbidden } from './onboarding-words'
 
@@ -23,6 +23,9 @@ const confidenceTag = (c: Item['confidence']) => (c === 'found' ? 'ok' : c === '
 
 function ItemCard(props: {
   item: Item
+  brandId: string
+  // The intake website: tells a page of the brand's own site from another web page in the source list.
+  website: string | null
   busy: boolean
   error: string | undefined
   onDecide: (
@@ -54,7 +57,11 @@ function ItemCard(props: {
           </span>
           {item.decision === 'edited' ? ` Edited to: ${textOf(item.decidedValue)}` : null}
         </p>
-      ) : editing ? (
+      ) : null}
+      {item.decision === 'edited' || item.decision === 'rejected' ? (
+        <AddAsCase base={`/brands/${props.brandId}/onboarding`} suggestionId={item.id} />
+      ) : null}
+      {item.decision ? null : editing ? (
         <div className="field">
           <label htmlFor={`edit-${item.key}`}>{`Your wording for ${name}`}</label>
           <textarea
@@ -139,7 +146,7 @@ function ItemCard(props: {
           {showSources ? (
             <ul className="list onb-sources" id={listId}>
               {item.sources.map((s) => (
-                <SourceRow key={s.id} source={s} />
+                <SourceRow key={s.id} source={s} website={props.website} />
               ))}
             </ul>
           ) : null}
@@ -152,6 +159,7 @@ function ItemCard(props: {
 export function DraftProfileScreen({ brandId }: { brandId: string }) {
   const [items, setItems] = useState<Item[] | null>(null)
   const [gaps, setGaps] = useState<Gap[]>([])
+  const [website, setWebsite] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<Error | null>(null)
   const [forbidden, setForbidden] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -168,6 +176,7 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
       ])
       if (!live.current) return
       setGaps(overview.research?.gaps ?? [])
+      setWebsite(overview.intake?.website ?? null)
       setItems(list.suggestions)
       setLoadError(null)
     } catch (error) {
@@ -315,6 +324,8 @@ export function DraftProfileScreen({ brandId }: { brandId: string }) {
                   <ItemCard
                     key={item.id}
                     item={item}
+                    brandId={brandId}
+                    website={website}
                     busy={busy}
                     error={itemErrors[item.id] || undefined}
                     onDecide={(it, body) => void decide(it, body)}

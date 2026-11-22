@@ -14,6 +14,8 @@ import {
   researchMergeHandler,
 } from './agents/research.ts'
 import { FACTS_RULES_DIR, factsRulesHandler } from './agents/facts-rules.ts'
+import { BRIEF_CHOICES_DIR, briefChoicesHandler } from './agents/brief-choices.ts'
+import { STRATEGIST_DIR, strategistHandler } from './agents/strategist.ts'
 import { QUESTIONNAIRE_DIR, questionnaireHandler } from './agents/questionnaire.ts'
 import { SUMMARY_DIR, summaryHandler } from './agents/summary.ts'
 
@@ -105,6 +107,16 @@ export function defaultHandlers(): Record<string, HandlerEntry> {
       handler: factsRulesHandler,
       agent: 'facts_rules',
       filesHash: agentFilesHash(FACTS_RULES_DIR),
+    },
+    'brief_choices.v1': {
+      handler: briefChoicesHandler,
+      agent: 'brief_choices',
+      filesHash: agentFilesHash(BRIEF_CHOICES_DIR),
+    },
+    'strategy_brief.v1': {
+      handler: strategistHandler,
+      agent: 'strategist',
+      filesHash: agentFilesHash(STRATEGIST_DIR),
     },
     'placeholder_check.v1': { handler: checkHandler, agent: null, filesHash: null },
   }

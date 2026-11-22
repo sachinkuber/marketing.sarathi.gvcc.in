@@ -6,6 +6,7 @@ import { principalOf } from './auth/session.ts'
 import type { AttemptLimiter } from './auth/limiter.ts'
 import type { Auth } from './auth/options.ts'
 import { csrfTokenFor } from './guard.ts'
+import type { ChangeHandlers } from './content/change-handlers.ts'
 import type { AuditSink, Mailer } from './ports.ts'
 import { registerBrandRoutes } from './routes/brands.ts'
 import { registerAlertRoutes } from './routes/alerts.ts'
@@ -54,6 +55,8 @@ export interface ApiDeps {
   // The service's clock, for "this month" and the time of a verify. Unset: the system clock.
   now?: () => Date
   logger?: Logger
+  // What "ask for changes" starts, by content kind (server.ts registers the strategy brief's). Unset: nothing starts.
+  changeHandlers?: ChangeHandlers
 }
 
 export interface ApiContext {
@@ -106,7 +109,7 @@ export function createApi(
   })
 
   registerContentRoutes(table, { pool: deps.pool, audit: deps.audit })
-  registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit })
+  registerApprovalRoutes(table, { pool: deps.pool, audit: deps.audit, changeHandlers: deps.changeHandlers })
   registerApprovalSettingsRoutes(table, { pool: deps.pool, audit: deps.audit })
   registerOnboardingRoutes(table, { pool: deps.pool, audit: deps.audit, jobs: deps.jobs, now: deps.now })
   registerDocumentRoutes(table, { pool: deps.pool, audit: deps.audit, logger: deps.logger })

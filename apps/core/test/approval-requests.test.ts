@@ -52,12 +52,15 @@ async function makeBrand(): Promise<Setup> {
 }
 
 // An item with one version waiting for approval, its request opened "now" by the controlled clock.
-async function waiting(brandId: string): Promise<{ versionId: string; requestId: string; openedAt: Date }> {
+async function waiting(
+  brandId: string,
+  kind: 'article' | 'strategy_brief' = 'article',
+): Promise<{ versionId: string; requestId: string; openedAt: Date }> {
   const item = (
-    await stack.db.admin.query(
-      `insert into app.content_item (brand_id, kind) values ($1, 'article') returning id`,
-      [brandId],
-    )
+    await stack.db.admin.query(`insert into app.content_item (brand_id, kind) values ($1, $2) returning id`, [
+      brandId,
+      kind,
+    ])
   ).rows[0].id as string
   const actor = { kind: 'system' as const }
   const created = await withBrand(stack.appPool, brandId, async (client) => {
@@ -65,7 +68,7 @@ async function waiting(brandId: string): Promise<{ versionId: string; requestId:
       brandId,
       contentItemId: item,
       payload: {
-        kind: 'article' as const,
+        kind,
         language: 'en',
         title: 'T',
         body: [{ type: 'paragraph' as const, text: `Hello ${seq}` }],
@@ -190,6 +193,40 @@ describe('reminders and escalation (test 20)', () => {
     expect(await notified(w.versionId, 'approval_overdue')).toEqual([])
     expect(auditActions(w.versionId)).toContain('approval.overdue')
     expect(auditActions(w.versionId)).not.toContain('approval.escalated')
+  })
+
+  it('reminds the platform owners about a strategy brief, never its approvers or admins, and escalates nowhere', async () => {
+    const b = await makeBrand()
+    const owners = (await stack.db.admin.query('select app.platform_owner_ids() as id order by 1')).rows.map(
+      (r) => r.id as string,
+    )
+    expect(owners.length).toBeGreaterThan(0)
+    const w = await waiting(b.brandId, 'strategy_brief')
+    const article = await waiting(b.brandId)
+    for (let i = 0; i < 5; i += 1) {
+      clock.advance(DAY)
+      await runTick()
+    }
+    clock.advance(30 * DAY)
+    await runTick()
+    // Only the platform owners decide on a brief, so only they are reminded, three times.
+    expect((await notified(w.versionId, 'approval_reminder')).sort()).toEqual(
+      owners.flatMap((id) => [id, id, id]).sort(),
+    )
+    for (const userId of [b.approverId, b.adminId]) {
+      expect(await notified(w.versionId, 'approval_reminder')).not.toContain(userId)
+    }
+    // Overdue, but there is no one above the platform owner to escalate to.
+    const row = await requestRow(w.requestId)
+    expect(row.overdue).toBe(true)
+    expect(row.escalated_to).toBeNull()
+    expect(await notified(w.versionId, 'approval_overdue')).toEqual([])
+    expect(auditActions(w.versionId)).not.toContain('approval.escalated')
+    // The brand's other content still goes to its approvers and admins, and escalates to the admin.
+    expect(new Set(await notified(article.versionId, 'approval_reminder'))).toEqual(
+      new Set([b.approverId, b.adminId]),
+    )
+    expect((await requestRow(article.requestId)).escalated_to).not.toBeNull()
   })
 })
 

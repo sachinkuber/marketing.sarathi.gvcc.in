@@ -10,6 +10,7 @@ import { AttemptLimiter } from './auth/limiter.ts'
 import { LOCK_DURATION_MS, LOCK_MAX_FAILURES, LOCK_WINDOW_MS } from './auth/policy.ts'
 import { createAuth, type Auth } from './auth/options.ts'
 import type { Config } from './config.ts'
+import type { ChangeHandlers } from './content/change-handlers.ts'
 import { libraryLogger } from './logger.ts'
 import { requestGuard } from './guard.ts'
 import { errorName, systemClock, type AlertChannel, type Clock, type NotifyDeps } from './notify/ports.ts'
@@ -28,6 +29,8 @@ export interface CoreDeps {
   audit: AuditSink
   // The work engine's dependencies. Unset: the service has no queue (tests that never create jobs).
   jobs?: JobsDeps
+  // What "ask for changes" starts, by content kind. Unset: the comment is kept and nothing starts.
+  changeHandlers?: ChangeHandlers
   // The second alert channel; unset, alerts go by email only (owner ruling R29, 2026-11-19).
   alertChannel?: AlertChannel
   // Unset: the system clock.
@@ -105,6 +108,7 @@ export function buildCore(deps: CoreDeps): {
       origin: config.publicOrigin,
       onMailFailure: (error) => deps.logger.error({ err: errorName(error) }, 'mail not sent'),
       jobs: deps.jobs,
+      changeHandlers: deps.changeHandlers,
       notify,
       triggers: {
         secret: config.triggerSecret,

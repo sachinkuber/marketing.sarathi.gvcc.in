@@ -1,0 +1,100 @@
+{
+  "id": "plain-strategist-change-request",
+  "title": "The owner asks for Instagram as the first channel at three posts a week; the new brief changes the channels and cadence and keeps the rest",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-22",
+    "brandName": "Aztek Films",
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Aztek Films",
+        "status": "found"
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Paint protection film (PPF) for cars and superbikes",
+        "status": "found"
+      },
+      {
+        "key": "places_served",
+        "value": "Pune and Mumbai",
+        "status": "found"
+      },
+      {
+        "key": "audiences",
+        "value": "Owners of new luxury cars; installers and studios that fit film; dealerships",
+        "status": "found"
+      },
+      {
+        "key": "price_position",
+        "value": "Premium",
+        "status": "found"
+      },
+      {
+        "key": "social_presence",
+        "value": "Instagram and YouTube channels exist; Facebook page dormant",
+        "status": "assumed"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000101",
+        "statement": "Aztek Films fits self-healing paint protection film on cars and superbikes."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000102",
+        "statement": "The studio is in Baner, Pune, and a second studio is in Andheri, Mumbai."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000103",
+        "statement": "A full-car film fitting takes three days."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000104",
+        "statement": "The film carries a 10-year manufacturer warranty."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000105",
+        "statement": "Aztek Films supplies film to two car dealerships in Pune."
+      }
+    ],
+    "rules": [
+      {
+        "kind": "competitor_not_named",
+        "text": "Do not name other film installers."
+      }
+    ],
+    "answers": [
+      {
+        "key": "goals",
+        "question": "What should marketing achieve in the next 90 days?",
+        "answer": "More enquiries from new car owners, and more dealership tie-ups."
+      },
+      {
+        "key": "capacity",
+        "question": "How much time and how many people do you have for content each week?",
+        "answer": "One person, about four hours a week."
+      }
+    ],
+    "picks": [
+      {
+        "key": "lead_audience",
+        "question": "Which audience do we speak to first?",
+        "picked": "Owners of new luxury cars",
+        "notTaken": ["Superbike riders", "Dealerships"]
+      }
+    ],
+    "baseline": null,
+    "changeRequest": {
+      "comment": "make Instagram the first channel, three posts a week",
+      "previous": "Positioning statement: Self-healing paint protection film for new luxury cars, with a 10-year manufacturer warranty.\nPositioning\nAztek Films fits self-healing paint protection film on cars and superbikes, and the film carries a 10-year manufacturer warranty. We speak first to owners of new luxury cars, who want the fitting done with care.\nAudiences\nOwners of new luxury cars\nNeeds: A careful fitting they can trust with a new car\nTell them: The film carries a 10-year manufacturer warranty\nWhere: YouTube and Instagram\nContent themes\nThe fitting\nOwners want to see how their car is looked after\nA full-car fitting\nBefore and after\nThe warranty\nThe warranty is a fact owners can rely on\nWhat the 10-year manufacturer warranty covers\nQuestions owners ask\nStudios\nTwo studios serve two cities\nThe Baner, Pune studio\nThe Andheri, Mumbai studio\nDealerships\nTwo Pune dealerships already use the film\nFilm supplied to dealerships\nWhat dealerships ask\nChannels\nYouTube: Owners of new luxury cars. Where owners look first.\nInstagram: Owners of new luxury cars. Longer fitting stories.\nPlan: posts per week\nYouTube: 1 a week\nInstagram: 1 a week\n90-day goals\nEnquiries a month: from baseline needed (B1) to 30\nChoices made\nOwners of new luxury cars (not taken: Superbike riders; Dealerships)\nFacts used\nAztek Films fits self-healing paint protection film on cars and superbikes.\nThe film carries a 10-year manufacturer warranty.\nThe studio is in Baner, Pune, and a second studio is in Andheri, Mumbai.\nAztek Films supplies film to two car dealerships in Pune."
+    }
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "brief is set and ask is null. The first entry in channels is Instagram, and the entry for Instagram in cadence has postsPerWeek 3. The first audience is still owners of new luxury cars, and choicesMade has one entry for lead_audience repeating the pick word for word. Every entry in factIds is one of the five fact ids in the input, none twice. Every goal's from is exactly baseline needed (B1). No company other than Aztek Films is named. A channel or platform name (Instagram, YouTube, Google Business Profile) is not a company."
+}

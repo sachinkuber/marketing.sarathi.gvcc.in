@@ -1,0 +1,9 @@
+{
+  "agent": "brief_choices",
+  "version": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "maxTokens": 16000,
+  "jobClass": "production",
+  "resultType": "brief_choices.v1"
+}

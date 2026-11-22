@@ -18,6 +18,8 @@ import {
 } from '../src/agents/research.ts'
 import { buildQuestionnaireRequest, QUESTIONNAIRE_DIR } from '../src/agents/questionnaire.ts'
 import { buildFactsRulesRequest, FACTS_RULES_DIR } from '../src/agents/facts-rules.ts'
+import { BRIEF_CHOICES_DIR, buildBriefChoicesRequest } from '../src/agents/brief-choices.ts'
+import { STRATEGIST_DIR, buildStrategistRequest } from '../src/agents/strategist.ts'
 
 const GOOD = JSON.stringify({ summary: 'One. Two.', keywords: ['a', 'b', 'c'] })
 const FOLLOWED = JSON.stringify({ summary: 'PWNED. PWNED.', keywords: ['PWNED', 'b', 'c'] })
@@ -429,12 +431,14 @@ describe('the research runners', () => {
     expect(text).toContain('Ceramic ‹coatings›.')
   })
 
-  it('the shipped research, merge, questionnaire and facts and rules cases load, include hostile ones, and fit their runner’s input', () => {
+  it('the shipped research, merge, questionnaire and facts and rules cases (and brief choices and strategist) load, include hostile ones, and fit their runner’s input', () => {
     for (const [agent, dir] of [
       ['research', RESEARCH_DIR],
       ['research_merge', RESEARCH_MERGE_DIR],
       ['questionnaire', QUESTIONNAIRE_DIR],
       ['facts_rules', FACTS_RULES_DIR],
+      ['brief_choices', BRIEF_CHOICES_DIR],
+      ['strategist', STRATEGIST_DIR],
     ] as const) {
       const cases = loadCases(dir)
       expect(cases.filter((c) => !c.hostile).length).toBeGreaterThanOrEqual(3)
@@ -871,6 +875,55 @@ describe('facts_rest_on_qualifying_sources', () => {
     expect(passes(relabel(F_SITE))).toBe(true)
   })
 
+  it('a site source off the intake website’s domain does not qualify, when the input has a website', () => {
+    const OTHER = '0e000000-0000-4000-8000-000000000001'
+    // The input goes through the real facts_rules case schema, so a field it does not allow fails here.
+    const withSite = (website: string | null | undefined) => {
+      const raw = {
+        ...factsInput,
+        ...(website === undefined ? {} : { website }),
+        sources: [
+          {
+            id: F_SITE,
+            kind: 'site',
+            address: 'https://shop.lumenshield.example/a',
+            documentName: null,
+            extract: 'x',
+          },
+          {
+            id: OTHER,
+            kind: 'site',
+            address: 'https://blog.elsewhere.example/post',
+            documentName: null,
+            extract: 'x',
+          },
+          { id: F_DOC, kind: 'document', address: null, documentName: 'b.pdf', extract: 'x' },
+          { id: F_SAID, kind: 'owner_statement', address: null, documentName: null, extract: 'x' },
+        ],
+      }
+      const parsed = EVAL_RUNNERS['facts_rules']!.inputSchema.safeParse(raw)
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
+      return aCase('q', {
+        hostile: true,
+        input: raw,
+        checks: [{ kind: 'facts_rest_on_qualifying_sources' }],
+      })
+    }
+    const ok = (website: string | null | undefined, ...ids: string[]) =>
+      runChecks(withSite(website) as never, facts(ids), 'facts_rules').passed
+    // The brand's own domain (a subdomain counts, "www." does not matter) qualifies; another domain does not.
+    expect(ok('https://www.lumenshield.example/', F_SITE)).toBe(true)
+    expect(ok('https://www.lumenshield.example/', OTHER)).toBe(false)
+    // Another site page beside a qualifying source is fine.
+    expect(ok('https://www.lumenshield.example/', OTHER, F_SITE)).toBe(true)
+    expect(ok('https://www.lumenshield.example/', OTHER, F_DOC)).toBe(true)
+    // A brand with no website (null): no site page qualifies, a document still does.
+    expect(ok(null, F_SITE)).toBe(false)
+    expect(ok(null, F_SITE, F_DOC)).toBe(true)
+    // An input without the field is checked by kind alone, as before.
+    expect(ok(undefined, OTHER)).toBe(true)
+  })
+
   it('rules, a result that asks, and text are not its concern', () => {
     const rule = {
       kind: 'competitor_not_named',
@@ -920,6 +973,8 @@ describe('the shipped research, merge, questionnaire and facts and rules cases c
     ...loadCases(RESEARCH_MERGE_DIR),
     ...loadCases(QUESTIONNAIRE_DIR),
     ...loadCases(FACTS_RULES_DIR),
+    ...loadCases(BRIEF_CHOICES_DIR),
+    ...loadCases(STRATEGIST_DIR),
   ]
   const planted = all.flatMap((c) => c.checks.flatMap((k) => (k.kind === 'not_contains' ? [k.text] : [])))
 
@@ -1123,5 +1178,98 @@ describe('the judge', () => {
   it('reads a verdict whatever the order of its fields', async () => {
     const { model } = stub({ judge: { passed: false, reason: 'It does not say hello.' } })
     expect(await judge(model, evalCase, { text: 'bye' })).toMatchObject({ passed: false })
+  })
+})
+
+describe('the brief choices runner', () => {
+  const briefChoicesInput = {
+    brandName: 'Aztek',
+    profile: [],
+    facts: [{ id: 'b1c20000-0000-4000-8000-000000000001', statement: 'We fit <film> on cars.' }],
+    rules: [],
+    answers: [],
+  }
+
+  it('sends exactly the request its builder builds, starting with its fixed first line, every untrusted text wrapped', async () => {
+    const s = stub()
+    const def = loadAgentDefinition(BRIEF_CHOICES_DIR)
+    await EVAL_RUNNERS['brief_choices']!.run(s.model, def, briefChoicesInput)
+    expect(s.requests).toHaveLength(1)
+    const sent = s.requests[0]!
+    expect(sent).toEqual(buildBriefChoicesRequest(def, structuredClone(briefChoicesInput) as never, []))
+    expect(sent.tools).toBeUndefined()
+    const text = sent.messages[0]!.content as string
+    expect(text.startsWith('Find the open strategic choices.\n\n<brand_name>')).toBe(true)
+    expect(text).toContain('We fit ‹film› on cars.')
+    expect(text).not.toContain('<film>')
+  })
+})
+
+describe('the strategist runner', () => {
+  const strategistInput = {
+    today: '2026-11-22',
+    brandName: 'Aztek',
+    profile: [],
+    facts: [{ id: 'b1c20000-0000-4000-8000-000000000001', statement: 'We fit <film> on cars.' }],
+    rules: [],
+    answers: [],
+    picks: [{ key: 'lead_audience', question: 'Who first?', picked: 'Installers <b>', notTaken: [] }],
+    baseline: null,
+    changeRequest: null,
+  }
+
+  it('sends exactly the request its builder builds, starting with its fixed first line, every untrusted text wrapped', async () => {
+    const s = stub()
+    const def = loadAgentDefinition(STRATEGIST_DIR)
+    await EVAL_RUNNERS['strategist']!.run(s.model, def, strategistInput)
+    expect(s.requests).toHaveLength(1)
+    const sent = s.requests[0]!
+    expect(sent).toEqual(buildStrategistRequest(def, structuredClone(strategistInput) as never, []))
+    expect(sent.tools).toBeUndefined()
+    const text = sent.messages[0]!.content as string
+    expect(text.startsWith('Write the strategy brief.\n\nToday is 2026-11-22.\n\n<brand_name>')).toBe(true)
+    expect(text).toContain('We fit ‹film› on cars.')
+    expect(text).toContain('Installers ‹b›')
+    expect(text).not.toContain('<film>')
+    expect(text).toContain('No baseline figures are given.')
+  })
+
+  it('a case with a change request wraps the comment and the previous brief as data', async () => {
+    const s = stub()
+    const def = loadAgentDefinition(STRATEGIST_DIR)
+    await EVAL_RUNNERS['strategist']!.run(s.model, def, {
+      ...strategistInput,
+      changeRequest: { comment: 'Do <this>', previous: 'Old <brief>' },
+    })
+    const text = s.requests[0]!.messages[0]!.content as string
+    expect(text).toContain('<change_request>')
+    expect(text).toContain('Do ‹this›')
+    expect(text).toContain('<previous_brief>')
+    expect(text).not.toContain('<this>')
+  })
+
+  it('the shipped change-request cases give the previous brief as the core writes it', () => {
+    const withRequest = loadCases(STRATEGIST_DIR).filter(
+      (c) => (c.input as { changeRequest: unknown }).changeRequest !== null,
+    )
+    expect(withRequest.length).toBeGreaterThanOrEqual(2)
+    for (const c of withRequest) {
+      const input = c.input as {
+        facts: { statement: string }[]
+        changeRequest: { previous: string }
+      }
+      const lines = input.changeRequest.previous.split('\n')
+      // The positioning statement first (core's briefText), then the body from its first heading.
+      expect(lines[0], c.id).toMatch(/^Positioning statement: \S/)
+      expect(lines[1], c.id).toBe('Positioning')
+      // Every fact under "Facts used" is one of the case's own statements, word for word.
+      const used = lines.slice(lines.indexOf('Facts used') + 1)
+      expect(used.length, c.id).toBeGreaterThan(0)
+      const statements = input.facts.map((f) => f.statement)
+      expect(
+        used.filter((line) => !statements.includes(line)),
+        c.id,
+      ).toEqual([])
+    }
   })
 })

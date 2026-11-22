@@ -11,14 +11,26 @@ import {
   tinyPdf,
   unique,
 } from './control.ts'
-import { ASK_TEXT, FACT_CONFIRMED, FACT_EDITED } from './decision-script.ts'
+import {
+  ASK_TEXT,
+  CHANGED_CADENCE,
+  CHOICE_AUDIENCE,
+  FACT_CONFIRMED,
+  FACT_DROPPED,
+  FACT_EDITED,
+  RULE_SUGGESTED,
+} from './decision-script.ts'
 
 // Runs first: the other phone check moves the clock a hundred hours on, and the platform owner would then see
 // its overdue pop-up over these screens.
-// The onboarding screens on a phone (test 53, for these screens): the intake with a document, the progress screen
-// and the draft profile work by touch, and none of them scrolls sideways.
-test('the intake, research progress and draft profile work on a phone', async ({ page }) => {
-  const brandId = await makeBrand(unique('phone-onb'))
+// The onboarding screens on a phone (test 53, for these screens): the intake with a document, the progress screen,
+// the draft profile, the questionnaire, facts and rules, the brief choices and the strategy brief in the inbox work
+// by touch, and none of them scrolls sideways.
+test('the onboarding screens, from the intake to the strategy brief, work on a phone', async ({ page }) => {
+  // Every agent of onboarding runs once or more in this one journey.
+  test.setTimeout(300_000)
+  const slug = unique('phone-onb')
+  const brandId = await makeBrand(slug)
   const owner = await makeUser({
     email: `${unique('owner')}@e2e.test`,
     platformOwner: true,
@@ -106,8 +118,13 @@ test('the intake, research progress and draft profile work on a phone', async ({
   await question.getByText('Premium', { exact: true }).tap()
   await question.getByRole('button', { name: 'Send answer' }).tap()
   await expect(question.getByText('Sent. The job starts again with your answer.')).toBeVisible()
+  // A suggestion waiting for a decision. Once decided it leaves these lists (an edited or dropped one is repeated
+  // under "Your corrections", a confirmed one under the confirmed facts or rules).
   const card = (text: string) =>
-    page.locator('li.dp-item').filter({ has: page.locator('p.dp-value', { hasText: text }) })
+    page
+      .getByRole('region', { name: /^(Facts|Rules) to confirm$/ })
+      .locator('li.dp-item')
+      .filter({ has: page.locator('p.dp-value', { hasText: text }) })
   const fact = card(FACT_CONFIRMED)
   await expect(fact).toBeVisible({ timeout: 120_000 })
   await expectNoHorizontalScroll(page)
@@ -119,6 +136,80 @@ test('the intake, research progress and draft profile work on a phone', async ({
   await expectNoHorizontalScroll(page)
   await page.getByRole('button', { name: 'Add your own rule' }).tap()
   await page.getByLabel('The rule, in your words').fill('Never compare prices with a named rival.')
+  await expectNoHorizontalScroll(page)
+  await page.getByLabel('Why', { exact: true }).fill('The owner asked for it.')
+  await page.getByRole('button', { name: 'Add rule' }).tap()
+  await expect(
+    page
+      .getByRole('region', { name: 'Confirmed rules' })
+      .getByText('Never compare prices with a named rival.'),
+  ).toBeVisible()
+  // Every fact and rule is decided before the brief choices start.
+  await card(FACT_EDITED).getByLabel('Your wording').fill('Aztek coatings carry ISO 9001 certification.')
+  await card(FACT_EDITED).getByRole('button', { name: 'Save edit' }).tap()
+  await expect(card(FACT_EDITED)).toHaveCount(0)
+  await card(FACT_DROPPED).getByRole('button', { name: 'Drop' }).tap()
+  await card(FACT_DROPPED).getByRole('button', { name: 'Yes, drop' }).tap()
+  await expect(card(FACT_DROPPED)).toHaveCount(0)
+  await card(RULE_SUGGESTED).getByRole('button', { name: 'Confirm' }).tap()
+  await expect(
+    page.getByRole('region', { name: 'Confirmed rules' }).getByText(RULE_SUGGESTED, { exact: true }),
+  ).toBeVisible()
+  await expect(card(RULE_SUGGESTED)).toHaveCount(0)
+  await expectNoHorizontalScroll(page)
+
+  // Milestone 11, steps 12 to 16 of the desktop journey by touch (tests 42, 53).
+  // 12. The brief choices: one pick in the owner's own words.
+  await page.getByRole('link', { name: 'Continue to brief choices' }).tap()
+  await expect(page.getByRole('heading', { name: 'Brief choices', level: 1 })).toBeVisible()
+  await page.getByRole('button', { name: 'Find the open choices' }).tap()
+  const audienceChoice = page.getByRole('region', { name: CHOICE_AUDIENCE })
+  await expect(audienceChoice).toBeVisible({ timeout: 120_000 })
+  await expectNoHorizontalScroll(page)
+  await audienceChoice.getByText('Other', { exact: true }).tap()
+  await expect(audienceChoice.getByRole('radio', { name: 'Other', exact: true })).toBeChecked()
+  await audienceChoice.getByLabel('Your own words').fill('Bike owners in Pune who ride every day')
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Save my picks' }).tap()
+  await expect(page.getByRole('status').filter({ hasText: 'Picks saved.' })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  // 13. Write the brief.
+  await page.getByRole('button', { name: 'Write the strategy brief' }).tap()
+  await expect(page.getByText('The brief is waiting for your approval.')).toBeVisible({ timeout: 120_000 })
+  await expectNoHorizontalScroll(page)
+
+  // 14. Open it from the inbox.
+  const briefTitle = `Strategy brief: ${slug}`
+  await page.goto(`/b/${brandId}/inbox`)
+  await page.getByRole('link', { name: briefTitle }).tap()
+  await expect(page.getByRole('heading', { name: briefTitle, level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Plan: posts per week', level: 3 })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  // 15. Ask for changes, and open the second version when it comes back.
+  await page.getByRole('button', { name: 'Ask for changes' }).tap()
+  await page.getByLabel('What should change?').fill('Post on Instagram three times a week.')
+  await expectNoHorizontalScroll(page)
+  await page.getByRole('button', { name: 'Send the comment' }).tap()
+  await expect(
+    page
+      .getByRole('status')
+      .filter({ hasText: 'Your comment was sent. A new version will come back to your inbox.' }),
+  ).toBeVisible()
+  await expectNoHorizontalScroll(page)
+  await page.goto(`/b/${brandId}/onboarding/brief-choices`)
+  await expect(page.getByText('The brief is waiting for your approval.')).toBeVisible({ timeout: 120_000 })
+  await page.getByRole('link', { name: 'Review the brief' }).tap()
+  await expect(page.getByText('Strategy brief · version 2 of 2')).toBeVisible()
+  await expect(page.getByText(CHANGED_CADENCE, { exact: true })).toBeVisible()
+  await expectNoHorizontalScroll(page)
+
+  // 16. Approve it.
+  await page.getByRole('button', { name: 'Approve' }).tap()
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Approved. Nothing is published in this phase.' }),
+  ).toBeVisible()
   await expectNoHorizontalScroll(page)
 })
 

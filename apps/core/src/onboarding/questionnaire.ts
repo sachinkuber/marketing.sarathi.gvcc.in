@@ -284,7 +284,7 @@ export async function readQuestionnaire(pool: Pool, brandId: string): Promise<Qu
       ? { state: job.state, ...(job.questionId ? { questionId: job.questionId } : {}) }
       : null
     const found = await client.query<{ id: string; finished_at: Date | null }>(
-      `select id, finished_at from app.questionnaire where brand_id = $1 and run_id = $2`,
+      `select id, finished_at from app.questionnaire where brand_id = $1 and run_id = $2 limit 1`,
       [brandId, job?.runId ?? null],
     )
     const z = found.rows[0]

@@ -9,7 +9,10 @@ import type { AuditSink } from '../ports.ts'
 import { acceptFound, decideSuggestion, listSuggestions } from '../onboarding/suggestions.ts'
 import { answerAgentQuestion, listAgentQuestions } from '../onboarding/agent-questions.ts'
 import { inputOf, validate } from '../validate.ts'
+import { addCorrectionCase, addExampleCase } from '../evaluation/cases.ts'
 import type { JobsDeps } from '../jobs/service.ts'
+import { startStrategist } from '../onboarding/brief.ts'
+import { readBriefChoices, startBriefChoices } from '../onboarding/brief-choices.ts'
 import {
   addOwnFact,
   addOwnRule,
@@ -91,6 +94,16 @@ const ruleBody = z.strictObject({
 })
 const factParams = z.strictObject({ brandId: z.uuid(), factId: z.uuid() })
 const ruleParams = z.strictObject({ brandId: z.uuid(), ruleId: z.uuid() })
+
+const noZero = (v: string) => !v.includes('\u0000')
+const caseNoteBody = z.strictObject({
+  note: z.string().max(1000).refine(noZero, 'must not contain U+0000').optional(),
+})
+const exampleBody = z.strictObject({
+  example: z.enum(['good', 'bad']),
+  text: z.string().min(1).max(4000).refine(noZero, 'must not contain U+0000'),
+  note: z.string().max(1000).refine(noZero, 'must not contain U+0000').optional(),
+})
 
 const MAX_VALUE = 4000
 const decisionBody = z
@@ -287,7 +300,57 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
         },
       ],
     })
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/brief-choices',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary:
+        'Start the brief choices: one job, from the profile, the facts and rules in force and the questionnaire answers',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startBriefChoices(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
+    // No change request from here: a revision starts only from "ask for changes" on the brief (Task 7).
+    table.add({
+      method: 'post',
+      path: '/brands/:brandId/onboarding/brief',
+      access: { kind: 'permission', permission: 'onboard_brand' },
+      summary:
+        'Start the strategy brief: one strategist job, from what the brief choices were made from and the owner’s picks',
+      handlers: [
+        validate({ params: brandParams }),
+        async (_req, res) => {
+          res.json(
+            await startStrategist(deps.pool, jobs, {
+              brandId: brandContextOf(res).brandId,
+              actor: { userId: principalOf(res).userId },
+            }),
+          )
+        },
+      ],
+    })
   }
+
+  table.add({
+    method: 'get',
+    path: '/brands/:brandId/onboarding/brief-choices',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'Brief choices: the job state and the current choices with their options and the owner’s pick',
+    handlers: [
+      validate({ params: brandParams }),
+      async (_req, res) => {
+        res.json(await readBriefChoices(deps.pool, brandContextOf(res).brandId))
+      },
+    ],
+  })
 
   table.add({
     method: 'get',
@@ -494,6 +557,53 @@ export function registerOnboardingRoutes(table: RouteTable, deps: OnboardingRout
           await acceptFound(deps.pool, deps, {
             brandId: brandContextOf(res).brandId,
             step: body.step,
+            actor: { userId: principalOf(res).userId },
+          }),
+        )
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/brands/:brandId/onboarding/suggestions/:suggestionId/case',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary:
+      'Add an edited or rejected suggestion as a candidate evaluation case for the agent that made it; once per suggestion',
+    handlers: [
+      validate({ params: suggestionParams, body: caseNoteBody }),
+      async (_req, res) => {
+        const { params, body } = inputOf<{
+          params: z.infer<typeof suggestionParams>
+          body: z.infer<typeof caseNoteBody>
+        }>(res)
+        res.json(
+          await addCorrectionCase(deps.pool, deps, {
+            brandId: brandContextOf(res).brandId,
+            suggestionId: params.suggestionId,
+            ...(body.note !== undefined ? { note: body.note } : {}),
+            actor: { userId: principalOf(res).userId },
+          }),
+        )
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: '/brands/:brandId/onboarding/examples',
+    access: { kind: 'permission', permission: 'onboard_brand' },
+    summary: 'Add an example of good or bad writing as a candidate evaluation case for the strategist',
+    handlers: [
+      validate({ params: brandParams, body: exampleBody }),
+      async (_req, res) => {
+        const { body } = inputOf<{ body: z.infer<typeof exampleBody> }>(res)
+        res.json(
+          await addExampleCase(deps.pool, deps, {
+            brandId: brandContextOf(res).brandId,
+            example: body.example,
+            text: body.text,
+            ...(body.note !== undefined ? { note: body.note } : {}),
             actor: { userId: principalOf(res).userId },
           }),
         )

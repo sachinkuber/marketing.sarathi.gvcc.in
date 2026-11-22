@@ -22,12 +22,12 @@ let seq = 0
 
 const deps = () => ({ clock, audit: stack.audit })
 
-async function waiting(brandId: string, title: string) {
+async function waiting(brandId: string, title: string, kind: 'article' | 'strategy_brief' = 'article') {
   const item = (
-    await stack.db.admin.query(
-      `insert into app.content_item (brand_id, kind) values ($1, 'article') returning id`,
-      [brandId],
-    )
+    await stack.db.admin.query(`insert into app.content_item (brand_id, kind) values ($1, $2) returning id`, [
+      brandId,
+      kind,
+    ])
   ).rows[0].id as string
   const actor = { kind: 'system' as const }
   const v = await withBrand(stack.appPool, brandId, async (client) => {
@@ -35,7 +35,7 @@ async function waiting(brandId: string, title: string) {
       brandId,
       contentItemId: item,
       payload: {
-        kind: 'article' as const,
+        kind,
         language: 'en',
         title,
         body: [{ type: 'paragraph' as const, text: `Text ${title}` }],
@@ -151,6 +151,37 @@ describe('GET /overdue: overdue items across the brands the caller may approve i
     await makeOverdue()
     const ids = (await all(client)).json.brands.map((b: { brandId: string }) => b.brandId)
     expect(ids).toEqual(expect.arrayContaining([brandA, brandB]))
+  })
+
+  it('lists an overdue strategy brief to the platform owner only, never to its admins and approvers', async () => {
+    const brand = await addBrand(stack, 'oa-brief')
+    await waiting(brand, 'Article A')
+    await waiting(brand, 'The brief', 'strategy_brief')
+    const admin = await person('brand_admin', brand)
+    const approver = await person('approver', brand)
+    // The brief's reminders go to the platform owners, so one must exist for it to become overdue.
+    await addUser(stack, { email: 'ob-owner@example.test', password: PASSWORD, platformOwner: true })
+    const owner = await enrolledClient(stack, 'ob-owner@example.test', PASSWORD)
+    await makeOverdue()
+    const titles = (body: { items: { title: string }[] }) => body.items.map((i) => i.title).sort()
+    for (const p of [admin, approver]) {
+      const across = (await all(p.client)).json.brands
+      expect(across).toHaveLength(1)
+      expect(across[0]).toMatchObject({ brandId: brand, count: 1 })
+      expect(titles(across[0])).toEqual(['Article A'])
+      const one = await p.client.request('GET', `/api/v1/brands/${brand}/approvals/overdue`)
+      expect(one.status).toBe(200)
+      expect(titles(one.json)).toEqual(['Article A'])
+      expect(one.json.count).toBe(1)
+      // Answering the pop-up records only what it showed.
+      const ack = await p.client.request('POST', `/api/v1/brands/${brand}/approvals/overdue/ack`, {
+        body: { choice: 'later' },
+      })
+      expect(ack.json.acknowledged).toBe(1)
+    }
+    const mine = (await all(owner.client)).json.brands.find((b: { brandId: string }) => b.brandId === brand)
+    expect(mine.count).toBe(2)
+    expect(titles(mine)).toEqual(['Article A', 'The brief'])
   })
 
   it('needs a session', async () => {

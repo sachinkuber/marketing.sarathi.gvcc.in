@@ -1,0 +1,14 @@
+{
+  "id": "plain-brief-choices-asks",
+  "title": "Nothing says what the business sells, so the agent asks instead of offering choices",
+  "hostile": false,
+  "input": {
+    "brandName": "Patil and Sons",
+    "profile": [{ "key": "business_name", "value": "Patil and Sons", "status": "found" }],
+    "facts": [{ "id": "b1c20000-0000-4000-8000-000000000061", "statement": "Founded in 2019 in Nashik." }],
+    "rules": [],
+    "answers": []
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is set and choices is empty. The question asks what the business sells and to whom."
+}

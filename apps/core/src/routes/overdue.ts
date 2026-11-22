@@ -35,11 +35,15 @@ interface OverdueRow {
 // `shown` is whether this person has already answered the pop-up for this request in this sign-in: a popup_ack
 // row of theirs for the request made at or after the session began. Both times are taken on the application
 // host, never from the database clock.
+//
+// A strategy brief is decided by the holder of onboard_brand alone (the platform owner), so it is listed only to a
+// caller who holds it (`decidesBriefs`): a brand admin or approver may read it but has nothing to do about it.
 export async function overdueFor(
   client: PoolClient,
   brandId: string,
   userId: string,
   sessionStartedAt: Date,
+  decidesBriefs: boolean,
 ) {
   const found = await client.query<OverdueRow>(
     `select r.id as request_id, v.content_item_id, r.content_version_id,
@@ -51,14 +55,18 @@ export async function overdueFor(
                        and a.user_id = $2 and a."at" >= $3) as shown
        from app.approval_request r
        join app.content_version v on v.id = r.content_version_id and v.brand_id = r.brand_id
+       join app.content_item i on i.id = v.content_item_id and i.brand_id = v.brand_id
        join app.content_version_state st on st.content_version_id = r.content_version_id and st.brand_id = r.brand_id
        join app.approval_setting s on s.brand_id = r.brand_id
       where r.brand_id = $1 and r.overdue and r.closed_at is null and st.state = 'awaiting_approval'
+        and ($4 or i.kind <> 'strategy_brief')
       order by overdue_since, r.id`,
-    [brandId, userId, sessionStartedAt],
+    [brandId, userId, sessionStartedAt, decidesBriefs],
   )
   return found.rows
 }
+
+const decidesBriefs = (actor: Actor): boolean => grantFor(actor, 'onboard_brand') !== false
 
 export function registerOverdueRoutes(table: RouteTable, deps: OverdueRouteDeps): void {
   // One read across the caller's brands, so the pop-up can open on any screen without a poll per brand. Only
@@ -77,7 +85,13 @@ export function registerOverdueRoutes(table: RouteTable, deps: OverdueRouteDeps)
         for (const brand of await visibleBrands(deps.pool, principal)) {
           if (!grantFor(brand.role as Actor, 'approve_content')) continue
           const rows = await withBrand(deps.pool, brand.id, (client) =>
-            overdueFor(client, brand.id, principal.userId, principal.sessionStartedAt),
+            overdueFor(
+              client,
+              brand.id,
+              principal.userId,
+              principal.sessionStartedAt,
+              decidesBriefs(brand.role as Actor),
+            ),
           )
           const first = rows[0]
           if (!first) continue
@@ -111,8 +125,9 @@ export function registerOverdueRoutes(table: RouteTable, deps: OverdueRouteDeps)
       validate({ params }),
       async (_req, res) => {
         const principal = principalOf(res)
-        const rows = await withBrand(deps.pool, brandContextOf(res).brandId, (client) =>
-          overdueFor(client, brandContextOf(res).brandId, principal.userId, principal.sessionStartedAt),
+        const { brandId, actor } = brandContextOf(res)
+        const rows = await withBrand(deps.pool, brandId, (client) =>
+          overdueFor(client, brandId, principal.userId, principal.sessionStartedAt, decidesBriefs(actor)),
         )
         res.json({
           items: rows.map((r) => ({
@@ -143,9 +158,15 @@ export function registerOverdueRoutes(table: RouteTable, deps: OverdueRouteDeps)
       async (_req, res) => {
         const { body } = inputOf<{ body: z.infer<typeof ackBody> }>(res)
         const principal = principalOf(res)
-        const brandId = brandContextOf(res).brandId
+        const { brandId, actor } = brandContextOf(res)
         const acknowledged = await withBrand(deps.pool, brandId, async (client) => {
-          const rows = await overdueFor(client, brandId, principal.userId, principal.sessionStartedAt)
+          const rows = await overdueFor(
+            client,
+            brandId,
+            principal.userId,
+            principal.sessionStartedAt,
+            decidesBriefs(actor),
+          )
           for (const r of rows) {
             await client.query(
               `insert into app.popup_ack (brand_id, user_id, approval_request_id, choice, "at")

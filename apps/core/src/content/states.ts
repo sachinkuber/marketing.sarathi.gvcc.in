@@ -25,6 +25,7 @@ export const TRANSITIONS: readonly (readonly [VersionState, VersionState])[] = [
   ['check_failed', 'superseded'],
   ['awaiting_approval', 'approved'],
   ['awaiting_approval', 'rejected'],
+  ['awaiting_approval', 'invalidated'],
   ['awaiting_approval', 'superseded'],
   ['approved', 'scheduled'],
   ['approved', 'superseded'],

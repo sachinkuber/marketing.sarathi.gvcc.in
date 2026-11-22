@@ -2,7 +2,14 @@ import type { Pool } from '@mkt/db'
 import { z } from 'zod'
 import { brandContextOf } from '../access/brand-access.ts'
 import type { RouteTable } from '../access/routes.ts'
-import { approve, comment, COMMENT_MAX, reject, type ApprovalDeps } from '../approvals/service.ts'
+import {
+  approve,
+  askForChanges,
+  comment,
+  COMMENT_MAX,
+  reject,
+  type ApprovalDeps,
+} from '../approvals/service.ts'
 import { principalOf } from '../auth/session.ts'
 import { inputOf, validate } from '../validate.ts'
 
@@ -15,15 +22,19 @@ const approveBody = z.strictObject({ hash: z.string().min(1).max(200), hash_sche
 const text = z.string().trim().min(1).max(COMMENT_MAX)
 const rejectBody = z.strictObject({ reason: text })
 const commentBody = z.strictObject({ text })
+const changesBody = z.strictObject({ comment: text })
 
 type P = z.infer<typeof params>
 
 export function registerApprovalRoutes(table: RouteTable, deps: ApprovalRouteDeps): void {
+  // The route needs approve_content; the service also checks the item's kind against the person's role (only the
+  // platform owner decides on a strategy brief).
   const target = (res: Parameters<typeof brandContextOf>[0], p: P) => ({
     brandId: brandContextOf(res).brandId,
     itemId: p.itemId,
     versionId: p.versionId,
     actor: { kind: 'user' as const, userId: principalOf(res).userId },
+    role: brandContextOf(res).actor,
   })
   const base = '/brands/:brandId/content/:itemId/versions/:versionId'
 
@@ -56,6 +67,23 @@ export function registerApprovalRoutes(table: RouteTable, deps: ApprovalRouteDep
       async (_req, res) => {
         const { params: p, body } = inputOf<{ params: P; body: z.infer<typeof rejectBody> }>(res)
         res.status(201).json(await reject(deps.pool, deps, { ...target(res, p), reason: body.reason }))
+      },
+    ],
+  })
+
+  table.add({
+    method: 'post',
+    path: `${base}/changes`,
+    access: { kind: 'permission', permission: 'approve_content' },
+    summary:
+      'Ask for changes to a version awaiting approval, with a comment; a strategy brief is then rewritten from it',
+    handlers: [
+      validate({ params, body: changesBody }),
+      async (_req, res) => {
+        const { params: p, body } = inputOf<{ params: P; body: z.infer<typeof changesBody> }>(res)
+        res
+          .status(201)
+          .json(await askForChanges(deps.pool, deps, { ...target(res, p), comment: body.comment }))
       },
     ],
   })

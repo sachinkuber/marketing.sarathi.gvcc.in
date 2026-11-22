@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import {
@@ -9,6 +10,7 @@ import {
   factChangedReply,
   factsRulesReply,
   factsRulesStartedReply,
+  onboardingReply,
   ruleAddedReply,
   ruleChangedReply,
   suggestionDecisionReply,
@@ -16,7 +18,7 @@ import {
 } from '../api/schemas'
 import { LoadError } from '../frame/LoadError'
 import { AgentQuestion } from './AgentQuestion'
-import { Ask, SourceRow } from './onboarding-parts'
+import { AddAsCase, Ask, SourceRow } from './onboarding-parts'
 import { OwnerOnly } from './OwnerOnly'
 import {
   OWNER_ONLY,
@@ -94,13 +96,18 @@ function useSender(onChanged: () => void) {
   return { run, busy, error, code }
 }
 
+// The intake website, which tells a page of the brand's own site from another web page: a string, null when the
+// brand has none, and undefined until the overview has been read (or when it could not be).
+const WebsiteContext = createContext<string | null | undefined>(undefined)
+
 // What the fact or rule rests on, shown as it is: the owner decides with it in view.
 function Sources({ sources, id }: { sources: Source[]; id: string }) {
+  const website = useContext(WebsiteContext)
   if (sources.length === 0) return <p className="muted small">No sources.</p>
   return (
     <ul className="list onb-sources" id={`src-${id}`}>
       {sources.map((s) => (
-        <SourceRow key={s.id} source={s} />
+        <SourceRow key={s.id} source={s} website={website} />
       ))}
     </ul>
   )
@@ -211,6 +218,21 @@ function FactCard({ item, base, onChanged }: { item: Item; base: string; onChang
           onYes={() => void decide({ decision: 'rejected' })}
         />
       </div>
+    </li>
+  )
+}
+
+// A suggestion the owner edited or dropped: it can become a candidate evaluation case.
+function Corrected({ item, base }: { item: Item; base: string }) {
+  const key = item.step === 'fact' ? 'statement' : 'text'
+  const edited = item.decision === 'edited'
+  return (
+    <li className="dp-item" data-id={item.id}>
+      <p className="dp-value onb-wrap">{asText(item.proposed, key)}</p>
+      <p className="muted small onb-wrap">
+        {edited ? `You changed it to: ${asText(item.decidedValue, key)}` : 'You dropped it.'}
+      </p>
+      <AddAsCase base={base} suggestionId={item.id} />
     </li>
   )
 }
@@ -658,6 +680,23 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
     }
   }, [base, attempt])
 
+  // The intake website, read once from the overview after the first read of this screen, for the sources' labels.
+  // A failed read leaves it unknown.
+  const [website, setWebsite] = useState<string | null | undefined>(undefined)
+  const loaded = data !== null
+  useEffect(() => {
+    if (!loaded) return
+    let on = true
+    api(onboardingReply, 'GET', base)
+      .then((overview) => {
+        if (on) setWebsite(overview.intake?.website ?? null)
+      })
+      .catch(() => undefined)
+    return () => {
+      on = false
+    }
+  }, [base, loaded])
+
   async function start() {
     if (startSending.current) return
     startSending.current = true
@@ -684,132 +723,158 @@ export function FactsRulesScreen({ brandId }: { brandId: string }) {
   const job = data?.job ?? null
   const activeFacts = data?.facts.active ?? []
   const activeRules = data?.rules.active ?? []
+  const corrected = [...(data?.facts.suggestions ?? []), ...(data?.rules.suggestions ?? [])].filter(
+    (i) => i.decision === 'edited' || i.decision === 'rejected',
+  )
 
   return (
-    <main id="content" className="page">
-      <div className="page-head">
-        <div>
-          <h1>Facts and rules</h1>
-          <p>
-            Confirm what the platform may state as fact, and what it must never say. Nothing is used until you
-            confirm it.
-          </p>
+    <WebsiteContext value={website}>
+      <main id="content" className="page">
+        <div className="page-head">
+          <div>
+            <h1>Facts and rules</h1>
+            <p>
+              Confirm what the platform may state as fact, and what it must never say. Nothing is used until
+              you confirm it.
+            </p>
+          </div>
         </div>
-      </div>
-      {stopped ? (
-        <div className="callout warn" role="alert">
-          {stopped}
-        </div>
-      ) : !data ? (
-        error ? (
-          <LoadError what="facts and rules" error={error as ApiError} onRetry={reload} />
+        {stopped ? (
+          <div className="callout warn" role="alert">
+            {stopped}
+          </div>
+        ) : !data ? (
+          error ? (
+            <LoadError what="facts and rules" error={error as ApiError} onRetry={reload} />
+          ) : (
+            <p className="muted">Loading…</p>
+          )
         ) : (
-          <p className="muted">Loading…</p>
-        )
-      ) : (
-        <div className="stack">
-          {stale ? (
-            <p className="callout warn" role="status">
-              The latest state could not be read. This screen keeps trying.
-            </p>
-          ) : null}
-          {asked ? (
-            <AgentQuestion key={asked.id} brandId={brandId} question={asked} onRefresh={reload} />
-          ) : null}
-          {job && isOpenJob(job.state) ? (
-            <p className="callout" role="status">
-              {JOB_WORDS[job.state]}
-            </p>
-          ) : null}
-          {!isOpenJob(job?.state) ? (
-            <div className="panel pad stack">
-              <p className="sub">
-                {job?.state === 'failed'
-                  ? 'Facts and rules could not be written. Start them again. If they fail again, check that the facts and rules agent has a live release.'
-                  : facts.length + rules.length > 0
-                    ? 'Start again to look for more facts and rules from the latest profile and answers. A waiting suggestion that the new run suggests again is replaced by the new one; the others stay waiting. What you confirmed stays.'
-                    : 'The platform reads the confirmed profile and your answers, and suggests facts and safety rules.'}
+          <div className="stack">
+            {stale ? (
+              <p className="callout warn" role="status">
+                The latest state could not be read. This screen keeps trying.
               </p>
-              <Problem text={startError} />
-              <div>
-                <button
-                  className="btn primary onb-touch"
-                  type="button"
-                  disabled={starting}
-                  onClick={() => void start()}
-                >
-                  {job ? 'Find facts and rules again' : 'Find facts and rules'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <section className="panel" aria-label="Facts to confirm">
-            <h2 className="pad onb-h">Facts to confirm</h2>
-            {foundFacts.length + assumedFacts.length === 0 ? (
-              <p className="pad sub">No facts wait for your decision.</p>
             ) : null}
-            {foundFacts.length > 0 ? (
-              <ul className="list">
-                {foundFacts.map((f) => (
-                  <FactCard key={f.id} item={f} base={base} onChanged={reload} />
-                ))}
-              </ul>
+            {asked ? (
+              <AgentQuestion key={asked.id} brandId={brandId} question={asked} onRefresh={reload} />
             ) : null}
-            {assumedFacts.length > 0 ? (
-              <>
-                <h3 className="pad onb-h">Needs your wording</h3>
-                <p className="pad muted small">
-                  These have no source that proves them. Edit them into your own words before confirming.
+            {job && isOpenJob(job.state) ? (
+              <p className="callout" role="status">
+                {JOB_WORDS[job.state]}
+              </p>
+            ) : null}
+            {!isOpenJob(job?.state) ? (
+              <div className="panel pad stack">
+                <p className="sub">
+                  {job?.state === 'failed'
+                    ? 'Facts and rules could not be written. Start them again. If they fail again, check that the facts and rules agent has a live release.'
+                    : facts.length + rules.length > 0
+                      ? 'Start again to look for more facts and rules from the latest profile and answers. A waiting suggestion that the new run suggests again is replaced by the new one; the others stay waiting. What you confirmed stays.'
+                      : 'The platform reads the confirmed profile and your answers, and suggests facts and safety rules.'}
                 </p>
+                <Problem text={startError} />
+                <div>
+                  <button
+                    className="btn primary onb-touch"
+                    type="button"
+                    disabled={starting}
+                    onClick={() => void start()}
+                  >
+                    {job ? 'Find facts and rules again' : 'Find facts and rules'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {job && !isOpenJob(job.state) && job.state !== 'failed' && facts.length + rules.length === 0 ? (
+              <div>
+                <Link className="btn primary onb-touch" href={`/b/${brandId}/onboarding/brief-choices`}>
+                  Continue to brief choices
+                </Link>
+              </div>
+            ) : null}
+
+            <section className="panel" aria-label="Facts to confirm">
+              <h2 className="pad onb-h">Facts to confirm</h2>
+              {foundFacts.length + assumedFacts.length === 0 ? (
+                <p className="pad sub">No facts wait for your decision.</p>
+              ) : null}
+              {foundFacts.length > 0 ? (
                 <ul className="list">
-                  {assumedFacts.map((f) => (
+                  {foundFacts.map((f) => (
                     <FactCard key={f.id} item={f} base={base} onChanged={reload} />
                   ))}
                 </ul>
-              </>
-            ) : null}
-            <div className="pad">
-              <AddFact base={base} onChanged={reload} />
-            </div>
-          </section>
+              ) : null}
+              {assumedFacts.length > 0 ? (
+                <>
+                  <h3 className="pad onb-h">Needs your wording</h3>
+                  <p className="pad muted small">
+                    These have no source that proves them. Edit them into your own words before confirming.
+                  </p>
+                  <ul className="list">
+                    {assumedFacts.map((f) => (
+                      <FactCard key={f.id} item={f} base={base} onChanged={reload} />
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              <div className="pad">
+                <AddFact base={base} onChanged={reload} />
+              </div>
+            </section>
 
-          <section className="panel" aria-label="Rules to confirm">
-            <h2 className="pad onb-h">Rules to confirm</h2>
-            {rules.length === 0 ? <p className="pad sub">No rules wait for your decision.</p> : null}
-            {rules.length > 0 ? (
+            <section className="panel" aria-label="Rules to confirm">
+              <h2 className="pad onb-h">Rules to confirm</h2>
+              {rules.length === 0 ? <p className="pad sub">No rules wait for your decision.</p> : null}
+              {rules.length > 0 ? (
+                <ul className="list">
+                  {rules.map((r) => (
+                    <RuleCard key={r.id} item={r} base={base} onChanged={reload} />
+                  ))}
+                </ul>
+              ) : null}
+              <div className="pad">
+                <AddRule base={base} onChanged={reload} />
+              </div>
+            </section>
+
+            {corrected.length > 0 ? (
+              <section className="panel" aria-label="Your corrections">
+                <h2 className="pad onb-h">Your corrections</h2>
+                <p className="pad muted small">
+                  Add a correction as a case so the platform is tested on it later.
+                </p>
+                <ul className="list">
+                  {corrected.map((i) => (
+                    <Corrected key={i.id} item={i} base={base} />
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+
+            <section className="panel" aria-label="Confirmed facts">
+              <h2 className="pad onb-h">Confirmed facts</h2>
+              {activeFacts.length === 0 ? <p className="pad sub">No fact is confirmed yet.</p> : null}
               <ul className="list">
-                {rules.map((r) => (
-                  <RuleCard key={r.id} item={r} base={base} onChanged={reload} />
+                {activeFacts.map((f) => (
+                  <ActiveFact key={f.id} fact={f} base={base} onChanged={reload} />
                 ))}
               </ul>
-            ) : null}
-            <div className="pad">
-              <AddRule base={base} onChanged={reload} />
-            </div>
-          </section>
+            </section>
 
-          <section className="panel" aria-label="Confirmed facts">
-            <h2 className="pad onb-h">Confirmed facts</h2>
-            {activeFacts.length === 0 ? <p className="pad sub">No fact is confirmed yet.</p> : null}
-            <ul className="list">
-              {activeFacts.map((f) => (
-                <ActiveFact key={f.id} fact={f} base={base} onChanged={reload} />
-              ))}
-            </ul>
-          </section>
-
-          <section className="panel" aria-label="Confirmed rules">
-            <h2 className="pad onb-h">Confirmed rules</h2>
-            {activeRules.length === 0 ? <p className="pad sub">No rule is confirmed yet.</p> : null}
-            <ul className="list">
-              {activeRules.map((r) => (
-                <ActiveRule key={r.id} rule={r} base={base} onChanged={reload} />
-              ))}
-            </ul>
-          </section>
-        </div>
-      )}
-    </main>
+            <section className="panel" aria-label="Confirmed rules">
+              <h2 className="pad onb-h">Confirmed rules</h2>
+              {activeRules.length === 0 ? <p className="pad sub">No rule is confirmed yet.</p> : null}
+              <ul className="list">
+                {activeRules.map((r) => (
+                  <ActiveRule key={r.id} rule={r} base={base} onChanged={reload} />
+                ))}
+              </ul>
+            </section>
+          </div>
+        )}
+      </main>
+    </WebsiteContext>
   )
 }

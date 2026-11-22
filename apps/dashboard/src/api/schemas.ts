@@ -331,6 +331,13 @@ export const contentItemReply = z.strictObject({
 })
 
 export const decisionReply = z.strictObject({ approvalId: z.string() })
+// Ask for changes: the version is closed; runId is the rewrite it started (a strategy brief's), or null. When a brief's
+// rewrite did not start, notStarted says why: 'revision_limit', or the code of the refusal (such as queue_busy).
+export const changesRequestedReply = z.strictObject({
+  approvalId: z.string(),
+  runId: z.string().nullable(),
+  notStarted: z.string().optional(),
+})
 export const commentReply = z.strictObject({ ok: z.literal(true) })
 export const versionCreatedReply = z.strictObject({
   versionId: z.uuid(),
@@ -518,6 +525,30 @@ export const onboardingReply = z.strictObject({
       activeRules: z.number().int().nonnegative(),
     })
     .nullable(),
+  briefChoices: z
+    .strictObject({
+      state: agentJobState,
+      total: z.number().int().nonnegative(),
+      decided: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  // The strategy brief's latest version; null before the first brief. needsDecision: closed by a change request
+  // at the revision limit, so no new version comes until the owner decides.
+  brief: z
+    .strictObject({
+      itemId: z.string(),
+      versionId: z.string(),
+      number: z.number().int().positive(),
+      state: versionState,
+      revision: z.number().int().nonnegative(),
+      needsDecision: z.boolean(),
+    })
+    .nullable(),
+  // The latest strategist job, apart from any version; null before the first start. It shows a brief being written
+  // (the first one too, while `brief` is still null) or waiting on a question.
+  briefJob: z.strictObject({ state: agentJobState, questionId: z.string().optional() }).nullable(),
+  // Gate 1: the latest brief version is approved.
+  gate1: z.boolean(),
   cost: maybeMoney,
 })
 
@@ -597,6 +628,8 @@ export const suggestionItem = z.strictObject({
   sources: z.array(suggestionSource),
 })
 export const suggestionsReply = z.strictObject({ suggestions: z.array(suggestionItem) })
+// Add as a case (a correction or an example): the id of the candidate case it made.
+export const caseAddedReply = z.strictObject({ caseId: z.string() })
 export const suggestionDecisionReply = z.strictObject({ createdId: z.string().nullable() })
 
 // --- facts and rules (M10) ----------------------------------------------------------------------------------
@@ -631,6 +664,30 @@ export const factsRulesReply = z.strictObject({
     .nullable(),
   facts: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeFact) }),
   rules: z.strictObject({ suggestions: z.array(suggestionItem), active: z.array(activeRule) }),
+})
+
+// --- brief choices (M11, spec 4, 6) ------------------------------------------------------------------------
+export const briefChoicesStartedReply = z.strictObject({ runId: z.string(), jobId: z.string() })
+export const briefChoice = z.strictObject({
+  id: z.string(),
+  key: z.string(),
+  question: z.string(),
+  why: z.string(),
+  options: z.array(z.strictObject({ value: z.string(), tradeOff: z.string(), recommended: z.boolean() })),
+  decision: z.enum(['accepted', 'edited']).nullable(),
+  // The recommended value, another option or the owner's own words.
+  picked: z.string().nullable(),
+})
+export const briefChoicesReply = z.strictObject({
+  job: z.strictObject({ state: agentJobState, questionId: z.string().optional() }).nullable(),
+  choices: z.array(briefChoice),
+})
+// --- the strategy brief (M11, spec 10) ---------------------------------------------------------------------
+// The brief itself is a content item: the inbox's item reply shows it. revision: 0 for a brief started on its own.
+export const briefStartedReply = z.strictObject({
+  runId: z.string(),
+  jobId: z.string(),
+  revision: z.number().int().nonnegative(),
 })
 export const factAddedReply = z.strictObject({ factId: z.string(), suggestionId: z.string() })
 export const ruleAddedReply = z.strictObject({ ruleId: z.string(), suggestionId: z.string() })

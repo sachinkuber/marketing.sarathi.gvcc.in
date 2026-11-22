@@ -18,6 +18,12 @@ import {
   factChangedReply,
   factsRulesReply,
   factsRulesStartedReply,
+  briefChoicesReply,
+  briefChoicesStartedReply,
+  briefStartedReply,
+  changesRequestedReply,
+  caseAddedReply,
+  decisionReply,
   homeReply,
   intakeSavedReply,
   inviteCreatedReply,
@@ -60,7 +66,9 @@ import {
   type Cast,
 } from './reads-support.ts'
 import { fileURLToPath } from 'node:url'
-import { agentFilesHash } from '@mkt/db'
+import { agentFilesHash, withBrand } from '@mkt/db'
+import { createVersion, moveState } from '../src/content/versions.ts'
+import { registerBriefChangeHandler } from '../src/onboarding/brief.ts'
 import { pdfOf } from './pdf-fixtures.ts'
 import { addBrand, addUser, enrolledClient, totp, type Stack, type TestClient } from './support.ts'
 
@@ -419,6 +427,17 @@ describe('the dashboard schemas accept the core’s replies', () => {
       })
       expect(decided.status).toBe(200)
       expect(suggestionDecisionReply.parse(decided.json).createdId).toEqual(expect.any(String))
+      // The edited suggestion becomes a candidate case, and an example is stored too (C8).
+      const asCase = await owner.request('POST', `${base()}/suggestions/${mine.id}/case`, {
+        body: { note: 'wrong name' },
+      })
+      expect(asCase.status).toBe(200)
+      caseAddedReply.parse(asCase.json)
+      const example = await owner.request('POST', `${base()}/examples`, {
+        body: { example: 'bad', text: 'Buy now, cheap!' },
+      })
+      expect(example.status).toBe(200)
+      caseAddedReply.parse(example.json)
     })
 
     it('documents: a split PDF in the upload reply and the list, then a delete', async () => {
@@ -594,6 +613,182 @@ describe('the dashboard schemas accept the core’s replies', () => {
           rules: { suggestions: [], active: [] },
         }).job?.questionId,
       ).toBe(ruleId)
+    })
+
+    it('brief choices: start, the job, the choices, a pick and the overview block', async () => {
+      // The facts and rules run of the test above ends here, and the brand confirms a fact.
+      await q(`update app.job_input set finished_at = coalesce(finished_at, now()) where brand_id = $1`, [
+        brand,
+      ])
+      await q(`update app.run set state = 'succeeded', finished_at = now() where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('brief_choices', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/brief_choices', import.meta.url)))],
+      )
+      const reviewDate = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10)
+      const fact = await owner.request('POST', `${base()}/facts`, {
+        body: { statement: 'Open since 2019.', reviewDate },
+      })
+      expect(fact.status).toBe(200)
+      const started = await owner.request('POST', `${base()}/brief-choices`, { body: {} })
+      expect(started.status, JSON.stringify(started.json)).toBe(200)
+      briefChoicesStartedReply.parse(started.json)
+      const read = async () => {
+        const reply = await owner.request('GET', `${base()}/brief-choices`)
+        expect(reply.status).toBe(200)
+        return briefChoicesReply.parse(reply.json)
+      }
+      expect(await read()).toEqual({ job: { state: 'waiting' }, choices: [] })
+      expect((await overview()).briefChoices).toEqual({ state: 'waiting', total: 0, decided: 0 })
+      const options = [
+        { value: 'Owners of new cars', tradeOff: 'Reaches many.', recommended: true },
+        { value: 'Fleet managers', tradeOff: 'Fewer, bigger.', recommended: false },
+      ]
+      const made = await q(
+        `insert into app.suggestion (brand_id, step, key, proposed, why, confidence, options)
+         values ($1, 'choice', 'lead_audience', $2::jsonb, 'It decides the brief.', 'assumed', $3::jsonb)
+         returning id`,
+        [
+          brand,
+          JSON.stringify({ question: 'Who do we speak to first?', value: 'Owners of new cars' }),
+          JSON.stringify(options),
+        ],
+      )
+      expect((await read()).choices).toEqual([
+        {
+          id: made.rows[0].id,
+          key: 'lead_audience',
+          question: 'Who do we speak to first?',
+          why: 'It decides the brief.',
+          options,
+          decision: null,
+          picked: null,
+        },
+      ])
+      const picked = await owner.request('POST', `${base()}/suggestions/${made.rows[0].id}/decision`, {
+        body: { decision: 'edited', value: { value: 'Fleet managers' } },
+      })
+      expect(picked.status).toBe(200)
+      expect((await read()).choices[0]).toMatchObject({ decision: 'edited', picked: 'Fleet managers' })
+      expect((await overview()).briefChoices).toEqual({ state: 'waiting', total: 1, decided: 1 })
+      expect(() => briefChoicesReply.parse({ job: null, choices: [{ id: 'x' }] })).toThrow()
+    })
+
+    it('the brief: start, the overview block, the approval and gate 1', async () => {
+      // The brief choices run of the test above ends; the owner's pick stands.
+      await q(`update app.job_input set finished_at = coalesce(finished_at, now()) where brand_id = $1`, [
+        brand,
+      ])
+      await q(`update app.run set state = 'succeeded', finished_at = now() where brand_id = $1`, [brand])
+      await q(`update app.onboarding set step = 'brief_choices' where brand_id = $1`, [brand])
+      await q(
+        `insert into app.agent_definition_version (agent, version, model, effort, files_hash, live)
+         values ('strategist', 1, 'claude-sonnet-5-5', 'medium', $1, true)`,
+        [agentFilesHash(fileURLToPath(new URL('../../../agents/strategist', import.meta.url)))],
+      )
+      expect(await overview()).toMatchObject({ brief: null, briefJob: null, gate1: false })
+      const started = await owner.request('POST', `${base()}/brief`, { body: {} })
+      expect(started.status, JSON.stringify(started.json)).toBe(200)
+      expect(briefStartedReply.parse(started.json).revision).toBe(0)
+      // The first brief is being written: no version yet, the job waiting to be picked up.
+      expect(await overview()).toMatchObject({ brief: null, briefJob: { state: 'waiting' }, gate1: false })
+
+      // The brief arrives as the strategist's result makes it: a version waiting for approval.
+      const item = await q(
+        `insert into app.content_item (brand_id, kind) values ($1, 'strategy_brief') returning id`,
+        [brand],
+      )
+      const briefItem = item.rows[0].id as string
+      const made = await withBrand(stack.appPool, brand, async (client) => {
+        const actor = { kind: 'agent' as const, runId: started.json.runId as string }
+        const v = await createVersion(
+          client,
+          { audit: stack.jobs!.audit },
+          {
+            brandId: brand,
+            contentItemId: briefItem,
+            payload: {
+              kind: 'strategy_brief',
+              language: 'en',
+              body: [{ type: 'paragraph', text: 'Shine.' }],
+            },
+            createdBy: actor,
+            provenance: { source: 'strategist', revision: 0 },
+          },
+        )
+        await moveState(client, { audit: stack.jobs!.audit }, v.versionId, 'in_checks', actor)
+        await moveState(client, { audit: stack.jobs!.audit }, v.versionId, 'awaiting_approval', actor)
+        return v
+      })
+      await q(`update app.onboarding set step = 'brief' where brand_id = $1`, [brand])
+      expect(await overview()).toMatchObject({
+        brief: {
+          itemId: briefItem,
+          versionId: made.versionId,
+          number: 1,
+          state: 'awaiting_approval',
+          revision: 0,
+          needsDecision: false,
+        },
+        // The strategist job started above has not been picked up.
+        briefJob: { state: 'waiting' },
+        gate1: false,
+      })
+      const shown = await owner.request('GET', api(brand, `/content/${briefItem}`))
+      expect(shown.status).toBe(200)
+      contentItemReply.parse(shown.json)
+      const approved = await owner.request(
+        'POST',
+        api(brand, `/content/${briefItem}/versions/${made.versionId}/approve`),
+        { body: { hash: made.hash, hash_scheme: 'cv1' } },
+      )
+      expect(approved.status, JSON.stringify(approved.json)).toBe(201)
+      decisionReply.parse(approved.json)
+      expect(await overview()).toMatchObject({ step: 'done', brief: { state: 'approved' }, gate1: true })
+      expect(() =>
+        onboardingReply.shape.brief.parse({ itemId: 'x', versionId: 'y', number: 0, state: 'approved' }),
+      ).toThrow()
+      expect(() => onboardingReply.shape.briefJob.parse({ state: 'writing' })).toThrow()
+
+      // Ask for changes on a later version: the version closes.
+      const later = await withBrand(stack.appPool, brand, async (client) => {
+        const actor = { kind: 'agent' as const, runId: started.json.runId as string }
+        const deps = { audit: stack.jobs!.audit }
+        const v = await createVersion(client, deps, {
+          brandId: brand,
+          contentItemId: briefItem,
+          payload: {
+            kind: 'strategy_brief',
+            language: 'en',
+            body: [{ type: 'paragraph', text: 'Shine on.' }],
+          },
+          createdBy: actor,
+          provenance: { source: 'strategist', revision: 0 },
+        })
+        await moveState(client, deps, v.versionId, 'in_checks', actor)
+        await moveState(client, deps, v.versionId, 'awaiting_approval', actor)
+        return v
+      })
+      // With the brief's own change handler: the strategist job started above still runs, so no rewrite starts
+      // and the answer says why.
+      registerBriefChangeHandler(stack.changeHandlers, stack.jobs!)
+      const changes = await owner
+        .request('POST', api(brand, `/content/${briefItem}/versions/${later.versionId}/changes`), {
+          body: { comment: 'Lead with fleets.' },
+        })
+        .finally(() => stack.changeHandlers.delete('strategy_brief'))
+      expect(changes.status, JSON.stringify(changes.json)).toBe(201)
+      expect(changesRequestedReply.parse(changes.json)).toEqual({
+        approvalId: expect.any(String),
+        runId: null,
+        notStarted: 'brief_running',
+      })
+      expect(await overview()).toMatchObject({
+        brief: { versionId: later.versionId, state: 'rejected', needsDecision: false },
+        gate1: false,
+      })
+      expect(() => changesRequestedReply.parse({ approvalId: 'x' })).toThrow()
     })
   })
 

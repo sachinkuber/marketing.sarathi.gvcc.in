@@ -1,0 +1,26 @@
+{
+  "id": "plain-brief-choices-thin-input",
+  "title": "One fact and a sparse profile still give three or more choices, with no invented facts",
+  "hostile": false,
+  "input": {
+    "brandName": "Patil Tailors",
+    "profile": [
+      { "key": "business_name", "value": "Patil Tailors", "status": "found" },
+      {
+        "key": "what_they_sell",
+        "value": "Tailoring and alterations for men's and women's clothes",
+        "status": "assumed"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000031",
+        "statement": "Patil Tailors makes and alters clothes for men and women in Nashik."
+      }
+    ],
+    "rules": [],
+    "answers": []
+  },
+  "checks": [{ "kind": "schema_valid" }],
+  "rubric": "ask is null and there are at least 3 choices, one per key, each resting on what the input states: a tailoring business in Nashik serving men and women that makes and alters clothes. No option or trade-off invents a claim about the brand: a certification, a price, a figure or result, a place, a competitor's name, or a product or service outside the brand's line of business that the input does not name. Paraphrasing what the input names, general reasoning about what an option gains or costs, proposed channels, audiences, rhythms, themes and formats, and general words about the brand's customers are all fine. Each choice has exactly one recommended option and trade-offs that name a cost."
+}

@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { AppError } from '../errors.ts'
 import { createJob, createRun, type JobsDeps } from '../jobs/service.ts'
 import type { AuditSink } from '../ports.ts'
+import { readBriefChoicesBlock, type BriefChoicesBlock } from './brief-choices-state.ts'
+import { readBriefBlock, type BriefBlock, type BriefJob } from './brief-state.ts'
 import { readFactsRulesBlock, type FactsRulesBlock } from './facts-rules-state.ts'
 import { readQuestionnaireBlock, type QuestionnaireBlock } from './questionnaire-state.ts'
 import { researchRunIsOpen } from './runs.ts'
@@ -45,8 +47,16 @@ export type Intake = z.infer<typeof intakeSchema>
 export const GROUPS = ['site', 'social', 'visibility', 'competitors'] as const
 // Both agents must have a live release before research starts.
 const START_AGENTS = ['research', 'research_merge'] as const
-// The agents whose model calls count in the onboarding cost; a later onboarding agent widens only this list.
-const COST_AGENTS = ['research', 'research_merge'] as const
+// The agents whose model calls count in the onboarding cost (spec 14); a later onboarding agent widens only this
+// list.
+const COST_AGENTS = [
+  'research',
+  'research_merge',
+  'questionnaire',
+  'facts_rules',
+  'brief_choices',
+  'strategist',
+] as const
 export const GROUP_RESULT_TYPE = 'research_group.v1'
 export const MERGE_RESULT_TYPE = 'research.v1'
 
@@ -201,6 +211,14 @@ export interface Overview {
   questionnaire: QuestionnaireBlock | null
   // Facts and rules: the job state, the suggestions waiting and what is in force; null before the first start.
   factsRules: FactsRulesBlock | null
+  // The brief choices: the job state and how many choices the owner has settled; null before the first start.
+  briefChoices: BriefChoicesBlock | null
+  // The strategy brief's latest version (null before the first brief), the latest strategist job (null before the
+  // first start; it shows the first brief being written, before any version), and gate 1: passed while the latest
+  // version is approved.
+  brief: BriefBlock | null
+  briefJob: BriefJob | null
+  gate1: boolean
   cost: Money
 }
 
@@ -235,6 +253,8 @@ export async function readOverview(pool: Pool, brandId: string): Promise<Overvie
       openSuggestions: counts.rows[0]!.open,
       questionnaire: await readQuestionnaireBlock(client, brandId),
       factsRules: await readFactsRulesBlock(client, brandId),
+      briefChoices: await readBriefChoicesBlock(client, brandId),
+      ...(await readBriefBlock(client, brandId)),
       cost: money(t.usd, t.inr, t.uncosted > 0),
     }
     const runId = ob.rows[0]?.research_run_id

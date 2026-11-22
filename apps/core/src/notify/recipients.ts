@@ -10,8 +10,14 @@ export async function approversOf(client: PoolClient, brandId: string): Promise<
 
 // Everyone who can approve content in the brand (the holders of approve_content): its approvers and brand
 // admins, and, when the brand has neither, the platform owners. Never empty unless there is no platform owner
-// either; the caller decides what to do then.
-export async function approvalRecipientsOf(client: PoolClient, brandId: string): Promise<string[]> {
+// either; the caller decides what to do then. A strategy brief is decided by the platform owners alone (they
+// hold onboard_brand), so for that kind only they are asked.
+export async function approvalRecipientsOf(
+  client: PoolClient,
+  brandId: string,
+  kind?: string,
+): Promise<string[]> {
+  if (kind === 'strategy_brief') return platformOwnersOf(client)
   const { rows } = await client.query<{ user_id: string }>(
     `select user_id from app.membership
       where brand_id = $1 and role in ('approver'::app.membership_role, 'brand_admin'::app.membership_role)

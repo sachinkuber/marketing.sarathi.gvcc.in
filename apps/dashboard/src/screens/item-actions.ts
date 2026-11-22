@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import { ApiError, api } from '../api/client'
 import {
+  changesRequestedReply,
   commentReply,
   contentItemReply,
   decisionReply,
@@ -21,6 +22,45 @@ const CONFLICTS: Record<string, string> = {
   stale_hash: STALE_MESSAGE,
   already_decided: 'This version has already been decided. The item has been reloaded.',
   not_awaiting_approval: 'This version is no longer waiting for approval. The item has been reloaded.',
+  fact_changed: 'A fact this brief cites changed. Write the brief again from onboarding.',
+}
+
+export const BRIEF_KIND = 'strategy_brief'
+export const BRIEF_OWNER_ONLY = 'Only the platform owner decides on the strategy brief.'
+
+// Why a brief's next version did not start: the revision limit, or the core's refusal code in plain words.
+export const REVISION_LIMIT = 'revision_limit'
+const NOT_STARTED: Record<string, string> = {
+  queue_busy: 'too much work is waiting',
+  agent_unavailable: 'the strategist has no live release',
+  brief_running: 'a brief is already being written',
+  choices_open: 'a brief choice is still open',
+  choices_needed: 'no brief choice is settled',
+  brief_choices_needed: 'the brief choices are not settled',
+  facts_needed: 'no fact is confirmed',
+}
+
+export interface ChangesReply {
+  runId: string | null
+  // Set when a brief's next version did not start: 'revision_limit', or the code of the refusal.
+  notStarted: string | null
+}
+
+// What the screen says after an ask for changes succeeded. The version is closed either way; for a brief, a new
+// version comes only from a rewrite that started.
+export function changesNotice(kind: string, reply: ChangesReply): string {
+  if (kind !== BRIEF_KIND) return 'Comment saved.'
+  if (reply.runId) return 'Your comment was sent. A new version will come back to your inbox.'
+  if (reply.notStarted === REVISION_LIMIT)
+    return 'Comment saved. The brief was revised three times. Write it again from onboarding.'
+  const why = reply.notStarted ? NOT_STARTED[reply.notStarted] : undefined
+  return `Comment saved. The next version could not be started${why ? ` (${why})` : ''}. Write it again from onboarding.`
+}
+
+// Who may decide on an item: the owner, brand admins and approvers; on the strategy brief, the platform owner alone.
+export function canDecideOn(kind: string, role: string | null | undefined): boolean {
+  if (kind === BRIEF_KIND) return role === 'owner'
+  return role === 'owner' || role === 'brand_admin' || role === 'approver'
 }
 
 // `reloaded` carries the fresh item, or null when the reload itself failed: the decision's answer still stands.
@@ -112,6 +152,31 @@ export async function commentOn(
   if (problem) return { kind: 'invalid', message: problem }
   await api(commentReply, 'POST', `${versionPath(brandId, itemId, shown.id)}/comments`, { text: text.trim() })
   return { kind: 'commented' }
+}
+
+// Ask for changes: the version is closed with the comment. For a strategy brief the core starts a rewrite
+// (`runId`), or none (`runId` null), saying why in `notStarted`: the revision limit, or the refusal's code.
+export async function askForChanges(
+  brandId: string,
+  itemId: string,
+  shown: Pick<Version, 'id'>,
+  comment: string,
+): Promise<Outcome<never> | ({ kind: 'changes_requested' } & ChangesReply)> {
+  const problem = textProblem(comment, 'Write what should change first.')
+  if (problem) return { kind: 'invalid', message: problem }
+  try {
+    const reply = await api(
+      changesRequestedReply,
+      'POST',
+      `${versionPath(brandId, itemId, shown.id)}/changes`,
+      {
+        comment: comment.trim(),
+      },
+    )
+    return { kind: 'changes_requested', runId: reply.runId, notStarted: reply.notStarted ?? null }
+  } catch (error) {
+    return onConflict(error, brandId, itemId)
+  }
 }
 
 export interface EditValues {

@@ -30,6 +30,7 @@ describe('approvals', () => {
     itemId,
     versionId,
     actor: actor(),
+    role: 'approver' as const,
   })
   // An item with one version waiting for approval.
   const waiting = async (text?: string) => {

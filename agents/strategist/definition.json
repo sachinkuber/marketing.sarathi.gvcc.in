@@ -1,0 +1,9 @@
+{
+  "agent": "strategist",
+  "version": 1,
+  "model": "claude-sonnet-5-5",
+  "effort": "medium",
+  "maxTokens": 16000,
+  "jobClass": "production",
+  "resultType": "strategy_brief.v1"
+}

@@ -1,0 +1,113 @@
+{
+  "id": "plain-strategist-aztek-like",
+  "title": "A paint protection film brand with three picks and no baseline gets a full brief, citing only the listed facts, with every goal starting at baseline needed (B1)",
+  "hostile": false,
+  "input": {
+    "today": "2026-11-22",
+    "brandName": "Aztek Films",
+    "profile": [
+      {
+        "key": "business_name",
+        "value": "Aztek Films",
+        "status": "found"
+      },
+      {
+        "key": "what_they_sell",
+        "value": "Paint protection film (PPF) for cars and superbikes",
+        "status": "found"
+      },
+      {
+        "key": "places_served",
+        "value": "Pune and Mumbai",
+        "status": "found"
+      },
+      {
+        "key": "audiences",
+        "value": "Owners of new luxury cars; installers and studios that fit film; dealerships",
+        "status": "found"
+      },
+      {
+        "key": "price_position",
+        "value": "Premium",
+        "status": "found"
+      },
+      {
+        "key": "social_presence",
+        "value": "Instagram and YouTube channels exist; Facebook page dormant",
+        "status": "assumed"
+      }
+    ],
+    "facts": [
+      {
+        "id": "b1c20000-0000-4000-8000-000000000101",
+        "statement": "Aztek Films fits self-healing paint protection film on cars and superbikes."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000102",
+        "statement": "The studio is in Baner, Pune, and a second studio is in Andheri, Mumbai."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000103",
+        "statement": "A full-car film fitting takes three days."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000104",
+        "statement": "The film carries a 10-year manufacturer warranty."
+      },
+      {
+        "id": "b1c20000-0000-4000-8000-000000000105",
+        "statement": "Aztek Films supplies film to two car dealerships in Pune."
+      }
+    ],
+    "rules": [
+      {
+        "kind": "forbidden_claim",
+        "text": "Never say the film makes a car scratch-proof."
+      },
+      {
+        "kind": "competitor_not_named",
+        "text": "Do not name other film installers."
+      }
+    ],
+    "answers": [
+      {
+        "key": "goals",
+        "question": "What should marketing achieve in the next 90 days?",
+        "answer": "More enquiries from new car owners, and more dealership tie-ups."
+      },
+      {
+        "key": "capacity",
+        "question": "How much time and how many people do you have for content each week?",
+        "answer": "One person, about four hours a week."
+      }
+    ],
+    "picks": [
+      {
+        "key": "lead_audience",
+        "question": "Which audience do we speak to first?",
+        "picked": "Owners of new luxury cars",
+        "notTaken": ["Superbike riders", "Dealerships"]
+      },
+      {
+        "key": "first_channels",
+        "question": "Which channels do we start on?",
+        "picked": "Instagram and YouTube",
+        "notTaken": ["Facebook"]
+      },
+      {
+        "key": "posting_rhythm",
+        "question": "How often do we publish?",
+        "picked": "Three posts a week in total",
+        "notTaken": ["Daily posts"]
+      }
+    ],
+    "baseline": null,
+    "changeRequest": null
+  },
+  "checks": [
+    {
+      "kind": "schema_valid"
+    }
+  ],
+  "rubric": "brief is set and ask is null. Every entry in factIds is one of the five fact ids in the input, none twice, and at least one is cited. Every goal's from is exactly baseline needed (B1). No text in the brief says the film is scratch-proof or names any company other than Aztek Films. A channel or platform name (Instagram, YouTube, Google Business Profile) is not a company. The brief invents no claim about the brand: no certification, approval, price, figure or result, place, competitor's name, product, service or feature, or way a product works (for example how its self-healing behaves) that no cited fact states. Saying why a cited fact matters to an audience, persuasive framing, and proposed themes, channels, cadence and goal targets are all fine. The first audience is the new luxury car owners, the first channel is Instagram or YouTube, and the posts per week in cadence add up to three. choicesMade has exactly three entries, with the keys lead_audience, first_channels and posting_rhythm, each repeating its pick and the options not taken word for word."
+}
